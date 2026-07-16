@@ -1,0 +1,50 @@
+from datetime import datetime
+
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database.base import Base
+
+
+class ImportBatch(Base):
+    __tablename__ = "import_batch"
+    __table_args__ = (
+        UniqueConstraint("batch_no"),
+        Index("ix_import_batch_source_dataset", "source_name", "dataset"),
+        Index("ix_import_batch_status", "status"),
+        Index("ix_import_batch_started_at", "started_at"),
+        {"schema": "raw"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    batch_no: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    dataset: Mapped[str] = mapped_column(String(50), nullable=False)
+    file_path: Mapped[str | None] = mapped_column(Text)
+    request_params: Mapped[dict | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'running'")
+    )
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
