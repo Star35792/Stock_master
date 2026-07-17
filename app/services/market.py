@@ -9,6 +9,7 @@ from app.repositories.market import (
     DailyBarSourceCompareRepository,
     ManualCorrectionRepository,
     SecurityRepository,
+    TradingCalendarRepository,
 )
 from app.schemas import (
     AdjustmentFactorRead,
@@ -18,7 +19,9 @@ from app.schemas import (
     ManualCorrectionRead,
     MissingDailyBarRead,
     Page,
+    SecurityLifecycleRead,
     SecurityRead,
+    TradingCalendarRead,
 )
 
 
@@ -31,6 +34,7 @@ class MarketQueryService:
         manual_correction_repository: ManualCorrectionRepository | None = None,
         corporate_action_repository: CorporateActionRepository | None = None,
         adjustment_factor_repository: AdjustmentFactorRepository | None = None,
+        trading_calendar_repository: TradingCalendarRepository | None = None,
     ) -> None:
         self.security_repository = security_repository or SecurityRepository()
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
@@ -45,6 +49,9 @@ class MarketQueryService:
         )
         self.adjustment_factor_repository = (
             adjustment_factor_repository or AdjustmentFactorRepository()
+        )
+        self.trading_calendar_repository = (
+            trading_calendar_repository or TradingCalendarRepository()
         )
 
     def list_securities(
@@ -72,6 +79,84 @@ class MarketQueryService:
             total=total,
             limit=limit,
             offset=offset,
+        )
+
+    def list_trading_calendar(
+        self,
+        db: Session,
+        *,
+        exchange: str | None,
+        start_date: date | None,
+        end_date: date | None,
+        is_open: bool | None,
+        limit: int,
+        offset: int,
+    ) -> Page[TradingCalendarRead]:
+        rows, total = self.trading_calendar_repository.list(
+            db,
+            exchange=exchange,
+            start_date=start_date,
+            end_date=end_date,
+            is_open=is_open,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[TradingCalendarRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_security_lifecycle(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        as_of_date: date,
+    ) -> SecurityLifecycleRead | None:
+        normalized_symbol = symbol.upper()
+        security = self.security_repository.get_by_symbol(db, symbol=normalized_symbol)
+        if security is None:
+            return None
+
+        calendar = self.trading_calendar_repository.get_by_exchange_date(
+            db,
+            exchange=security.exchange,
+            trade_date=as_of_date,
+        )
+        is_trading_day = bool(calendar and calendar.is_open)
+        lifecycle_status = "listed"
+        reason = "eligible"
+
+        if security.list_date and as_of_date < security.list_date:
+            lifecycle_status = "pre_listed"
+            reason = "before_list_date"
+        elif security.delist_date and as_of_date > security.delist_date:
+            lifecycle_status = "delisted"
+            reason = "after_delist_date"
+        elif not security.is_active and security.delist_date is None:
+            lifecycle_status = "inactive_unknown"
+            reason = "inactive_without_delist_date"
+        elif calendar is None:
+            reason = "calendar_missing"
+        elif not calendar.is_open:
+            reason = "market_closed"
+
+        should_have_daily_bar = lifecycle_status == "listed" and is_trading_day
+        return SecurityLifecycleRead(
+            symbol=security.symbol,
+            name=security.name,
+            security_type=security.security_type,
+            exchange=security.exchange,
+            list_date=security.list_date,
+            delist_date=security.delist_date,
+            is_active=security.is_active,
+            as_of_date=as_of_date,
+            lifecycle_status=lifecycle_status,
+            is_trading_day=is_trading_day,
+            should_have_daily_bar=should_have_daily_bar,
+            reason=reason,
         )
 
     def list_daily_bars(

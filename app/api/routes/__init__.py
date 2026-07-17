@@ -6,6 +6,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.manual_corrections import router as manual_corrections_router
 from app.api.routes.securities import router as securities_router
 from app.api.routes.source_compares import router as source_compares_router
+from app.api.routes.trading_calendar import router as trading_calendar_router
 
 __all__ = [
     "adjustment_factors_router",
@@ -16,4 +17,5 @@ __all__ = [
     "manual_corrections_router",
     "securities_router",
     "source_compares_router",
+    "trading_calendar_router",
 ]

@@ -133,7 +133,6 @@ class DailyBarRepository:
         offset: int = 0,
     ) -> tuple[list[object], int]:
         filters = [
-            Security.is_active.is_(True),
             TradingCalendar.is_open.is_(True),
             TradingCalendar.trade_date >= start_date,
             TradingCalendar.trade_date <= end_date,

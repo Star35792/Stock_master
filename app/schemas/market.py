@@ -21,6 +21,36 @@ class SecurityRead(BaseModel):
     updated_at: datetime
 
 
+class TradingCalendarRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    exchange: str
+    trade_date: date
+    is_open: bool
+    previous_trade_date: date | None
+    next_trade_date: date | None
+    is_half_day: bool
+    source_name: str | None
+    updated_at: datetime
+
+
+class SecurityLifecycleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: str
+    security_type: str
+    exchange: str
+    list_date: date | None
+    delist_date: date | None
+    is_active: bool
+    as_of_date: date
+    lifecycle_status: str
+    is_trading_day: bool
+    should_have_daily_bar: bool
+    reason: str
+
+
 class DailyBarRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

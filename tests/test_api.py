@@ -60,6 +60,8 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/manual-corrections" in paths
     assert "/api/v1/corporate-actions" in paths
     assert "/api/v1/adjustment-factors" in paths
+    assert "/api/v1/trading-calendar" in paths
+    assert "/api/v1/securities/{symbol}/lifecycle" in paths
 
 
 def test_daily_bar_rejects_reversed_date_range() -> None:
@@ -115,6 +117,16 @@ def test_corporate_actions_reject_reversed_date_range() -> None:
 def test_adjustment_factors_reject_reversed_date_range() -> None:
     response = client.get(
         "/api/v1/adjustment-factors",
+        params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_trading_calendar_rejects_reversed_date_range() -> None:
+    response = client.get(
+        "/api/v1/trading-calendar",
         params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
     )
 

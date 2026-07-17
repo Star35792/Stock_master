@@ -1,9 +1,10 @@
+from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
-from app.schemas import Page, SecurityRead
+from app.schemas import Page, SecurityLifecycleRead, SecurityRead
 from app.services import MarketQueryService
 
 router = APIRouter(prefix="/securities", tags=["securities"])
@@ -29,3 +30,18 @@ def list_securities(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/{symbol}/lifecycle", response_model=SecurityLifecycleRead)
+def get_security_lifecycle(
+    symbol: str,
+    db: DatabaseSession,
+    as_of_date: date,
+) -> SecurityLifecycleRead:
+    result = service.get_security_lifecycle(db, symbol=symbol, as_of_date=as_of_date)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="security not found",
+        )
+    return result

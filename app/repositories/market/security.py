@@ -59,6 +59,9 @@ class SecurityRepository:
         ).all()
         return dict(rows)
 
+    def get_by_symbol(self, db: Session, *, symbol: str) -> Security | None:
+        return db.scalar(select(Security).where(Security.symbol == symbol))
+
     def list(
         self,
         db: Session,
