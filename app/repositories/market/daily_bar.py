@@ -10,6 +10,31 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def count_trusted_by_date(
+        self,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbols: list[str] | None = None,
+    ) -> dict[date, int]:
+        filters = [
+            DailyBar.trade_date >= start_date,
+            DailyBar.trade_date <= end_date,
+            DailyBar.adjust_type == adjust_type,
+            DailyBar.quality_status == "trusted",
+            DailyBar.is_suspect.is_(False),
+        ]
+        if symbols:
+            filters.append(DailyBar.symbol.in_(symbols))
+        rows = db.execute(
+            select(DailyBar.trade_date, func.count())
+            .where(*filters)
+            .group_by(DailyBar.trade_date)
+        ).all()
+        return dict(rows)
+
     def list_for_factor_calculation(
         self,
         db: Session,

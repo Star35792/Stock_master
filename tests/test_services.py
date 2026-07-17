@@ -253,6 +253,36 @@ class FakeFactorValueRepository:
         self.kwargs = kwargs
 
 
+class FakeFactorProfileRepository:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def list(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
+        self.kwargs = kwargs
+        row = SimpleNamespace(
+            id=1,
+            factor_name="ret_1d",
+            factor_version="v1-none",
+            trade_date=date(2026, 7, 17),
+            universe_size=100,
+            observation_count=90,
+            missing_count=10,
+            coverage_rate=Decimal("0.9000000000"),
+            missing_rate=Decimal("0.1000000000"),
+            mean=Decimal("0.0010000000"),
+            standard_deviation=Decimal("0.0200000000"),
+            minimum=Decimal("-0.1000000000"),
+            maximum=Decimal("0.1000000000"),
+            p01=Decimal("-0.0500000000"),
+            p99=Decimal("0.0500000000"),
+            extreme_count=1,
+            code_version="abc123",
+            created_at=datetime(2026, 7, 17, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 17, tzinfo=UTC),
+        )
+        return [row], 1
+
+
 class FakeSecurityRepository:
     def __init__(self, security: SimpleNamespace | None = None) -> None:
         self.security = security
@@ -579,3 +609,23 @@ def test_factor_service_lists_values_and_normalizes_symbol() -> None:
     assert result.items[0].value == Decimal("0.0100000000")
     assert repository.kwargs is not None
     assert repository.kwargs["symbol"] == "600519.SH"
+
+
+def test_factor_service_lists_profiles() -> None:
+    repository = FakeFactorProfileRepository()
+    service = FactorQueryService(profile_repository=repository)
+
+    result = service.list_profiles(
+        object(),
+        factor_name="ret_1d",
+        factor_version="v1-none",
+        start_date=date(2026, 7, 17),
+        end_date=date(2026, 7, 17),
+        limit=100,
+        offset=0,
+    )
+
+    assert result.total == 1
+    assert result.items[0].coverage_rate == Decimal("0.9000000000")
+    assert repository.kwargs is not None
+    assert repository.kwargs["factor_version"] == "v1-none"

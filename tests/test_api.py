@@ -66,6 +66,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/factors/definitions" in paths
     assert "/api/v1/factors/runs" in paths
     assert "/api/v1/factors/values" in paths
+    assert "/api/v1/factors/profiles" in paths
 
 
 def test_daily_bar_rejects_reversed_date_range() -> None:
@@ -163,6 +164,16 @@ def test_factor_runs_reject_reversed_date_range() -> None:
 def test_factor_values_reject_reversed_date_range() -> None:
     response = client.get(
         "/api/v1/factors/values",
+        params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_factor_profiles_reject_reversed_date_range() -> None:
+    response = client.get(
+        "/api/v1/factors/profiles",
         params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
     )
 

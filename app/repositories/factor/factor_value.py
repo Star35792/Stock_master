@@ -9,6 +9,28 @@ from app.models.factor import FactorValue
 
 
 class FactorValueRepository:
+    def list_for_cross_section(
+        self,
+        db: Session,
+        *,
+        factor_name: str,
+        factor_version: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[FactorValue]:
+        return list(
+            db.scalars(
+                select(FactorValue)
+                .where(
+                    FactorValue.factor_name == factor_name,
+                    FactorValue.factor_version == factor_version,
+                    FactorValue.trade_date >= start_date,
+                    FactorValue.trade_date <= end_date,
+                )
+                .order_by(FactorValue.trade_date, FactorValue.symbol)
+            )
+        )
+
     def upsert_value(
         self,
         db: Session,

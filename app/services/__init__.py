@@ -7,6 +7,7 @@ from app.services.daily_bar_market_builder import DailyBarMarketBuildService, Ma
 from app.services.daily_sync import HithinkDailySyncResult, HithinkDailySyncService
 from app.services.data_quality import DataQualityQueryService
 from app.services.factor import FactorQueryService
+from app.services.factor_cross_section import CrossSectionRunResult, FactorCrossSectionService
 from app.services.hithink_collection import (
     DailyBarCollectionResult,
     HithinkDailyBarCollectionService,
@@ -23,6 +24,8 @@ __all__ = [
     "CsvDailyBarCollectionService",
     "DataQualityQueryService",
     "FactorQueryService",
+    "CrossSectionRunResult",
+    "FactorCrossSectionService",
     "HithinkDailySyncResult",
     "HithinkDailySyncService",
     "HithinkDailyBarCollectionService",

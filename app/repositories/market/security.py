@@ -59,6 +59,14 @@ class SecurityRepository:
         ).all()
         return dict(rows)
 
+    def get_industries(self, db: Session, symbols: set[str]) -> dict[str, str]:
+        if not symbols:
+            return {}
+        rows = db.execute(
+            select(Security.symbol, Security.industry).where(Security.symbol.in_(symbols))
+        ).all()
+        return {symbol: industry or "UNKNOWN" for symbol, industry in rows}
+
     def get_by_symbol(self, db: Session, *, symbol: str) -> Security | None:
         return db.scalar(select(Security).where(Security.symbol == symbol))
 

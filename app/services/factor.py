@@ -6,20 +6,29 @@ from sqlalchemy.orm import Session
 
 from app.repositories.factor import (
     FactorDefinitionRepository,
+    FactorProfileRepository,
     FactorRunRepository,
     FactorValueRepository,
 )
-from app.schemas import FactorDefinitionRead, FactorRunRead, FactorValueRead, Page
+from app.schemas import (
+    FactorDefinitionRead,
+    FactorProfileRead,
+    FactorRunRead,
+    FactorValueRead,
+    Page,
+)
 
 
 class FactorQueryService:
     def __init__(
         self,
         definition_repository: FactorDefinitionRepository | None = None,
+        profile_repository: FactorProfileRepository | None = None,
         run_repository: FactorRunRepository | None = None,
         value_repository: FactorValueRepository | None = None,
     ) -> None:
         self.definition_repository = definition_repository or FactorDefinitionRepository()
+        self.profile_repository = profile_repository or FactorProfileRepository()
         self.run_repository = run_repository or FactorRunRepository()
         self.value_repository = value_repository or FactorValueRepository()
 
@@ -101,6 +110,33 @@ class FactorQueryService:
         )
         return Page(
             items=[FactorValueRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_profiles(
+        self,
+        db: Session,
+        *,
+        factor_name: str | None,
+        factor_version: str | None,
+        start_date: date | None,
+        end_date: date | None,
+        limit: int,
+        offset: int,
+    ) -> Page[FactorProfileRead]:
+        rows, total = self.profile_repository.list(
+            db,
+            factor_name=factor_name,
+            factor_version=factor_version,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[FactorProfileRead.model_validate(row) for row in rows],
             total=total,
             limit=limit,
             offset=offset,

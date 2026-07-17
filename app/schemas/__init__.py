@@ -1,5 +1,10 @@
 from app.schemas.common import Page
-from app.schemas.factor import FactorDefinitionRead, FactorRunRead, FactorValueRead
+from app.schemas.factor import (
+    FactorDefinitionRead,
+    FactorProfileRead,
+    FactorRunRead,
+    FactorValueRead,
+)
 from app.schemas.market import (
     AdjustmentFactorRead,
     CorporateActionRead,
@@ -21,6 +26,7 @@ __all__ = [
     "DataQualityIssueRead",
     "DataQualityIssueStatusUpdate",
     "FactorDefinitionRead",
+    "FactorProfileRead",
     "FactorRunRead",
     "FactorValueRead",
     "ManualCorrectionRead",

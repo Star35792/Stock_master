@@ -56,3 +56,27 @@ class FactorValueRead(BaseModel):
     run_id: int
     created_at: datetime
     updated_at: datetime
+
+
+class FactorProfileRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    factor_name: str
+    factor_version: str
+    trade_date: date
+    universe_size: int
+    observation_count: int
+    missing_count: int
+    coverage_rate: Decimal
+    missing_rate: Decimal
+    mean: Decimal | None
+    standard_deviation: Decimal | None
+    minimum: Decimal | None
+    maximum: Decimal | None
+    p01: Decimal | None
+    p99: Decimal | None
+    extreme_count: int
+    code_version: str
+    created_at: datetime
+    updated_at: datetime
