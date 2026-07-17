@@ -14,6 +14,7 @@ class FactorDefinitionRead(BaseModel):
     description: str | None
     frequency: str
     inputs: list[str]
+    applicable_security_types: list[str]
     window_days: int | None
     version: str
     dependencies: list[str]

@@ -10,6 +10,34 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def list_for_factor_calculation(
+        self,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbols: list[str] | None = None,
+        quality_status: str = "trusted",
+    ) -> list[DailyBar]:
+        filters = [
+            DailyBar.trade_date >= start_date,
+            DailyBar.trade_date <= end_date,
+            DailyBar.adjust_type == adjust_type,
+            DailyBar.quality_status == quality_status,
+            DailyBar.is_suspect.is_(False),
+        ]
+        if symbols:
+            filters.append(DailyBar.symbol.in_(symbols))
+
+        return list(
+            db.scalars(
+                select(DailyBar)
+                .where(*filters)
+                .order_by(DailyBar.symbol, DailyBar.trade_date)
+            )
+        )
+
     def get_by_key(
         self,
         db: Session,

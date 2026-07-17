@@ -155,7 +155,8 @@ class FakeFactorDefinitionRepository:
             display_name="1日收益率",
             description="close / pre_close - 1",
             frequency="daily",
-            inputs=["market.daily_bar.close", "market.daily_bar.pre_close"],
+            inputs=["market.daily_bar.close"],
+            applicable_security_types=["stock", "etf", "index"],
             window_days=1,
             version="v1",
             dependencies=[],
@@ -518,7 +519,7 @@ def test_factor_service_lists_definitions() -> None:
 
     assert result.total == 1
     assert result.items[0].name == "ret_1d"
-    assert result.items[0].inputs == ["market.daily_bar.close", "market.daily_bar.pre_close"]
+    assert result.items[0].inputs == ["market.daily_bar.close"]
     assert repository.kwargs is not None
     assert repository.kwargs["frequency"] == "daily"
 

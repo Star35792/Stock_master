@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -5,6 +7,43 @@ from app.models.factor import FactorDefinition
 
 
 class FactorDefinitionRepository:
+    def ensure(
+        self,
+        db: Session,
+        *,
+        name: str,
+        display_name: str,
+        description: str,
+        frequency: str,
+        inputs: list[str],
+        applicable_security_types: list[str],
+        window_days: int | None,
+        version: str,
+        dependencies: list[str] | None = None,
+        parameters_schema: dict[str, Any] | None = None,
+    ) -> FactorDefinition:
+        definition = self.get_by_name_version(db, name=name, version=version)
+        values = {
+            "display_name": display_name,
+            "description": description,
+            "frequency": frequency,
+            "inputs": inputs,
+            "applicable_security_types": applicable_security_types,
+            "window_days": window_days,
+            "dependencies": dependencies or [],
+            "parameters_schema": parameters_schema or {},
+            "is_active": True,
+        }
+        if definition is None:
+            definition = FactorDefinition(name=name, version=version, **values)
+        else:
+            for field_name, value in values.items():
+                setattr(definition, field_name, value)
+
+        db.add(definition)
+        db.flush()
+        return definition
+
     def get_by_name_version(
         self,
         db: Session,

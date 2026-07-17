@@ -31,6 +31,7 @@ class FactorRunRepository:
             metadata_=metadata,
         )
         db.add(run)
+        db.flush()
         return run
 
     def list(
@@ -90,6 +91,6 @@ class FactorRunRepository:
         run.status = status
         run.rows_written = rows_written
         run.error_message = error_message
-        run.finished_at = datetime.now(UTC)
+        run.finished_at = db.scalar(select(func.clock_timestamp()))
         db.add(run)
         return run

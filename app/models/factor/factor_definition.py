@@ -43,6 +43,11 @@ class FactorDefinition(TimestampMixin, Base):
     inputs: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    applicable_security_types: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[\"stock\", \"etf\", \"index\"]'::jsonb"),
+    )
     window_days: Mapped[int | None] = mapped_column(Integer)
     version: Mapped[str] = mapped_column(String(50), nullable=False)
     dependencies: Mapped[list[str]] = mapped_column(
