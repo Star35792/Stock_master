@@ -54,6 +54,7 @@ def test_openapi_contains_v1_routes() -> None:
     paths = response.json()["paths"]
     assert "/api/v1/securities" in paths
     assert "/api/v1/daily-bars/{symbol}" in paths
+    assert "/api/v1/daily-bars/missing" in paths
     assert "/api/v1/data-quality/issues" in paths
     assert "/api/v1/daily-bar-source-compares" in paths
     assert "/api/v1/manual-corrections" in paths
@@ -62,6 +63,16 @@ def test_openapi_contains_v1_routes() -> None:
 def test_daily_bar_rejects_reversed_date_range() -> None:
     response = client.get(
         "/api/v1/daily-bars/600519.SH",
+        params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_missing_daily_bar_rejects_reversed_date_range() -> None:
+    response = client.get(
+        "/api/v1/daily-bars/missing",
         params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
     )
 

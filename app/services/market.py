@@ -12,6 +12,7 @@ from app.schemas import (
     DailyBarRead,
     DailyBarSourceCompareRead,
     ManualCorrectionRead,
+    MissingDailyBarRead,
     Page,
     SecurityRead,
 )
@@ -85,6 +86,42 @@ class MarketQueryService:
         )
         return Page(
             items=[DailyBarRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_missing_daily_bars(
+        self,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbol: str | None,
+        security_type: str | None,
+        exchange: str | None,
+        limit: int,
+        offset: int,
+    ) -> Page[MissingDailyBarRead]:
+        rows, total = self.daily_bar_repository.list_missing_by_calendar(
+            db,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            symbol=symbol.upper() if symbol else None,
+            security_type=security_type,
+            exchange=exchange,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[
+                MissingDailyBarRead.model_validate(
+                    row._mapping if hasattr(row, "_mapping") else row
+                )
+                for row in rows
+            ],
             total=total,
             limit=limit,
             offset=offset,

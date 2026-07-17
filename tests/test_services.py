@@ -33,6 +33,20 @@ class FakeDailyBarRepository:
         )
         return [row], 1
 
+    def list_missing_by_calendar(
+        self, db: object, **kwargs: object
+    ) -> tuple[list[SimpleNamespace], int]:
+        assert kwargs["symbol"] == "600519.SH"
+        row = SimpleNamespace(
+            symbol="600519.SH",
+            name="贵州茅台",
+            security_type="stock",
+            exchange="SH",
+            trade_date=date(2026, 7, 17),
+            adjust_type="none",
+        )
+        return [row], 1
+
 
 class FakeSourceCompareRepository:
     def __init__(self) -> None:
@@ -99,6 +113,26 @@ def test_market_service_normalizes_symbol() -> None:
 
     assert result.total == 1
     assert result.items[0].symbol == "600519.SH"
+
+
+def test_market_service_lists_missing_daily_bars() -> None:
+    service = MarketQueryService(daily_bar_repository=FakeDailyBarRepository())
+
+    result = service.list_missing_daily_bars(
+        object(),
+        start_date=date(2026, 7, 17),
+        end_date=date(2026, 7, 17),
+        adjust_type="none",
+        symbol="600519.sh",
+        security_type="stock",
+        exchange="SH",
+        limit=100,
+        offset=0,
+    )
+
+    assert result.total == 1
+    assert result.items[0].symbol == "600519.SH"
+    assert result.items[0].trade_date == date(2026, 7, 17)
 
 
 def test_market_service_lists_source_compares() -> None:

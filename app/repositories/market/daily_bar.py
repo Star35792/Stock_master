@@ -1,11 +1,11 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models.market import DailyBar
+from app.models.market import DailyBar, Security, TradingCalendar
 from app.models.raw import RawDailyBar
 
 
@@ -116,5 +116,69 @@ class DailyBarRepository:
                 .limit(limit)
                 .offset(offset)
             )
+        )
+        return items, total
+
+    def list_missing_by_calendar(
+        self,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbol: str | None = None,
+        security_type: str | None = None,
+        exchange: str | None = None,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[list[object], int]:
+        filters = [
+            Security.is_active.is_(True),
+            TradingCalendar.is_open.is_(True),
+            TradingCalendar.trade_date >= start_date,
+            TradingCalendar.trade_date <= end_date,
+            or_(Security.list_date.is_(None), Security.list_date <= TradingCalendar.trade_date),
+            or_(
+                Security.delist_date.is_(None),
+                Security.delist_date >= TradingCalendar.trade_date,
+            ),
+            DailyBar.id.is_(None),
+        ]
+        if symbol:
+            filters.append(Security.symbol == symbol)
+        if security_type:
+            filters.append(Security.security_type == security_type)
+        if exchange:
+            filters.append(Security.exchange == exchange)
+
+        base = (
+            select(
+                Security.symbol,
+                Security.name,
+                Security.security_type,
+                Security.exchange,
+                TradingCalendar.trade_date,
+                literal(adjust_type).label("adjust_type"),
+            )
+            .select_from(Security)
+            .join(TradingCalendar, TradingCalendar.exchange == Security.exchange)
+            .outerjoin(
+                DailyBar,
+                and_(
+                    DailyBar.symbol == Security.symbol,
+                    DailyBar.trade_date == TradingCalendar.trade_date,
+                    DailyBar.adjust_type == adjust_type,
+                ),
+            )
+            .where(*filters)
+        )
+
+        total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        items = list(
+            db.execute(
+                base.order_by(TradingCalendar.trade_date, Security.symbol)
+                .limit(limit)
+                .offset(offset)
+            ).all()
         )
         return items, total

@@ -47,6 +47,17 @@ class DailyBarRead(BaseModel):
     updated_at: datetime
 
 
+class MissingDailyBarRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: str
+    security_type: str
+    exchange: str
+    trade_date: date
+    adjust_type: str
+
+
 class DailyBarSourceCompareRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
