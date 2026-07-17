@@ -1,6 +1,11 @@
 from datetime import date
 
-from app.data_sources.eastmoney import EastmoneyDataSource
+from app.data_sources.eastmoney import (
+    KLINE_FALLBACK_HOST,
+    KLINE_HOST,
+    EastmoneyDataError,
+    EastmoneyDataSource,
+)
 from app.services.eastmoney_collection import _money, _normalize_rows
 
 
@@ -24,6 +29,21 @@ def test_eastmoney_source_parses_qfq_klines(monkeypatch) -> None:
     assert rows[0].adjust_type == "qfq"
     assert rows[0].trade_date == date(2026, 7, 17)
     assert rows[0].amount == 10200
+
+
+def test_eastmoney_kline_uses_fallback_host(monkeypatch) -> None:
+    source = EastmoneyDataSource(retries=0)
+    hosts = []
+
+    def fake_get(host, path, params):
+        hosts.append(host)
+        if host == KLINE_HOST:
+            raise EastmoneyDataError("disconnected")
+        return {"data": {"klines": []}}
+
+    monkeypatch.setattr(source, "_get_json", fake_get)
+    assert source.fetch_daily_bars(symbol="600519", count=10) == []
+    assert hosts == [KLINE_HOST, KLINE_FALLBACK_HOST]
 
 
 def test_eastmoney_flow_rows_parse_units_and_sector_symbols() -> None:

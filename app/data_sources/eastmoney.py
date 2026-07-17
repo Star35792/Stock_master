@@ -13,6 +13,7 @@ from app.data_sources.base import DailyBarRecord
 
 QUOTE_HOST = "https://push2delay.eastmoney.com"
 KLINE_HOST = "https://push2his.eastmoney.com"
+KLINE_FALLBACK_HOST = "https://push2.eastmoney.com"
 _HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Referer": "https://data.eastmoney.com/",
@@ -108,19 +109,29 @@ class EastmoneyDataSource:
             raise ValueError("symbol must contain a six-digit A-share code")
         if count < 1 or count > 5000:
             raise ValueError("count must be between 1 and 5000")
-        data = self._get_json(
-            KLINE_HOST,
-            "/api/qt/stock/kline/get",
-            {
-                "secid": f"{market_prefix(code)}.{code}",
-                "klt": 101,
-                "fqt": 1,
-                "end": "20500101",
-                "lmt": count,
-                "fields1": "f1,f2,f3,f4,f5,f6",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            },
-        )
+        params = {
+            "secid": f"{market_prefix(code)}.{code}",
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            "klt": 101,
+            "fqt": 1,
+            "beg": 0,
+            "end": "20500101",
+            "lmt": count,
+            "fields1": "f1,f2,f3,f4,f5,f6",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        }
+        last_error: EastmoneyDataError | None = None
+        data = None
+        for host in (KLINE_HOST, KLINE_FALLBACK_HOST):
+            try:
+                data = self._get_json(host, "/api/qt/stock/kline/get", params)
+                break
+            except EastmoneyDataError as exc:
+                last_error = exc
+        if data is None:
+            raise EastmoneyDataError(
+                f"Eastmoney K-line request failed for {symbol}"
+            ) from last_error
         rows = []
         for line in ((data.get("data") or {}).get("klines") or []):
             parts = str(line).split(",")
@@ -162,7 +173,14 @@ class EastmoneyDataSource:
                 if not isinstance(result, dict):
                     raise EastmoneyDataError(f"unexpected response from {path}")
                 return result
-            except (HTTPError, URLError, TimeoutError, JSONDecodeError, EastmoneyDataError) as exc:
+            except (
+                HTTPError,
+                URLError,
+                TimeoutError,
+                OSError,
+                JSONDecodeError,
+                EastmoneyDataError,
+            ) as exc:
                 last_error = exc
                 if attempt < self.retries:
                     sleep(min(2**attempt, 8))
