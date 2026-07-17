@@ -5,7 +5,12 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
 from app.database.session import SessionLocal
-from app.services import HithinkDailySyncResult, HithinkDailySyncService
+from app.services import (
+    HithinkDailySyncResult,
+    HithinkDailySyncService,
+    RecentDataCompletionResult,
+    RecentDataCompletionService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,78 @@ def create_daily_sync_scheduler(
         minute=minute,
         id="hithink_daily_sync",
         name="HiThink daily market data sync",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+        kwargs={
+            "symbols": normalized_symbols,
+            "days": days,
+            "adjust_type": adjust_type,
+            "refresh_reference_data": refresh_reference_data,
+        },
+    )
+    return scheduler
+
+
+def run_recent_data_completion(
+    *,
+    symbols: list[str],
+    days: int = 14,
+    adjust_type: str = "qfq",
+    refresh_reference_data: bool = False,
+    service: RecentDataCompletionService | None = None,
+    session_factory: Callable[[], Session] = SessionLocal,
+) -> RecentDataCompletionResult:
+    with session_factory() as db:
+        result = (service or RecentDataCompletionService()).complete(
+            db,
+            symbols=symbols,
+            days=days,
+            adjust_type=adjust_type,
+            refresh_reference_data=refresh_reference_data,
+        )
+
+    logger.info(
+        "Recent data completion finished: primary_batch=%s primary_trusted=%s "
+        "gap_batch=%s gap_inserted=%s gap_trusted=%s gap_issues=%s",
+        result.primary_sync.collection.batch_no,
+        result.primary_sync.market_build.trusted_count,
+        result.gap_backfill.batch_no,
+        result.gap_backfill.inserted_rows,
+        result.gap_market_build.trusted_count if result.gap_market_build else 0,
+        result.gap_market_build.issue_count if result.gap_market_build else 0,
+    )
+    return result
+
+
+def create_recent_data_completion_scheduler(
+    *,
+    symbols: list[str],
+    hour: int = 18,
+    minute: int = 20,
+    timezone: str = "Asia/Shanghai",
+    days: int = 14,
+    adjust_type: str = "qfq",
+    refresh_reference_data: bool = False,
+) -> BlockingScheduler:
+    normalized_symbols = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
+    if not normalized_symbols:
+        raise ValueError("symbols must not be empty")
+    if days < 1:
+        raise ValueError("days must be greater than or equal to 1")
+    if adjust_type != "qfq":
+        raise ValueError("recent data completion currently supports qfq only")
+
+    scheduler = BlockingScheduler(timezone=timezone)
+    scheduler.add_job(
+        run_recent_data_completion,
+        trigger="cron",
+        day_of_week="mon-fri",
+        hour=hour,
+        minute=minute,
+        id="recent_data_completion",
+        name="Recent trusted daily data completion",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

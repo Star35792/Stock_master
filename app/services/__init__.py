@@ -15,6 +15,10 @@ from app.services.eastmoney_collection import (
 from app.services.factor import FactorQueryService
 from app.services.factor_cross_section import CrossSectionRunResult, FactorCrossSectionService
 from app.services.gap_backfill import GapBackfillResult, MissingDailyBarBackfillService
+from app.services.hithink_alternative_collection import (
+    AlternativeCollectionResult,
+    HithinkAlternativeCollectionService,
+)
 from app.services.hithink_collection import (
     DailyBarCollectionResult,
     HithinkDailyBarCollectionService,
@@ -34,6 +38,10 @@ from app.services.operations import OperationsOverviewService
 from app.services.paper_trading import PaperTradingResult, PaperTradingService
 from app.services.performance import BacktestPerformanceService, PersistedPerformanceReport
 from app.services.portfolio import PersistedPortfolioPlan, PortfolioConstructionService
+from app.services.recent_data_completion import (
+    RecentDataCompletionResult,
+    RecentDataCompletionService,
+)
 from app.services.reference_data import ReferenceDataSyncResult, ReferenceDataSyncService
 from app.services.risk import PersistedRiskCheck, PortfolioRiskService
 from app.services.strategy_research import StrategyResearchService
@@ -79,11 +87,9 @@ __all__ = [
     "PersistedBacktestResult",
     "ReferenceDataSyncResult",
     "ReferenceDataSyncService",
+    "RecentDataCompletionResult",
+    "RecentDataCompletionService",
     "PersistedRiskCheck",
     "PortfolioRiskService",
     "StrategyResearchService",
 ]
-from app.services.hithink_alternative_collection import (
-    AlternativeCollectionResult,
-    HithinkAlternativeCollectionService,
-)
