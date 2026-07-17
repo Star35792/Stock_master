@@ -26,7 +26,7 @@ class DataQualityIssue(Base):
             name="ck_quality_issue_severity",
         ),
         CheckConstraint(
-            "status in ('open', 'ignored', 'fixed', 'false_positive')",
+            "status in ('open', 'ignored', 'fixed', 'reopened', 'false_positive')",
             name="ck_quality_issue_status_allowed",
         ),
         Index("ix_quality_issue_status", "status"),

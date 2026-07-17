@@ -17,6 +17,9 @@ def _raw_bar(**overrides):
         "high": Decimal("1250.00"),
         "low": Decimal("1190.00"),
         "close": Decimal("1242.47"),
+        "pre_close": Decimal("1240.00"),
+        "change_amount": Decimal("2.47"),
+        "pct_change": Decimal("0.199194"),
         "volume": Decimal("1000"),
         "amount": Decimal("1242470"),
     }
@@ -149,6 +152,9 @@ def test_market_build_promotes_consistent_multi_source_candidate() -> None:
     assert result.trusted_count == 1
     assert result.conflict_count == 0
     assert market_repository.calls[0]["source_count"] == 2
+    assert market_repository.calls[0]["quality_score"] == Decimal("100.00")
+    assert market_repository.calls[0]["quality_status"] == "trusted"
+    assert market_repository.calls[0]["is_suspect"] is False
     assert compare_repository.calls[0]["is_conflict"] is False
     assert issue_repository.calls == []
     assert db.committed is True
@@ -179,4 +185,41 @@ def test_market_build_blocks_price_conflict_between_sources() -> None:
     assert market_repository.calls == []
     assert compare_repository.calls[0]["is_conflict"] is True
     assert issue_repository.calls[0]["issue_type"] == "SOURCE_CONFLICT"
+    assert db.committed is True
+
+
+def test_market_build_keeps_warning_candidate_as_suspect() -> None:
+    row = _raw_bar(
+        open=Decimal("140.00"),
+        high=Decimal("155.00"),
+        low=Decimal("139.00"),
+        close=Decimal("150.00"),
+        pre_close=Decimal("100.00"),
+        change_amount=Decimal("50.00"),
+        amount=Decimal("0"),
+    )
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    issue_repository = FakeIssueRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([row], row),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=issue_repository,  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.trusted_count == 0
+    assert result.suspect_count == 1
+    assert result.rejected_count == 0
+    assert result.issue_count == 2
+    assert market_repository.calls[0]["quality_score"] == Decimal("60.00")
+    assert market_repository.calls[0]["quality_status"] == "suspect"
+    assert market_repository.calls[0]["is_suspect"] is True
+    assert {issue["issue_type"] for issue in issue_repository.calls} == {
+        "PRICE_MOVE_EXTREME",
+        "TURNOVER_INCONSISTENT",
+    }
     assert db.committed is True

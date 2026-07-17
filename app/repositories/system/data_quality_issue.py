@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -79,3 +79,25 @@ class DataQualityIssueRepository:
             )
         )
         return items, total
+
+    def update_status(
+        self,
+        db: Session,
+        *,
+        issue_id: int,
+        status: str,
+        resolved_by: str | None = None,
+    ) -> DataQualityIssue | None:
+        issue = db.get(DataQualityIssue, issue_id)
+        if issue is None:
+            return None
+
+        issue.status = status
+        if status in {"fixed", "ignored", "false_positive"}:
+            issue.resolved_by = resolved_by
+            issue.resolved_at = datetime.now(UTC)
+        elif status in {"open", "reopened"}:
+            issue.resolved_by = None
+            issue.resolved_at = None
+        db.add(issue)
+        return issue

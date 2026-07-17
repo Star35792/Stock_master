@@ -23,3 +23,8 @@ class DataQualityIssueRead(BaseModel):
     resolved_by: str | None
     resolved_at: datetime | None
     created_at: datetime
+
+
+class DataQualityIssueStatusUpdate(BaseModel):
+    status: str
+    resolved_by: str | None = None

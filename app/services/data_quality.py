@@ -40,3 +40,23 @@ class DataQualityQueryService:
             limit=limit,
             offset=offset,
         )
+
+    def update_issue_status(
+        self,
+        db: Session,
+        *,
+        issue_id: int,
+        status: str,
+        resolved_by: str | None,
+    ) -> DataQualityIssueRead | None:
+        issue = self.repository.update_status(
+            db,
+            issue_id=issue_id,
+            status=status,
+            resolved_by=resolved_by,
+        )
+        if issue is None:
+            return None
+        db.commit()
+        db.refresh(issue)
+        return DataQualityIssueRead.model_validate(issue)

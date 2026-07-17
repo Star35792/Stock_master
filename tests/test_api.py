@@ -56,6 +56,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/daily-bars/{symbol}" in paths
     assert "/api/v1/daily-bars/missing" in paths
     assert "/api/v1/data-quality/issues" in paths
+    assert "/api/v1/data-quality/issues/{issue_id}/status" in paths
     assert "/api/v1/daily-bar-source-compares" in paths
     assert "/api/v1/manual-corrections" in paths
     assert "/api/v1/corporate-actions" in paths
@@ -132,3 +133,15 @@ def test_trading_calendar_rejects_reversed_date_range() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_data_quality_issue_status_rejects_invalid_status() -> None:
+    response = client.patch(
+        "/api/v1/data-quality/issues/1/status",
+        json={"status": "done"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "status must be one of: open, ignored, fixed, reopened, false_positive"
+    )

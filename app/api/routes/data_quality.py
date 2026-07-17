@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
-from app.schemas import DataQualityIssueRead, Page
+from app.schemas import DataQualityIssueRead, DataQualityIssueStatusUpdate, Page
 from app.services import DataQualityQueryService
 
 router = APIRouter(prefix="/data-quality/issues", tags=["data-quality"])
@@ -15,7 +15,7 @@ service = DataQualityQueryService()
 def list_data_quality_issues(
     db: DatabaseSession,
     status_filter: Annotated[
-        Literal["open", "ignored", "fixed", "false_positive"] | None,
+        Literal["open", "ignored", "fixed", "reopened", "false_positive"] | None,
         Query(alias="status"),
     ] = "open",
     severity: Literal["info", "warning", "error", "critical"] | None = None,
@@ -43,3 +43,30 @@ def list_data_quality_issues(
         limit=limit,
         offset=offset,
     )
+
+
+@router.patch("/{issue_id}/status", response_model=DataQualityIssueRead)
+def update_data_quality_issue_status(
+    issue_id: int,
+    payload: DataQualityIssueStatusUpdate,
+    db: DatabaseSession,
+) -> DataQualityIssueRead:
+    allowed_statuses = {"open", "ignored", "fixed", "reopened", "false_positive"}
+    if payload.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="status must be one of: open, ignored, fixed, reopened, false_positive",
+        )
+
+    result = service.update_issue_status(
+        db,
+        issue_id=issue_id,
+        status=payload.status,
+        resolved_by=payload.resolved_by,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="data quality issue not found",
+        )
+    return result

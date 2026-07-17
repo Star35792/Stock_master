@@ -10,7 +10,7 @@ from app.schemas.market import (
     SecurityRead,
     TradingCalendarRead,
 )
-from app.schemas.system import DataQualityIssueRead
+from app.schemas.system import DataQualityIssueRead, DataQualityIssueStatusUpdate
 
 __all__ = [
     "AdjustmentFactorRead",
@@ -18,6 +18,7 @@ __all__ = [
     "DailyBarRead",
     "DailyBarSourceCompareRead",
     "DataQualityIssueRead",
+    "DataQualityIssueStatusUpdate",
     "ManualCorrectionRead",
     "MissingDailyBarRead",
     "SecurityLifecycleRead",

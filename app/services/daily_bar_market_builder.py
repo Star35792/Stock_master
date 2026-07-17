@@ -22,6 +22,7 @@ class MarketBuildResult:
     trusted_count: int
     rejected_count: int
     issue_count: int
+    suspect_count: int = 0
     conflict_count: int = 0
 
 
@@ -90,6 +91,7 @@ class DailyBarMarketBuildService:
         }
 
         trusted_count = 0
+        suspect_count = 0
         rejected_count = 0
         issue_count = 0
         conflict_count = 0
@@ -103,32 +105,40 @@ class DailyBarMarketBuildService:
                     issue_count += 1
                 continue
 
-            issues = _validate_candidate(
+            assessment = _assess_candidate_quality(
                 candidate,
                 existing_symbols=existing_symbols,
                 open_dates_by_exchange=open_dates_by_exchange,
             )
-            if issues:
+            if assessment.quality_status == "rejected":
                 rejected_count += 1
-                for issue in issues:
+                for issue in assessment.issues:
                     self.issue_repository.create(db, **issue)
                     issue_count += 1
                 continue
 
+            for issue in assessment.issues:
+                self.issue_repository.create(db, **issue)
+                issue_count += 1
+
             self.market_repository.upsert_from_raw(
                 db,
                 raw_bar=candidate,
-                quality_score=Decimal("100.00"),
-                quality_status="trusted",
-                is_suspect=False,
+                quality_score=assessment.quality_score,
+                quality_status=assessment.quality_status,
+                is_suspect=assessment.is_suspect,
                 source_count=reconciliation.source_counts.get(key, 1),
             )
-            trusted_count += 1
+            if assessment.quality_status == "trusted":
+                trusted_count += 1
+            else:
+                suspect_count += 1
 
         db.commit()
         return MarketBuildResult(
             candidates_count=len(candidates),
             trusted_count=trusted_count,
+            suspect_count=suspect_count,
             rejected_count=rejected_count,
             issue_count=issue_count,
             conflict_count=conflict_count,
@@ -167,6 +177,43 @@ class DailyBarMarketBuildService:
 class _ReconciliationResult:
     conflict_issues: dict[tuple[str, date, str], list[dict]]
     source_counts: dict[tuple[str, date, str], int]
+
+
+@dataclass(frozen=True)
+class _QualityAssessment:
+    quality_score: Decimal
+    quality_status: str
+    is_suspect: bool
+    issues: list[dict]
+
+
+def _assess_candidate_quality(
+    candidate: RawDailyBar,
+    *,
+    existing_symbols: set[str],
+    open_dates_by_exchange: dict[str, set[date]],
+) -> _QualityAssessment:
+    hard_issues = _validate_candidate(
+        candidate,
+        existing_symbols=existing_symbols,
+        open_dates_by_exchange=open_dates_by_exchange,
+    )
+    if hard_issues:
+        return _QualityAssessment(
+            quality_score=Decimal("0.00"),
+            quality_status="rejected",
+            is_suspect=True,
+            issues=hard_issues,
+        )
+
+    warning_issues = _warning_issues(candidate)
+    score = max(Decimal("0.00"), Decimal("100.00") - Decimal("20.00") * len(warning_issues))
+    return _QualityAssessment(
+        quality_score=score,
+        quality_status="suspect" if warning_issues else "trusted",
+        is_suspect=bool(warning_issues),
+        issues=warning_issues,
+    )
 
 
 def _validate_candidate(
@@ -260,6 +307,99 @@ def _validate_candidate(
                 "severity": "error",
                 "description": "amount must not be negative",
                 "actual_value": {"amount": str(candidate.amount)},
+            }
+        )
+
+    return issues
+
+
+def _warning_issues(candidate: RawDailyBar) -> list[dict]:
+    issues: list[dict] = []
+    base = {
+        "dataset": "daily_bar",
+        "symbol": candidate.symbol,
+        "trade_date": candidate.trade_date,
+        "adjust_type": candidate.adjust_type,
+        "source_name": candidate.source_name,
+        "raw_id": candidate.id,
+    }
+
+    pre_close = getattr(candidate, "pre_close", None)
+    close = getattr(candidate, "close", None)
+    change_amount = getattr(candidate, "change_amount", None)
+    volume = getattr(candidate, "volume", None)
+    amount = getattr(candidate, "amount", None)
+
+    if pre_close and close and change_amount is not None:
+        expected_change = close - pre_close
+        if abs(expected_change - change_amount) > Decimal("0.01"):
+            issues.append(
+                {
+                    **base,
+                    "issue_type": "PRICE_CONTINUITY_WARNING",
+                    "severity": "warning",
+                    "description": "close - pre_close does not match change_amount",
+                    "expected_value": {"change_amount": str(expected_change)},
+                    "actual_value": {"change_amount": str(change_amount)},
+                }
+            )
+
+    if pre_close and pre_close > 0 and close:
+        pct_move = abs((close - pre_close) / pre_close)
+        if pct_move > Decimal("0.30"):
+            issues.append(
+                {
+                    **base,
+                    "issue_type": "PRICE_MOVE_EXTREME",
+                    "severity": "warning",
+                    "description": "absolute close-to-pre-close move is unusually large",
+                    "expected_value": {"abs_pct_move_lte": "0.30"},
+                    "actual_value": {"abs_pct_move": str(pct_move)},
+                }
+            )
+
+    if volume is None:
+        issues.append(
+            {
+                **base,
+                "issue_type": "VOLUME_MISSING",
+                "severity": "warning",
+                "description": "volume is missing",
+            }
+        )
+    if amount is None:
+        issues.append(
+            {
+                **base,
+                "issue_type": "AMOUNT_MISSING",
+                "severity": "warning",
+                "description": "amount is missing",
+            }
+        )
+    if volume == 0 and amount and amount > 0:
+        issues.append(
+            {
+                **base,
+                "issue_type": "TURNOVER_INCONSISTENT",
+                "severity": "warning",
+                "description": "amount is positive while volume is zero",
+                "actual_value": {
+                    "volume": str(volume),
+                    "amount": str(amount),
+                },
+            }
+        )
+    if amount == 0 and volume and volume > 0:
+        issues.append(
+            {
+                **base,
+                "issue_type": "TURNOVER_INCONSISTENT",
+                "severity": "warning",
+                "description": "volume is positive while amount is zero",
+                "actual_value": {
+                    "volume": str(volume),
+                    "amount": str(amount),
+                },
             }
         )
 
