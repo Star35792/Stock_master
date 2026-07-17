@@ -18,6 +18,7 @@ from app.services.market import MarketQueryService
 from app.services.performance import BacktestPerformanceService, PersistedPerformanceReport
 from app.services.portfolio import PersistedPortfolioPlan, PortfolioConstructionService
 from app.services.reference_data import ReferenceDataSyncResult, ReferenceDataSyncService
+from app.services.risk import PersistedRiskCheck, PortfolioRiskService
 from app.services.strategy_research import StrategyResearchService
 
 __all__ = [
@@ -45,5 +46,7 @@ __all__ = [
     "PersistedBacktestResult",
     "ReferenceDataSyncResult",
     "ReferenceDataSyncService",
+    "PersistedRiskCheck",
+    "PortfolioRiskService",
     "StrategyResearchService",
 ]

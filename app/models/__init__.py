@@ -10,6 +10,7 @@ from app.models.market import (
 )
 from app.models.portfolio import PortfolioPlanRecord, PortfolioTargetRecord
 from app.models.raw import ImportBatch, RawDailyBar
+from app.models.risk import RiskCheck, RiskCheckOrder
 from app.models.strategy import (
     BacktestEquity,
     BacktestPerformance,
@@ -41,6 +42,8 @@ __all__ = [
     "PortfolioPlanRecord",
     "PortfolioTargetRecord",
     "RawDailyBar",
+    "RiskCheck",
+    "RiskCheckOrder",
     "Security",
     "TradingCalendar",
 ]

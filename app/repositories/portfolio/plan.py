@@ -1,6 +1,7 @@
 from datetime import date
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.portfolio import PortfolioPlanRecord, PortfolioTargetRecord
@@ -8,6 +9,22 @@ from app.portfolio import PortfolioPlan
 
 
 class PortfolioPlanRepository:
+    def get_with_targets(
+        self,
+        db: Session,
+        *,
+        plan_id: int,
+    ) -> tuple[PortfolioPlanRecord | None, list[PortfolioTargetRecord]]:
+        plan = db.get(PortfolioPlanRecord, plan_id)
+        targets = list(
+            db.scalars(
+                select(PortfolioTargetRecord)
+                .where(PortfolioTargetRecord.plan_id == plan_id)
+                .order_by(PortfolioTargetRecord.symbol)
+            )
+        )
+        return plan, targets
+
     def save(
         self,
         db: Session,
