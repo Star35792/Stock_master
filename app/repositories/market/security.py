@@ -51,6 +51,14 @@ class SecurityRepository:
             return set()
         return set(db.scalars(select(Security.symbol).where(Security.symbol.in_(symbols))).all())
 
+    def get_security_types(self, db: Session, symbols: set[str]) -> dict[str, str]:
+        if not symbols:
+            return {}
+        rows = db.execute(
+            select(Security.symbol, Security.security_type).where(Security.symbol.in_(symbols))
+        ).all()
+        return dict(rows)
+
     def list(
         self,
         db: Session,

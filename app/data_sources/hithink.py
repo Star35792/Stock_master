@@ -179,6 +179,8 @@ def _optional_decimal(value: Any) -> Decimal | None:
 def _to_security_type(asset_type: str) -> str:
     if asset_type == "a-share":
         return "stock"
+    if asset_type in {"etf", "a-share-etf"}:
+        return "etf"
     if asset_type == "a-share-index":
         return "index"
     return "unknown"

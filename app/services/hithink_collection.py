@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.data_sources import DailyBarRecord, HithinkFinanceDataSource
 from app.models.raw import RawDailyBar
+from app.repositories.market import SecurityRepository
 from app.repositories.raw import RawDailyBarImportRepository
 
 
@@ -28,9 +29,11 @@ class HithinkDailyBarCollectionService:
         *,
         data_source: HithinkFinanceDataSource | None = None,
         repository: RawDailyBarImportRepository | None = None,
+        security_repository: SecurityRepository | None = None,
     ) -> None:
         self.data_source = data_source or HithinkFinanceDataSource()
         self.repository = repository or RawDailyBarImportRepository()
+        self.security_repository = security_repository or SecurityRepository()
 
     def collect_daily_bars(
         self,
@@ -43,6 +46,7 @@ class HithinkDailyBarCollectionService:
         source_priority: int = 50,
     ) -> DailyBarCollectionResult:
         normalized_symbols = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
+        security_types = self.security_repository.get_security_types(db, set(normalized_symbols))
         batch_no = f"hithink_daily_bar_{datetime.now(UTC):%Y%m%d%H%M%S}_{uuid4().hex[:8]}"
         batch = self.repository.create_batch(
             db,
@@ -83,6 +87,7 @@ class HithinkDailyBarCollectionService:
                             source_type=self.data_source.source_type,
                             source_priority=source_priority,
                             record=record,
+                            security_type=security_types.get(record.symbol),
                         ),
                     )
                     accepted_count += 1
@@ -128,6 +133,7 @@ def _to_raw_daily_bar(
     source_type: str,
     source_priority: int,
     record: DailyBarRecord,
+    security_type: str | None = None,
 ) -> RawDailyBar:
     return RawDailyBar(
         batch_id=batch_id,
@@ -136,7 +142,7 @@ def _to_raw_daily_bar(
         source_priority=source_priority,
         symbol=record.symbol,
         raw_symbol=record.symbol,
-        security_type=_infer_security_type(record.symbol),
+        security_type=security_type or _infer_security_type(record.symbol),
         trade_date=record.trade_date,
         adjust_type=record.adjust_type,
         open=record.open,
@@ -167,9 +173,13 @@ def _daily_bar_row_hash(record: DailyBarRecord) -> str:
 
 
 def _infer_security_type(symbol: str) -> str:
-    code = symbol.split(".", 1)[0]
+    parts = symbol.split(".", 1)
+    code = parts[0]
+    exchange = parts[1] if len(parts) == 2 else ""
     if code.startswith(("15", "16", "18", "51", "56", "58")):
         return "etf"
+    if code.startswith("399") or (exchange == "SH" and code.startswith("000")):
+        return "index"
     if code.startswith(("00", "30", "60", "68", "83", "87", "92")):
         return "stock"
     return "unknown"

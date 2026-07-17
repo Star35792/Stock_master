@@ -27,7 +27,13 @@ class ReferenceDataSyncService:
         )
 
     def sync_hithink_reference_data(self, db: Session) -> ReferenceDataSyncResult:
-        securities = self.data_source.fetch_securities()
+        securities = [
+            *self.data_source.fetch_securities(asset_type="a-share"),
+            *self.data_source.fetch_securities(
+                asset_type="a-share-index",
+                exchanges=("SH", "SZ"),
+            ),
+        ]
         trading_days = self.data_source.fetch_trading_days()
 
         securities_count = self.security_repository.upsert_many(
