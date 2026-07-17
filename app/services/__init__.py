@@ -16,6 +16,7 @@ from app.services.hithink_collection import (
 from app.services.manual_correction import ManualCorrectionResult, ManualCorrectionService
 from app.services.market import MarketQueryService
 from app.services.reference_data import ReferenceDataSyncResult, ReferenceDataSyncService
+from app.services.strategy_research import StrategyResearchService
 
 __all__ = [
     "BasicFactorRunResult",
@@ -38,4 +39,5 @@ __all__ = [
     "PersistedBacktestResult",
     "ReferenceDataSyncResult",
     "ReferenceDataSyncService",
+    "StrategyResearchService",
 ]
