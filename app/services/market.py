@@ -3,12 +3,16 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.repositories.market import (
+    AdjustmentFactorRepository,
+    CorporateActionRepository,
     DailyBarRepository,
     DailyBarSourceCompareRepository,
     ManualCorrectionRepository,
     SecurityRepository,
 )
 from app.schemas import (
+    AdjustmentFactorRead,
+    CorporateActionRead,
     DailyBarRead,
     DailyBarSourceCompareRead,
     ManualCorrectionRead,
@@ -25,6 +29,8 @@ class MarketQueryService:
         daily_bar_repository: DailyBarRepository | None = None,
         source_compare_repository: DailyBarSourceCompareRepository | None = None,
         manual_correction_repository: ManualCorrectionRepository | None = None,
+        corporate_action_repository: CorporateActionRepository | None = None,
+        adjustment_factor_repository: AdjustmentFactorRepository | None = None,
     ) -> None:
         self.security_repository = security_repository or SecurityRepository()
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
@@ -33,6 +39,12 @@ class MarketQueryService:
         )
         self.manual_correction_repository = (
             manual_correction_repository or ManualCorrectionRepository()
+        )
+        self.corporate_action_repository = (
+            corporate_action_repository or CorporateActionRepository()
+        )
+        self.adjustment_factor_repository = (
+            adjustment_factor_repository or AdjustmentFactorRepository()
         )
 
     def list_securities(
@@ -151,6 +163,68 @@ class MarketQueryService:
         )
         return Page(
             items=[DailyBarSourceCompareRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_corporate_actions(
+        self,
+        db: Session,
+        *,
+        symbol: str | None,
+        start_date: date | None,
+        end_date: date | None,
+        action_type: str | None,
+        source_name: str | None,
+        limit: int,
+        offset: int,
+    ) -> Page[CorporateActionRead]:
+        rows, total = self.corporate_action_repository.list(
+            db,
+            symbol=symbol.upper() if symbol else None,
+            start_date=start_date,
+            end_date=end_date,
+            action_type=action_type,
+            source_name=source_name,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[CorporateActionRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_adjustment_factors(
+        self,
+        db: Session,
+        *,
+        symbol: str | None,
+        start_date: date | None,
+        end_date: date | None,
+        adjust_type: str | None,
+        source_name: str | None,
+        version: str | None,
+        quality_status: str | None,
+        limit: int,
+        offset: int,
+    ) -> Page[AdjustmentFactorRead]:
+        rows, total = self.adjustment_factor_repository.list(
+            db,
+            symbol=symbol.upper() if symbol else None,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            source_name=source_name,
+            version=version,
+            quality_status=quality_status,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[AdjustmentFactorRead.model_validate(row) for row in rows],
             total=total,
             limit=limit,
             offset=offset,

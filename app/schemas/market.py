@@ -47,6 +47,43 @@ class DailyBarRead(BaseModel):
     updated_at: datetime
 
 
+class CorporateActionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    symbol: str
+    ex_date: date
+    action_type: str
+    cash_dividend: Decimal | None
+    bonus_share_ratio: Decimal | None
+    transfer_share_ratio: Decimal | None
+    rights_issue_ratio: Decimal | None
+    rights_issue_price: Decimal | None
+    split_ratio: Decimal | None
+    record_date: date | None
+    payment_date: date | None
+    source_name: str
+    source_event_id: str | None
+    note: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdjustmentFactorRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    symbol: str
+    trade_date: date
+    adjust_type: str
+    factor: Decimal
+    source_name: str
+    version: str
+    quality_status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class MissingDailyBarRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

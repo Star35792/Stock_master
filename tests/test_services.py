@@ -97,6 +97,55 @@ class FakeManualCorrectionRepository:
         return [row], 1
 
 
+class FakeCorporateActionRepository:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def list(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
+        self.kwargs = kwargs
+        row = SimpleNamespace(
+            id=1,
+            symbol="600519.SH",
+            ex_date=date(2026, 7, 17),
+            action_type="cash_dividend",
+            cash_dividend=Decimal("10.000000"),
+            bonus_share_ratio=None,
+            transfer_share_ratio=None,
+            rights_issue_ratio=None,
+            rights_issue_price=None,
+            split_ratio=None,
+            record_date=date(2026, 7, 16),
+            payment_date=date(2026, 7, 18),
+            source_name="hithink_finance",
+            source_event_id="event-1",
+            note=None,
+            created_at=datetime(2026, 7, 17, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 17, tzinfo=UTC),
+        )
+        return [row], 1
+
+
+class FakeAdjustmentFactorRepository:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def list(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
+        self.kwargs = kwargs
+        row = SimpleNamespace(
+            id=1,
+            symbol="600519.SH",
+            trade_date=date(2026, 7, 17),
+            adjust_type="qfq",
+            factor=Decimal("0.9123456789"),
+            source_name="hithink_finance",
+            version="v1",
+            quality_status="trusted",
+            created_at=datetime(2026, 7, 17, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 17, tzinfo=UTC),
+        )
+        return [row], 1
+
+
 def test_market_service_normalizes_symbol() -> None:
     service = MarketQueryService(daily_bar_repository=FakeDailyBarRepository())
 
@@ -178,3 +227,49 @@ def test_market_service_lists_manual_corrections() -> None:
     assert repository.kwargs is not None
     assert repository.kwargs["symbol"] == "600519.SH"
     assert repository.kwargs["corrected_by"] == "liuzu"
+
+
+def test_market_service_lists_corporate_actions() -> None:
+    repository = FakeCorporateActionRepository()
+    service = MarketQueryService(corporate_action_repository=repository)
+
+    result = service.list_corporate_actions(
+        object(),
+        symbol="600519.sh",
+        start_date=None,
+        end_date=None,
+        action_type="cash_dividend",
+        source_name="hithink_finance",
+        limit=100,
+        offset=0,
+    )
+
+    assert result.total == 1
+    assert result.items[0].symbol == "600519.SH"
+    assert result.items[0].cash_dividend == Decimal("10.000000")
+    assert repository.kwargs is not None
+    assert repository.kwargs["symbol"] == "600519.SH"
+
+
+def test_market_service_lists_adjustment_factors() -> None:
+    repository = FakeAdjustmentFactorRepository()
+    service = MarketQueryService(adjustment_factor_repository=repository)
+
+    result = service.list_adjustment_factors(
+        object(),
+        symbol="600519.sh",
+        start_date=None,
+        end_date=None,
+        adjust_type="qfq",
+        source_name="hithink_finance",
+        version="v1",
+        quality_status="trusted",
+        limit=100,
+        offset=0,
+    )
+
+    assert result.total == 1
+    assert result.items[0].symbol == "600519.SH"
+    assert result.items[0].factor == Decimal("0.9123456789")
+    assert repository.kwargs is not None
+    assert repository.kwargs["symbol"] == "600519.SH"
