@@ -10,6 +10,35 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def get_by_key(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        trade_date: date,
+        adjust_type: str,
+    ) -> DailyBar | None:
+        return db.scalar(
+            select(DailyBar).where(
+                DailyBar.symbol == symbol,
+                DailyBar.trade_date == trade_date,
+                DailyBar.adjust_type == adjust_type,
+            )
+        )
+
+    def apply_manual_correction(
+        self,
+        db: Session,
+        *,
+        daily_bar: DailyBar,
+        field_name: str,
+        value: object,
+    ) -> None:
+        setattr(daily_bar, field_name, value)
+        daily_bar.quality_status = "manual_fixed"
+        daily_bar.is_suspect = False
+        db.add(daily_bar)
+
     def upsert_from_raw(
         self,
         db: Session,
@@ -18,6 +47,7 @@ class DailyBarRepository:
         quality_score: Decimal,
         quality_status: str,
         is_suspect: bool,
+        source_count: int = 1,
     ) -> None:
         row = {
             "symbol": raw_bar.symbol,
@@ -36,7 +66,7 @@ class DailyBarRepository:
             "turnover_rate": raw_bar.turnover_rate,
             "amplitude": raw_bar.amplitude,
             "source_name": raw_bar.source_name,
-            "source_count": 1,
+            "source_count": source_count,
             "quality_score": quality_score,
             "quality_status": quality_status,
             "is_suspect": is_suspect,

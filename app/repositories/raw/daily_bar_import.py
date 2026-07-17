@@ -14,12 +14,14 @@ class RawDailyBarImportRepository:
         source_type: str,
         dataset: str,
         request_params: dict,
+        file_path: str | None = None,
     ) -> ImportBatch:
         batch = ImportBatch(
             batch_no=batch_no,
             source_name=source_name,
             source_type=source_type,
             dataset=dataset,
+            file_path=file_path,
             request_params=request_params,
             status="running",
         )

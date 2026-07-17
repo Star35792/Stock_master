@@ -3,7 +3,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from app.data_sources.hithink import HithinkFinanceDataSource
-from app.services.daily_bar_market_builder import _validate_candidate
+from app.services.daily_bar_market_builder import DailyBarMarketBuildService, _validate_candidate
 
 
 def _raw_bar(**overrides):
@@ -22,6 +22,68 @@ def _raw_bar(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+class FakeDb:
+    def __init__(self) -> None:
+        self.committed = False
+
+    def commit(self) -> None:
+        self.committed = True
+
+
+class FakeRawRepository:
+    def __init__(self, rows: list[SimpleNamespace], selected: SimpleNamespace) -> None:
+        self.rows = rows
+        self.selected = selected
+
+    def latest_candidates(self, db: object, **kwargs: object) -> list[SimpleNamespace]:
+        return [self.selected]
+
+    def latest_candidates_by_source(
+        self, db: object, **kwargs: object
+    ) -> dict[tuple[str, date, str], list[SimpleNamespace]]:
+        return {
+            (
+                self.selected.symbol,
+                self.selected.trade_date,
+                self.selected.adjust_type,
+            ): self.rows
+        }
+
+
+class FakeMarketRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def upsert_from_raw(self, db: object, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
+class FakeSecurityRepository:
+    def get_symbols(self, db: object, symbols: set[str]) -> set[str]:
+        return symbols
+
+
+class FakeTradingCalendarRepository:
+    def get_open_dates(self, db: object, *, exchange: str, dates: set[date]) -> set[date]:
+        return dates
+
+
+class FakeCompareRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def upsert_pair(self, db: object, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
+class FakeIssueRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def create(self, db: object, **kwargs: object) -> None:
+        self.calls.append(kwargs)
 
 
 def test_hithink_security_mapping() -> None:
@@ -64,3 +126,57 @@ def test_market_build_validation_rejects_missing_security_and_bad_price() -> Non
         "SECURITY_NOT_FOUND",
         "PRICE_INVALID",
     }
+
+
+def test_market_build_promotes_consistent_multi_source_candidate() -> None:
+    hithink = _raw_bar(id=1, source_name="hithink_finance")
+    csv = _raw_bar(id=2, source_name="csv")
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    compare_repository = FakeCompareRepository()
+    issue_repository = FakeIssueRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([hithink, csv], hithink),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        compare_repository=compare_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=issue_repository,  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.trusted_count == 1
+    assert result.conflict_count == 0
+    assert market_repository.calls[0]["source_count"] == 2
+    assert compare_repository.calls[0]["is_conflict"] is False
+    assert issue_repository.calls == []
+    assert db.committed is True
+
+
+def test_market_build_blocks_price_conflict_between_sources() -> None:
+    hithink = _raw_bar(id=1, source_name="hithink_finance")
+    csv = _raw_bar(id=2, source_name="csv", close=Decimal("1243.00"))
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    compare_repository = FakeCompareRepository()
+    issue_repository = FakeIssueRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([hithink, csv], hithink),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        compare_repository=compare_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=issue_repository,  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.trusted_count == 0
+    assert result.rejected_count == 1
+    assert result.issue_count == 1
+    assert result.conflict_count == 1
+    assert market_repository.calls == []
+    assert compare_repository.calls[0]["is_conflict"] is True
+    assert issue_repository.calls[0]["issue_type"] == "SOURCE_CONFLICT"
+    assert db.committed is True

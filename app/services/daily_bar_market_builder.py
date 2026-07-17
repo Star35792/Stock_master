@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from itertools import combinations
 
 from sqlalchemy.orm import Session
 
 from app.models.raw import RawDailyBar
 from app.repositories.market import (
     DailyBarRepository,
+    DailyBarSourceCompareRepository,
     SecurityRepository,
     TradingCalendarRepository,
 )
@@ -20,6 +22,7 @@ class MarketBuildResult:
     trusted_count: int
     rejected_count: int
     issue_count: int
+    conflict_count: int = 0
 
 
 class DailyBarMarketBuildService:
@@ -28,12 +31,14 @@ class DailyBarMarketBuildService:
         *,
         raw_repository: RawDailyBarRepository | None = None,
         market_repository: DailyBarRepository | None = None,
+        compare_repository: DailyBarSourceCompareRepository | None = None,
         security_repository: SecurityRepository | None = None,
         trading_calendar_repository: TradingCalendarRepository | None = None,
         issue_repository: DataQualityIssueRepository | None = None,
     ) -> None:
         self.raw_repository = raw_repository or RawDailyBarRepository()
         self.market_repository = market_repository or DailyBarRepository()
+        self.compare_repository = compare_repository or DailyBarSourceCompareRepository()
         self.security_repository = security_repository or SecurityRepository()
         self.trading_calendar_repository = (
             trading_calendar_repository or TradingCalendarRepository()
@@ -58,6 +63,15 @@ class DailyBarMarketBuildService:
             adjust_type=adjust_type,
             source_name=source_name,
         )
+        raw_groups = self.raw_repository.latest_candidates_by_source(
+            db,
+            symbols=symbols,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            source_name=source_name,
+        )
+        reconciliation = self._reconcile_sources(db, raw_groups)
         existing_symbols = self.security_repository.get_symbols(
             db, {candidate.symbol for candidate in candidates}
         )
@@ -78,7 +92,17 @@ class DailyBarMarketBuildService:
         trusted_count = 0
         rejected_count = 0
         issue_count = 0
+        conflict_count = 0
         for candidate in candidates:
+            key = (candidate.symbol, candidate.trade_date, candidate.adjust_type)
+            if key in reconciliation.conflict_issues:
+                rejected_count += 1
+                conflict_count += 1
+                for issue in reconciliation.conflict_issues[key]:
+                    self.issue_repository.create(db, **issue)
+                    issue_count += 1
+                continue
+
             issues = _validate_candidate(
                 candidate,
                 existing_symbols=existing_symbols,
@@ -97,6 +121,7 @@ class DailyBarMarketBuildService:
                 quality_score=Decimal("100.00"),
                 quality_status="trusted",
                 is_suspect=False,
+                source_count=reconciliation.source_counts.get(key, 1),
             )
             trusted_count += 1
 
@@ -106,7 +131,42 @@ class DailyBarMarketBuildService:
             trusted_count=trusted_count,
             rejected_count=rejected_count,
             issue_count=issue_count,
+            conflict_count=conflict_count,
         )
+
+    def _reconcile_sources(
+        self,
+        db: Session,
+        raw_groups: dict[tuple[str, date, str], list[RawDailyBar]],
+    ) -> "_ReconciliationResult":
+        conflict_issues: dict[tuple[str, date, str], list[dict]] = {}
+        source_counts: dict[tuple[str, date, str], int] = {}
+
+        for key, rows in raw_groups.items():
+            if len(rows) < 2:
+                source_counts[key] = len(rows)
+                continue
+
+            sorted_rows = sorted(rows, key=lambda row: (row.source_name, row.id))
+            source_counts[key] = len(sorted_rows)
+            for left, right in combinations(sorted_rows, 2):
+                comparison = _compare_candidates(left, right)
+                self.compare_repository.upsert_pair(db, **comparison)
+                if comparison["is_conflict"]:
+                    conflict_issues.setdefault(key, []).append(
+                        _source_conflict_issue(left, right, comparison)
+                    )
+
+        return _ReconciliationResult(
+            conflict_issues=conflict_issues,
+            source_counts=source_counts,
+        )
+
+
+@dataclass(frozen=True)
+class _ReconciliationResult:
+    conflict_issues: dict[tuple[str, date, str], list[dict]]
+    source_counts: dict[tuple[str, date, str], int]
 
 
 def _validate_candidate(
@@ -204,6 +264,92 @@ def _validate_candidate(
         )
 
     return issues
+
+
+def _compare_candidates(left: RawDailyBar, right: RawDailyBar) -> dict:
+    if left.id > right.id:
+        left, right = right, left
+
+    price_fields = ("open", "high", "low", "close")
+    different_price_fields = [
+        field
+        for field in price_fields
+        if getattr(left, field) is not None
+        and getattr(right, field) is not None
+        and getattr(left, field) != getattr(right, field)
+    ]
+    close_diff = _diff(left.close, right.close)
+    is_conflict = bool(different_price_fields)
+    return {
+        "symbol": left.symbol,
+        "trade_date": left.trade_date,
+        "adjust_type": left.adjust_type,
+        "source_a": left.source_name,
+        "source_b": right.source_name,
+        "raw_id_a": left.id,
+        "raw_id_b": right.id,
+        "close_diff": close_diff,
+        "close_diff_pct": _pct_diff(left.close, right.close),
+        "volume_diff_pct": _pct_diff(left.volume, right.volume),
+        "amount_diff_pct": _pct_diff(left.amount, right.amount),
+        "is_conflict": is_conflict,
+        "conflict_reason": (
+            f"price fields differ: {', '.join(different_price_fields)}"
+            if different_price_fields
+            else None
+        ),
+    }
+
+
+def _source_conflict_issue(left: RawDailyBar, right: RawDailyBar, comparison: dict) -> dict:
+    return {
+        "dataset": "daily_bar",
+        "symbol": left.symbol,
+        "trade_date": left.trade_date,
+        "adjust_type": left.adjust_type,
+        "source_name": f"{left.source_name},{right.source_name}",
+        "raw_id": left.id,
+        "issue_type": "SOURCE_CONFLICT",
+        "severity": "error",
+        "description": "daily bar price differs between sources",
+        "expected_value": {
+            left.source_name: _price_snapshot(left),
+            right.source_name: _price_snapshot(right),
+        },
+        "actual_value": {
+            "raw_id_a": left.id,
+            "raw_id_b": right.id,
+            "close_diff": str(comparison["close_diff"]),
+            "conflict_reason": comparison["conflict_reason"],
+        },
+    }
+
+
+def _price_snapshot(row: RawDailyBar) -> dict[str, str | None]:
+    return {
+        "open": _decimal_to_str(row.open),
+        "high": _decimal_to_str(row.high),
+        "low": _decimal_to_str(row.low),
+        "close": _decimal_to_str(row.close),
+    }
+
+
+def _diff(left: Decimal | None, right: Decimal | None) -> Decimal | None:
+    if left is None or right is None:
+        return None
+    return left - right
+
+
+def _pct_diff(left: Decimal | None, right: Decimal | None) -> Decimal | None:
+    if left is None or right in (None, Decimal("0")):
+        return None
+    return (left - right) / right
+
+
+def _decimal_to_str(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _exchange_from_symbol(symbol: str) -> str:
