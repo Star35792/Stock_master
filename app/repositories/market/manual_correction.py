@@ -7,6 +7,49 @@ from app.models.market import ManualCorrection
 
 
 class ManualCorrectionRepository:
+    def list(
+        self,
+        db: Session,
+        *,
+        symbol: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        adjust_type: str | None = None,
+        field_name: str | None = None,
+        corrected_by: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ManualCorrection], int]:
+        filters = []
+        if symbol:
+            filters.append(ManualCorrection.symbol == symbol)
+        if start_date:
+            filters.append(ManualCorrection.trade_date >= start_date)
+        if end_date:
+            filters.append(ManualCorrection.trade_date <= end_date)
+        if adjust_type:
+            filters.append(ManualCorrection.adjust_type == adjust_type)
+        if field_name:
+            filters.append(ManualCorrection.field_name == field_name)
+        if corrected_by:
+            filters.append(ManualCorrection.corrected_by == corrected_by)
+
+        total = db.scalar(select(func.count()).select_from(ManualCorrection).where(*filters)) or 0
+        items = list(
+            db.scalars(
+                select(ManualCorrection)
+                .where(*filters)
+                .order_by(
+                    ManualCorrection.trade_date.desc(),
+                    ManualCorrection.symbol,
+                    ManualCorrection.id.desc(),
+                )
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        return items, total
+
     def create(
         self,
         db: Session,

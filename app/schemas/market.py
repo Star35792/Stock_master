@@ -45,3 +45,40 @@ class DailyBarRead(BaseModel):
     quality_status: str
     is_suspect: bool
     updated_at: datetime
+
+
+class DailyBarSourceCompareRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    symbol: str
+    trade_date: date
+    adjust_type: str
+    source_a: str
+    source_b: str
+    raw_id_a: int
+    raw_id_b: int
+    close_diff: Decimal | None
+    close_diff_pct: Decimal | None
+    volume_diff_pct: Decimal | None
+    amount_diff_pct: Decimal | None
+    is_conflict: bool
+    conflict_reason: str | None
+    created_at: datetime
+
+
+class ManualCorrectionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    dataset: str
+    symbol: str
+    trade_date: date
+    adjust_type: str
+    field_name: str
+    old_value: str | None
+    new_value: str
+    reason: str
+    corrected_by: str
+    created_at: datetime
+    applied_at: datetime | None

@@ -1,13 +1,56 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.market import DailyBarSourceCompare
 
 
 class DailyBarSourceCompareRepository:
+    def list(
+        self,
+        db: Session,
+        *,
+        symbol: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        adjust_type: str | None = None,
+        is_conflict: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[DailyBarSourceCompare], int]:
+        filters = []
+        if symbol:
+            filters.append(DailyBarSourceCompare.symbol == symbol)
+        if start_date:
+            filters.append(DailyBarSourceCompare.trade_date >= start_date)
+        if end_date:
+            filters.append(DailyBarSourceCompare.trade_date <= end_date)
+        if adjust_type:
+            filters.append(DailyBarSourceCompare.adjust_type == adjust_type)
+        if is_conflict is not None:
+            filters.append(DailyBarSourceCompare.is_conflict == is_conflict)
+
+        total = (
+            db.scalar(select(func.count()).select_from(DailyBarSourceCompare).where(*filters))
+            or 0
+        )
+        items = list(
+            db.scalars(
+                select(DailyBarSourceCompare)
+                .where(*filters)
+                .order_by(
+                    DailyBarSourceCompare.trade_date.desc(),
+                    DailyBarSourceCompare.symbol,
+                    DailyBarSourceCompare.id.desc(),
+                )
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        return items, total
+
     def upsert_pair(
         self,
         db: Session,

@@ -2,8 +2,19 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.repositories.market import DailyBarRepository, SecurityRepository
-from app.schemas import DailyBarRead, Page, SecurityRead
+from app.repositories.market import (
+    DailyBarRepository,
+    DailyBarSourceCompareRepository,
+    ManualCorrectionRepository,
+    SecurityRepository,
+)
+from app.schemas import (
+    DailyBarRead,
+    DailyBarSourceCompareRead,
+    ManualCorrectionRead,
+    Page,
+    SecurityRead,
+)
 
 
 class MarketQueryService:
@@ -11,9 +22,17 @@ class MarketQueryService:
         self,
         security_repository: SecurityRepository | None = None,
         daily_bar_repository: DailyBarRepository | None = None,
+        source_compare_repository: DailyBarSourceCompareRepository | None = None,
+        manual_correction_repository: ManualCorrectionRepository | None = None,
     ) -> None:
         self.security_repository = security_repository or SecurityRepository()
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
+        self.source_compare_repository = (
+            source_compare_repository or DailyBarSourceCompareRepository()
+        )
+        self.manual_correction_repository = (
+            manual_correction_repository or ManualCorrectionRepository()
+        )
 
     def list_securities(
         self,
@@ -66,6 +85,66 @@ class MarketQueryService:
         )
         return Page(
             items=[DailyBarRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_source_compares(
+        self,
+        db: Session,
+        *,
+        symbol: str | None,
+        start_date: date | None,
+        end_date: date | None,
+        adjust_type: str | None,
+        is_conflict: bool | None,
+        limit: int,
+        offset: int,
+    ) -> Page[DailyBarSourceCompareRead]:
+        rows, total = self.source_compare_repository.list(
+            db,
+            symbol=symbol.upper() if symbol else None,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            is_conflict=is_conflict,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[DailyBarSourceCompareRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_manual_corrections(
+        self,
+        db: Session,
+        *,
+        symbol: str | None,
+        start_date: date | None,
+        end_date: date | None,
+        adjust_type: str | None,
+        field_name: str | None,
+        corrected_by: str | None,
+        limit: int,
+        offset: int,
+    ) -> Page[ManualCorrectionRead]:
+        rows, total = self.manual_correction_repository.list(
+            db,
+            symbol=symbol.upper() if symbol else None,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            field_name=field_name,
+            corrected_by=corrected_by,
+            limit=limit,
+            offset=offset,
+        )
+        return Page(
+            items=[ManualCorrectionRead.model_validate(row) for row in rows],
             total=total,
             limit=limit,
             offset=offset,
