@@ -15,6 +15,7 @@ from app.services.hithink_collection import (
 )
 from app.services.manual_correction import ManualCorrectionResult, ManualCorrectionService
 from app.services.market import MarketQueryService
+from app.services.operations import OperationsOverviewService
 from app.services.paper_trading import PaperTradingResult, PaperTradingService
 from app.services.performance import BacktestPerformanceService, PersistedPerformanceReport
 from app.services.portfolio import PersistedPortfolioPlan, PortfolioConstructionService
@@ -40,6 +41,7 @@ __all__ = [
     "ManualCorrectionService",
     "MarketBuildResult",
     "MarketQueryService",
+    "OperationsOverviewService",
     "BacktestPerformanceService",
     "PaperTradingResult",
     "PaperTradingService",

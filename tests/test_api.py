@@ -67,6 +67,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/factors/runs" in paths
     assert "/api/v1/factors/values" in paths
     assert "/api/v1/factors/profiles" in paths
+    assert "/api/v1/operations/overview" in paths
 
 
 def test_daily_bar_rejects_reversed_date_range() -> None:
