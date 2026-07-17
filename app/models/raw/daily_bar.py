@@ -1,7 +1,18 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,7 +22,23 @@ from app.database.base import Base
 class RawDailyBar(Base):
     __tablename__ = "daily_bar"
     __table_args__ = (
+        CheckConstraint(
+            "adjust_type in ('none', 'qfq', 'hfq')",
+            name="ck_raw_daily_bar_adjust_type",
+        ),
+        CheckConstraint(
+            "source_priority >= 0",
+            name="ck_raw_daily_bar_source_priority_non_negative",
+        ),
         Index("ix_raw_daily_bar_symbol_date", "symbol", "trade_date"),
+        Index("ix_raw_daily_bar_symbol_adjust_date", "symbol", "adjust_type", "trade_date"),
+        Index(
+            "ix_raw_daily_bar_source_symbol_adjust_date",
+            "source_name",
+            "symbol",
+            "adjust_type",
+            "trade_date",
+        ),
         Index("ix_raw_daily_bar_source_date", "source_name", "trade_date"),
         Index("ix_raw_daily_bar_batch_id", "batch_id"),
         Index("ix_raw_daily_bar_row_hash", "row_hash"),

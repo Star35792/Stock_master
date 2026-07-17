@@ -1,6 +1,17 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -9,7 +20,27 @@ from app.database.base import Base
 
 class JobLog(Base):
     __tablename__ = "job_log"
-    __table_args__ = {"schema": "system"}
+    __table_args__ = (
+        CheckConstraint(
+            "job_type in ('import', 'normalize', 'validate', 'reconcile', 'repair', 'schedule')",
+            name="ck_job_log_type",
+        ),
+        CheckConstraint(
+            "status in ('running', 'success', 'failed', 'partial')",
+            name="ck_job_log_status",
+        ),
+        CheckConstraint(
+            "rows_read >= 0 and rows_inserted >= 0 and rows_updated >= 0 and rows_failed >= 0",
+            name="ck_job_log_counts_non_negative",
+        ),
+        CheckConstraint(
+            "finished_at is null or finished_at >= started_at",
+            name="ck_job_log_time_order",
+        ),
+        Index("ix_job_log_type_status_started", "job_type", "status", "started_at"),
+        Index("ix_job_log_batch_id", "batch_id"),
+        {"schema": "system"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     job_name: Mapped[str] = mapped_column(String(100), nullable=False)

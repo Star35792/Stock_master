@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Index,
     Integer,
@@ -21,6 +22,22 @@ class ImportBatch(Base):
     __tablename__ = "import_batch"
     __table_args__ = (
         UniqueConstraint("batch_no"),
+        CheckConstraint(
+            "status in ('running', 'success', 'failed', 'partial')",
+            name="ck_raw_import_batch_status",
+        ),
+        CheckConstraint(
+            "row_count >= 0 and accepted_count >= 0 and rejected_count >= 0",
+            name="ck_raw_import_batch_counts_non_negative",
+        ),
+        CheckConstraint(
+            "accepted_count + rejected_count <= row_count",
+            name="ck_raw_import_batch_counts_consistent",
+        ),
+        CheckConstraint(
+            "finished_at is null or finished_at >= started_at",
+            name="ck_raw_import_batch_time_order",
+        ),
         Index("ix_import_batch_source_dataset", "source_name", "dataset"),
         Index("ix_import_batch_status", "status"),
         Index("ix_import_batch_started_at", "started_at"),

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, String, Text, func
+from sqlalchemy import BigInteger, Date, DateTime, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -8,7 +8,16 @@ from app.database.base import Base
 
 class ManualCorrection(Base):
     __tablename__ = "manual_correction"
-    __table_args__ = {"schema": "market"}
+    __table_args__ = (
+        Index(
+            "ix_manual_correction_symbol_date_field",
+            "symbol",
+            "trade_date",
+            "adjust_type",
+            "field_name",
+        ),
+        {"schema": "market"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)

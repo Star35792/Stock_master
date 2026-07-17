@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -29,7 +29,7 @@ class FakeDailyBarRepository:
             quality_score=Decimal("100.00"),
             quality_status="trusted",
             is_suspect=False,
-            updated_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 7, 16, tzinfo=UTC),
         )
         return [row], 1
 

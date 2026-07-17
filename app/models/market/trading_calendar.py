@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import BigInteger, Date, Index, String, UniqueConstraint, text
+from sqlalchemy import BigInteger, CheckConstraint, Date, Index, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -11,6 +11,10 @@ class TradingCalendar(TimestampMixin, Base):
     __tablename__ = "trading_calendar"
     __table_args__ = (
         UniqueConstraint("exchange", "trade_date"),
+        CheckConstraint(
+            "exchange in ('SH', 'SZ', 'BJ', 'HK', 'UNKNOWN')",
+            name="ck_trading_calendar_exchange",
+        ),
         Index("ix_trading_calendar_trade_date", "trade_date"),
         Index("ix_trading_calendar_exchange_open", "exchange", "is_open"),
         {"schema": "market"},

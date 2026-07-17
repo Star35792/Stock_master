@@ -1,4 +1,5 @@
 from functools import cached_property
+from urllib.parse import quote
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,11 +18,18 @@ class Settings(BaseSettings):
     postgres_user: str = "quant"
     postgres_password: str = Field(default="quant_password", repr=False)
 
+    redis_url_override: str | None = Field(default=None, alias="REDIS_URL", repr=False)
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
+    redis_username: str | None = None
+    redis_password: str | None = Field(default=None, repr=False)
 
     akshare_timeout_seconds: int = 30
+
+    hithink_finance_api_key: str | None = Field(default=None, repr=False)
+    hithink_finance_base_url: str = "https://fuyao.aicubes.cn"
+    hithink_finance_timeout_seconds: int = 30
 
     @cached_property
     def database_url(self) -> str:
@@ -33,7 +41,16 @@ class Settings(BaseSettings):
 
     @cached_property
     def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        if self.redis_url_override:
+            return self.redis_url_override
+
+        auth = ""
+        if self.redis_password:
+            username = quote(self.redis_username or "")
+            password = quote(self.redis_password)
+            auth = f"{username}:{password}@" if username else f":{password}@"
+
+        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
 
 settings = Settings()

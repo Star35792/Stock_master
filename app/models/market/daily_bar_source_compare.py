@@ -1,7 +1,18 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Numeric, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -10,6 +21,7 @@ from app.database.base import Base
 class DailyBarSourceCompare(Base):
     __tablename__ = "daily_bar_source_compare"
     __table_args__ = (
+        CheckConstraint("raw_id_a <> raw_id_b", name="ck_daily_bar_compare_distinct_raw"),
         Index("ix_daily_bar_compare_symbol_date", "symbol", "trade_date", "adjust_type"),
         Index("ix_daily_bar_compare_conflict", "is_conflict"),
         {"schema": "market"},

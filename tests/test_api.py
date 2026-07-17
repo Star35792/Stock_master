@@ -1,15 +1,50 @@
 from fastapi.testclient import TestClient
 
+from app.api.routes import health as health_module
 from app.main import app
 
 client = TestClient(app)
 
 
-def test_health() -> None:
+def test_health(monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_module,
+        "check_database",
+        lambda: health_module.HealthComponent(status="ok"),
+    )
+    monkeypatch.setattr(
+        health_module,
+        "check_redis",
+        lambda: health_module.HealthComponent(status="ok"),
+    )
+
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {
+        "status": "ok",
+        "database": {"status": "ok", "message": None},
+        "redis": {"status": "ok", "message": None},
+    }
+
+
+def test_health_returns_503_when_dependency_is_down(monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_module,
+        "check_database",
+        lambda: health_module.HealthComponent(status="ok"),
+    )
+    monkeypatch.setattr(
+        health_module,
+        "check_redis",
+        lambda: health_module.HealthComponent(status="error", message="connection refused"),
+    )
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+    assert response.json()["redis"] == {"status": "error", "message": "connection refused"}
 
 
 def test_openapi_contains_v1_routes() -> None:

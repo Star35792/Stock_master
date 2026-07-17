@@ -393,7 +393,80 @@ unique(source_name)
 8. 创建 `market.manual_correction`。
 9. 创建索引和约束。
 
-## 15. 暂不创建的表
+## 15. V1 优化设计
+
+真实采集开始后，数据库设计需要从“能建表”升级为“能长期跑”。V1 优化重点不是提前做复杂数仓，而是给当前链路补上约束、索引和演进边界。
+
+### 15.1 约束分层
+
+`raw` 层保留来源弹性，不对 OHLC、成交量、成交额做过强业务判断。原因是 raw 要承接外部脏数据和异常数据，后续由质量系统解释。
+
+`market` 层必须强约束。进入可信消费层的数据应由数据库兜底保证：
+
+- `adjust_type` 只能是 `none` / `qfq` / `hfq`。
+- `quality_status` 只能是 `trusted` / `suspect` / `rejected` / `manual_fixed`。
+- `quality_score` 必须在 `0-100`。
+- OHLC 必须大于 0，且满足 `high >= open/close/low`、`low <= open/close/high`。
+- `volume`、`amount` 如存在则不能为负。
+- `source_count` 至少为 1。
+- `market.daily_bar.symbol` 必须能在 `market.security.symbol` 中找到。
+
+### 15.2 状态枚举
+
+以下状态字段使用 check constraint 固化，避免后续服务随手写入不一致字符串：
+
+```text
+raw.import_batch.status: running / success / failed / partial
+system.job_log.status: running / success / failed / partial
+system.data_quality_issue.status: open / ignored / fixed / false_positive
+system.data_quality_issue.severity: info / warning / error / critical
+```
+
+### 15.3 真实采集索引
+
+同花顺、CSV、QMT 等来源开始持续导入后，`raw.daily_bar` 的高频访问不只是按 symbol 查询，还包括按来源、复权类型和日期窗口做批处理。因此增加：
+
+```sql
+index raw.daily_bar(symbol, adjust_type, trade_date)
+index raw.daily_bar(source_name, symbol, adjust_type, trade_date)
+```
+
+### 15.4 回测查询索引
+
+策略和回测最常见查询是“某证券 + 复权口径 + 日期区间 + 可信状态”。因此 `market.daily_bar` 保留通用索引：
+
+```sql
+index market.daily_bar(symbol, adjust_type, trade_date)
+```
+
+并增加面向默认消费路径的索引：
+
+```sql
+index market.daily_bar(quality_status, symbol, adjust_type, trade_date)
+partial index market.daily_bar(symbol, adjust_type, trade_date)
+where quality_status in ('trusted', 'manual_fixed')
+```
+
+### 15.5 审计和排障索引
+
+质量问题和人工修复会成为后续数据运营界面的主要入口，因此增加：
+
+```sql
+index system.data_quality_issue(symbol, status, trade_date)
+index system.data_quality_issue(status, severity, created_at)
+index market.manual_correction(symbol, trade_date, adjust_type, field_name)
+```
+
+### 15.6 暂不做的优化
+
+V1 暂不引入以下设计：
+
+- 分区表：当前数据量尚未到需要按年份或月份分区的阶段。
+- 版本化日线表：先用当前表 + raw 留痕 + manual correction 审计。
+- raw 层严格去重唯一键：先允许完整留痕，等导入服务具备 upsert / conflict handling 后再决定是否启用。
+- PostgreSQL enum 类型：先用 `varchar + check constraint`，便于早期演进。
+
+## 16. 暂不创建的表
 
 V1 暂不创建：
 

@@ -34,9 +34,7 @@ class DataQualityIssueRepository:
         if end_date:
             filters.append(DataQualityIssue.trade_date <= end_date)
 
-        total = db.scalar(
-            select(func.count()).select_from(DataQualityIssue).where(*filters)
-        ) or 0
+        total = db.scalar(select(func.count()).select_from(DataQualityIssue).where(*filters)) or 0
         items = list(
             db.scalars(
                 select(DataQualityIssue)

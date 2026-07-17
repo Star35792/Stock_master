@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import BigInteger, Date, Index, String, UniqueConstraint, text
+from sqlalchemy import BigInteger, CheckConstraint, Date, Index, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -11,6 +11,14 @@ class Security(TimestampMixin, Base):
     __tablename__ = "security"
     __table_args__ = (
         UniqueConstraint("symbol"),
+        CheckConstraint(
+            "security_type in ('stock', 'etf', 'index', 'fund', 'bond', 'unknown')",
+            name="ck_security_type",
+        ),
+        CheckConstraint(
+            "exchange in ('SH', 'SZ', 'BJ', 'HK', 'UNKNOWN')",
+            name="ck_security_exchange",
+        ),
         Index("ix_security_type", "security_type"),
         Index("ix_security_exchange", "exchange"),
         Index("ix_security_name", "name"),

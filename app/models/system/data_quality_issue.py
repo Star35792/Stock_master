@@ -1,6 +1,17 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, String, Text, func, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,8 +21,18 @@ from app.database.base import Base
 class DataQualityIssue(Base):
     __tablename__ = "data_quality_issue"
     __table_args__ = (
+        CheckConstraint(
+            "severity in ('info', 'warning', 'error', 'critical')",
+            name="ck_quality_issue_severity",
+        ),
+        CheckConstraint(
+            "status in ('open', 'ignored', 'fixed', 'false_positive')",
+            name="ck_quality_issue_status_allowed",
+        ),
         Index("ix_quality_issue_status", "status"),
         Index("ix_quality_issue_symbol_date", "symbol", "trade_date"),
+        Index("ix_quality_issue_symbol_status_date", "symbol", "status", "trade_date"),
+        Index("ix_quality_issue_status_severity_created", "status", "severity", "created_at"),
         Index("ix_quality_issue_type", "issue_type"),
         Index("ix_quality_issue_severity", "severity"),
         {"schema": "system"},

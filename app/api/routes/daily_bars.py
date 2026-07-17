@@ -18,9 +18,7 @@ def list_daily_bars(
     adjust_type: Literal["none", "qfq", "hfq"] = "none",
     start_date: date | None = None,
     end_date: date | None = None,
-    quality_status: Literal["trusted", "suspect", "rejected", "manual_fixed"] | None = (
-        "trusted"
-    ),
+    quality_status: Literal["trusted", "suspect", "rejected", "manual_fixed"] | None = ("trusted"),
     limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[DailyBarRead]:

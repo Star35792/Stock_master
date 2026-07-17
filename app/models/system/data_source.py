@@ -1,4 +1,13 @@
-from sqlalchemy import BigInteger, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -8,7 +17,16 @@ from app.models.common import TimestampMixin
 
 class DataSource(TimestampMixin, Base):
     __tablename__ = "data_source"
-    __table_args__ = (UniqueConstraint("source_name"), {"schema": "system"})
+    __table_args__ = (
+        UniqueConstraint("source_name"),
+        CheckConstraint(
+            "source_type in ('csv', 'api', 'akshare', 'qmt', 'manual', 'vendor')",
+            name="ck_data_source_type",
+        ),
+        CheckConstraint("priority >= 0", name="ck_data_source_priority_non_negative"),
+        Index("ix_data_source_active_priority", "is_active", "priority"),
+        {"schema": "system"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
