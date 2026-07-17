@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.risk import RiskCheck, RiskCheckOrder
@@ -7,6 +8,22 @@ from app.risk import OrderRiskDecision, RiskLimits
 
 
 class RiskCheckRepository:
+    def get_with_orders(
+        self,
+        db: Session,
+        *,
+        check_id: int,
+    ) -> tuple[RiskCheck | None, list[RiskCheckOrder]]:
+        check = db.get(RiskCheck, check_id)
+        orders = list(
+            db.scalars(
+                select(RiskCheckOrder)
+                .where(RiskCheckOrder.check_id == check_id)
+                .order_by(RiskCheckOrder.symbol)
+            )
+        )
+        return check, orders
+
     def save(
         self,
         db: Session,
