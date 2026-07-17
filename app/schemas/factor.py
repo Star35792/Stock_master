@@ -77,6 +77,9 @@ class FactorProfileRead(BaseModel):
     p01: Decimal | None
     p99: Decimal | None
     extreme_count: int
+    ic_1d: Decimal | None
+    rank_ic_1d: Decimal | None
+    top_quantile_turnover: Decimal | None
     code_version: str
     created_at: datetime
     updated_at: datetime

@@ -28,6 +28,9 @@ class FactorProfileRepository:
         p01: Decimal | None,
         p99: Decimal | None,
         extreme_count: int,
+        ic_1d: Decimal | None,
+        rank_ic_1d: Decimal | None,
+        top_quantile_turnover: Decimal | None,
         code_version: str,
     ) -> None:
         row = {
@@ -46,6 +49,9 @@ class FactorProfileRepository:
             "p01": p01,
             "p99": p99,
             "extreme_count": extreme_count,
+            "ic_1d": ic_1d,
+            "rank_ic_1d": rank_ic_1d,
+            "top_quantile_turnover": top_quantile_turnover,
             "code_version": code_version,
         }
         statement = insert(FactorProfile).values(row)

@@ -63,6 +63,22 @@ class FakeDailyBarRepository:
     def count_trusted_by_date(self, db: object, **kwargs: object) -> dict[date, int]:
         return {date(2026, 7, 17): 5}
 
+    def list_for_factor_calculation(
+        self,
+        db: object,
+        **kwargs: object,
+    ) -> list[SimpleNamespace]:
+        return [
+            _bar("A", date(2026, 7, 17), "100"),
+            _bar("A", date(2026, 7, 18), "101"),
+            _bar("B", date(2026, 7, 17), "100"),
+            _bar("B", date(2026, 7, 18), "102"),
+            _bar("C", date(2026, 7, 17), "100"),
+            _bar("C", date(2026, 7, 18), "103"),
+            _bar("D", date(2026, 7, 17), "100"),
+            _bar("D", date(2026, 7, 18), "104"),
+        ]
+
 
 class FakeSecurityRepository:
     def get_industries(self, db: object, symbols: set[str]) -> dict[str, str]:
@@ -77,6 +93,14 @@ def _row(symbol: str, factor_name: str, value: str) -> SimpleNamespace:
         factor_version="v1-none",
         value=Decimal(value),
         created_at=datetime(2026, 7, 17, tzinfo=UTC),
+    )
+
+
+def _bar(symbol: str, trade_date: date, close: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        symbol=symbol,
+        trade_date=trade_date,
+        close=Decimal(close),
     )
 
 
@@ -129,6 +153,9 @@ def test_cross_section_service_transforms_and_profiles_factor() -> None:
     assert result.total_rows == 20
     assert profile_repository.profiles[0]["coverage_rate"] == Decimal("0.8000000000")
     assert profile_repository.profiles[0]["missing_rate"] == Decimal("0.2000000000")
+    assert profile_repository.profiles[0]["ic_1d"] > Decimal("0")
+    assert profile_repository.profiles[0]["rank_ic_1d"] == Decimal("1.0000000000")
+    assert profile_repository.profiles[0]["top_quantile_turnover"] is None
     assert len(definition_repository.definitions) == 5
     assert len(run_repository.finished) == 5
 

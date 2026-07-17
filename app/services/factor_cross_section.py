@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal, localcontext
+from datetime import date, timedelta
+from decimal import ROUND_CEILING, Decimal, localcontext
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -106,12 +106,21 @@ class FactorCrossSectionService:
             )
             size_by_date = self._group_values(size_rows)
 
+        forward_returns_by_date = self._next_returns_by_date(
+            db,
+            values_by_date=values_by_date,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            symbols=normalized_symbols,
+        )
         profile_rows = self._write_profiles(
             db,
             factor_name=factor_name,
             factor_version=factor_version,
             values_by_date=values_by_date,
             universe_by_date=universe_by_date,
+            forward_returns_by_date=forward_returns_by_date,
             code_version=code_version,
         )
         transforms = {
@@ -203,11 +212,14 @@ class FactorCrossSectionService:
         factor_version: str,
         values_by_date: dict[date, dict[str, Decimal]],
         universe_by_date: dict[date, int],
+        forward_returns_by_date: dict[date, dict[str, Decimal]],
         code_version: str,
     ) -> int:
         rows_written = 0
+        previous_top_symbols: set[str] | None = None
         for trade_date in sorted(set(universe_by_date) | set(values_by_date)):
-            values = list(values_by_date.get(trade_date, {}).values())
+            symbol_values = values_by_date.get(trade_date, {})
+            values = list(symbol_values.values())
             universe_size = universe_by_date.get(trade_date, len(values))
             observation_count = len(values)
             missing_count = max(universe_size - observation_count, 0)
@@ -219,6 +231,13 @@ class FactorCrossSectionService:
                 extreme_count = sum(
                     abs(value - mean) > standard_deviation * Decimal(3)
                     for value in values
+                )
+            current_top_symbols = self._top_quantile_symbols(symbol_values)
+            top_quantile_turnover = None
+            if previous_top_symbols is not None and current_top_symbols:
+                retained = len(previous_top_symbols & current_top_symbols)
+                top_quantile_turnover = Decimal(1) - (
+                    Decimal(retained) / Decimal(len(current_top_symbols))
                 )
             self.profile_repository.upsert(
                 db,
@@ -237,10 +256,59 @@ class FactorCrossSectionService:
                 p01=self._quantize_optional(self._quantile(values, Decimal("0.01"))),
                 p99=self._quantize_optional(self._quantile(values, Decimal("0.99"))),
                 extreme_count=extreme_count,
+                ic_1d=self._quantize_optional(
+                    self._information_coefficient(
+                        symbol_values,
+                        forward_returns_by_date.get(trade_date, {}),
+                    )
+                ),
+                rank_ic_1d=self._quantize_optional(
+                    self._rank_information_coefficient(
+                        symbol_values,
+                        forward_returns_by_date.get(trade_date, {}),
+                    )
+                ),
+                top_quantile_turnover=self._quantize_optional(top_quantile_turnover),
                 code_version=code_version,
             )
+            previous_top_symbols = current_top_symbols
             rows_written += 1
         return rows_written
+
+    def _next_returns_by_date(
+        self,
+        db: Session,
+        *,
+        values_by_date: dict[date, dict[str, Decimal]],
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbols: list[str] | None,
+    ) -> dict[date, dict[str, Decimal]]:
+        if not values_by_date:
+            return {}
+        target_dates = set(values_by_date)
+        bars = self.daily_bar_repository.list_for_factor_calculation(
+            db,
+            start_date=start_date,
+            end_date=end_date + timedelta(days=14),
+            adjust_type=adjust_type,
+            symbols=symbols,
+            quality_status="trusted",
+        )
+        bars_by_symbol: dict[str, list[Any]] = defaultdict(list)
+        for bar in bars:
+            bars_by_symbol[bar.symbol].append(bar)
+
+        returns_by_date: dict[date, dict[str, Decimal]] = defaultdict(dict)
+        for symbol, symbol_bars in bars_by_symbol.items():
+            for previous, current in zip(symbol_bars, symbol_bars[1:], strict=False):
+                if previous.trade_date not in target_dates:
+                    continue
+                forward_return = self._ratio_change(current.close, previous.close)
+                if forward_return is not None:
+                    returns_by_date[previous.trade_date][symbol] = forward_return
+        return dict(returns_by_date)
 
     def _write_values(
         self,
@@ -308,23 +376,7 @@ class FactorCrossSectionService:
     ) -> dict[date, dict[str, Decimal]]:
         result = {}
         for trade_date, values in values_by_date.items():
-            ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
-            count = len(ordered)
-            if count == 1:
-                result[trade_date] = {ordered[0][0]: Decimal("0.5")}
-                continue
-            ranks: dict[str, Decimal] = {}
-            index = 0
-            while index < count:
-                end = index
-                while end + 1 < count and ordered[end + 1][1] == ordered[index][1]:
-                    end += 1
-                average_rank = Decimal(index + end) / Decimal(2)
-                percentile = average_rank / Decimal(count - 1)
-                for position in range(index, end + 1):
-                    ranks[ordered[position][0]] = percentile
-                index = end + 1
-            result[trade_date] = ranks
+            result[trade_date] = self._rank_values(values)
         return result
 
     def _industry_neutralize(
@@ -401,6 +453,91 @@ class FactorCrossSectionService:
             context.prec = 28
             return variance.sqrt()
 
+    def _information_coefficient(
+        self,
+        factor_values: dict[str, Decimal],
+        forward_returns: dict[str, Decimal],
+    ) -> Decimal | None:
+        common_symbols = sorted(set(factor_values) & set(forward_returns))
+        if len(common_symbols) < 2:
+            return None
+        return self._correlation(
+            [factor_values[symbol] for symbol in common_symbols],
+            [forward_returns[symbol] for symbol in common_symbols],
+        )
+
+    def _rank_information_coefficient(
+        self,
+        factor_values: dict[str, Decimal],
+        forward_returns: dict[str, Decimal],
+    ) -> Decimal | None:
+        common_symbols = sorted(set(factor_values) & set(forward_returns))
+        if len(common_symbols) < 2:
+            return None
+        factor_ranks = self._rank_values(
+            {symbol: factor_values[symbol] for symbol in common_symbols}
+        )
+        return_ranks = self._rank_values(
+            {symbol: forward_returns[symbol] for symbol in common_symbols}
+        )
+        return self._correlation(
+            [factor_ranks[symbol] for symbol in common_symbols],
+            [return_ranks[symbol] for symbol in common_symbols],
+        )
+
+    def _correlation(self, left: list[Decimal], right: list[Decimal]) -> Decimal | None:
+        left_mean = self._mean(left)
+        right_mean = self._mean(right)
+        if left_mean is None or right_mean is None:
+            return None
+        covariance = sum(
+            ((left_value - left_mean) * (right_value - right_mean))
+            for left_value, right_value in zip(left, right, strict=True)
+        )
+        left_sum_squares = sum(((value - left_mean) ** 2 for value in left), Decimal())
+        right_sum_squares = sum(((value - right_mean) ** 2 for value in right), Decimal())
+        if not left_sum_squares or not right_sum_squares:
+            return None
+        with localcontext() as context:
+            context.prec = 28
+            denominator = (left_sum_squares * right_sum_squares).sqrt()
+            return covariance / denominator
+
+    @staticmethod
+    def _rank_values(values: dict[str, Decimal]) -> dict[str, Decimal]:
+        ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
+        count = len(ordered)
+        if count == 0:
+            return {}
+        if count == 1:
+            return {ordered[0][0]: Decimal("0.5")}
+        ranks: dict[str, Decimal] = {}
+        index = 0
+        while index < count:
+            end = index
+            while end + 1 < count and ordered[end + 1][1] == ordered[index][1]:
+                end += 1
+            average_rank = Decimal(index + end) / Decimal(2)
+            percentile = average_rank / Decimal(count - 1)
+            for position in range(index, end + 1):
+                ranks[ordered[position][0]] = percentile
+            index = end + 1
+        return ranks
+
+    @staticmethod
+    def _top_quantile_symbols(
+        values: dict[str, Decimal],
+        quantile: Decimal = Decimal("0.2"),
+    ) -> set[str]:
+        if not values:
+            return set()
+        count = max(
+            1,
+            int((Decimal(len(values)) * quantile).to_integral_value(rounding=ROUND_CEILING)),
+        )
+        ordered = sorted(values.items(), key=lambda item: (-item[1], item[0]))
+        return {symbol for symbol, _ in ordered[:count]}
+
     @staticmethod
     def _quantile(values: list[Decimal], quantile: Decimal) -> Decimal | None:
         if not values:
@@ -417,3 +554,12 @@ class FactorCrossSectionService:
     @staticmethod
     def _quantize_optional(value: Decimal | None) -> Decimal | None:
         return value.quantize(VALUE_QUANT) if value is not None else None
+
+    @staticmethod
+    def _ratio_change(
+        current: Decimal | None,
+        previous: Decimal | None,
+    ) -> Decimal | None:
+        if current is None or previous is None or previous == 0:
+            return None
+        return current / previous - Decimal(1)

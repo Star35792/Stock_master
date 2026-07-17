@@ -32,4 +32,7 @@ class FactorProfile(TimestampMixin, Base):
     p01: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     p99: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     extreme_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    ic_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
+    rank_ic_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
+    top_quantile_turnover: Mapped[Decimal | None] = mapped_column(Numeric(12, 10))
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
