@@ -8,6 +8,10 @@ from app.services.csv_collection import CsvDailyBarCollectionService
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService, MarketBuildResult
 from app.services.daily_sync import HithinkDailySyncResult, HithinkDailySyncService
 from app.services.data_quality import DataQualityQueryService
+from app.services.eastmoney_collection import (
+    EastmoneyFlowCollectionResult,
+    EastmoneyFlowCollectionService,
+)
 from app.services.factor import FactorQueryService
 from app.services.factor_cross_section import CrossSectionRunResult, FactorCrossSectionService
 from app.services.hithink_collection import (
@@ -36,6 +40,8 @@ from app.services.strategy_research import StrategyResearchService
 __all__ = [
     "AdjustmentBuildResult",
     "AdjustmentBuildService",
+    "EastmoneyFlowCollectionResult",
+    "EastmoneyFlowCollectionService",
     "AlternativeCollectionResult",
     "BasicFactorRunResult",
     "BasicPriceVolumeFactorService",

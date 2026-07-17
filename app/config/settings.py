@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     hithink_finance_timeout_seconds: int = 30
     hithink_dump_cache_dir: str = "data/hithink_dumps"
     data_lake_root: str = "data/lake"
+    eastmoney_timeout_seconds: int = 15
+    eastmoney_retries: int = 2
 
     @cached_property
     def database_url(self) -> str:
