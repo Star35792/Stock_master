@@ -1,10 +1,56 @@
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.data_sources import SecurityRecord
 from app.models.market import Security
 
 
 class SecurityRepository:
+    def upsert_many(
+        self,
+        db: Session,
+        *,
+        records: list[SecurityRecord],
+        source_name: str,
+    ) -> int:
+        if not records:
+            return 0
+
+        rows = [
+            {
+                "symbol": record.symbol,
+                "raw_symbol": record.raw_symbol,
+                "name": record.name,
+                "security_type": record.security_type,
+                "exchange": record.exchange,
+                "currency": record.currency,
+                "is_active": True,
+                "source_name": source_name,
+            }
+            for record in records
+        ]
+        statement = insert(Security).values(rows)
+        statement = statement.on_conflict_do_update(
+            index_elements=[Security.symbol],
+            set_={
+                "raw_symbol": statement.excluded.raw_symbol,
+                "name": statement.excluded.name,
+                "security_type": statement.excluded.security_type,
+                "exchange": statement.excluded.exchange,
+                "currency": statement.excluded.currency,
+                "is_active": True,
+                "source_name": statement.excluded.source_name,
+            },
+        )
+        db.execute(statement)
+        return len(rows)
+
+    def get_symbols(self, db: Session, symbols: set[str]) -> set[str]:
+        if not symbols:
+            return set()
+        return set(db.scalars(select(Security.symbol).where(Security.symbol.in_(symbols))).all())
+
     def list(
         self,
         db: Session,

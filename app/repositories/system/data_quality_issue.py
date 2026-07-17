@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -7,6 +8,39 @@ from app.models.system import DataQualityIssue
 
 
 class DataQualityIssueRepository:
+    def create(
+        self,
+        db: Session,
+        *,
+        dataset: str,
+        issue_type: str,
+        severity: str,
+        description: str,
+        symbol: str | None = None,
+        trade_date: date | None = None,
+        adjust_type: str | None = None,
+        source_name: str | None = None,
+        raw_id: int | None = None,
+        expected_value: dict[str, Any] | None = None,
+        actual_value: dict[str, Any] | None = None,
+    ) -> DataQualityIssue:
+        issue = DataQualityIssue(
+            dataset=dataset,
+            symbol=symbol,
+            trade_date=trade_date,
+            adjust_type=adjust_type,
+            source_name=source_name,
+            raw_id=raw_id,
+            issue_type=issue_type,
+            severity=severity,
+            description=description,
+            expected_value=expected_value,
+            actual_value=actual_value,
+            status="open",
+        )
+        db.add(issue)
+        return issue
+
     def list(
         self,
         db: Session,

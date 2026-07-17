@@ -18,3 +18,20 @@ class DailyBarRecord:
     volume: Decimal | None = None
     amount: Decimal | None = None
     raw_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class SecurityRecord:
+    symbol: str
+    raw_symbol: str | None
+    name: str
+    security_type: str
+    exchange: str
+    currency: str = "CNY"
+
+
+@dataclass(frozen=True)
+class TradingDayRecord:
+    exchange: str
+    trade_date: date
+    is_open: bool = True

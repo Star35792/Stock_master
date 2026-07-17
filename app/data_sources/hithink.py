@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from app.config.settings import settings
-from app.data_sources.base import AdjustType, DailyBarRecord
+from app.data_sources.base import AdjustType, DailyBarRecord, SecurityRecord, TradingDayRecord
 
 _ADJUST_TO_HITHINK = {
     "none": "none",
@@ -65,6 +65,46 @@ class HithinkFinanceDataSource:
             self._to_daily_bar(symbol.upper(), adjust_type, item) for item in data.get("item", [])
         ]
 
+    def fetch_securities(
+        self,
+        *,
+        asset_type: str = "a-share",
+        exchanges: tuple[str, ...] = ("SH", "SZ", "BJ"),
+        limit: int = 10000,
+    ) -> list[SecurityRecord]:
+        offset = 0
+        records: list[SecurityRecord] = []
+        while True:
+            data = self._get(
+                "/api/meta/tickers/list",
+                {
+                    "asset_type": asset_type,
+                    "exchange": ",".join(exchanges),
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+            page = data.get("item", [])
+            records.extend(self._to_security(item) for item in page)
+            if len(page) < limit:
+                return records
+            offset += limit
+
+    def fetch_trading_days(
+        self, *, exchanges: tuple[str, ...] = ("SH", "SZ", "BJ")
+    ) -> list[TradingDayRecord]:
+        data = self._get("/api/a-share/calendar/trading-days", {})
+        days = [
+            datetime.fromtimestamp(item["date_ms"] / 1000, tz=_SHANGHAI).date()
+            for item in data.get("item", [])
+            if item.get("date_ms") is not None
+        ]
+        return [
+            TradingDayRecord(exchange=exchange, trade_date=trade_date)
+            for exchange in exchanges
+            for trade_date in days
+        ]
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         if not self.api_key:
             raise HithinkFinanceError("HITHINK_FINANCE_API_KEY is required")
@@ -111,6 +151,19 @@ class HithinkFinanceDataSource:
             raw_payload=item,
         )
 
+    @staticmethod
+    def _to_security(item: dict[str, Any]) -> SecurityRecord:
+        symbol = str(item["thscode"]).upper()
+        asset_type = str(item.get("asset_type") or "")
+        return SecurityRecord(
+            symbol=symbol,
+            raw_symbol=item.get("ticker"),
+            name=item.get("name") or symbol,
+            security_type=_to_security_type(asset_type),
+            exchange=item.get("exchange") or _exchange_from_symbol(symbol),
+            currency=item.get("currency") or "CNY",
+        )
+
 
 def _date_to_ms(d: date) -> int:
     """Convert a date to Asia/Shanghai midnight millisecond timestamp."""
@@ -121,3 +174,18 @@ def _optional_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _to_security_type(asset_type: str) -> str:
+    if asset_type == "a-share":
+        return "stock"
+    if asset_type == "a-share-index":
+        return "index"
+    return "unknown"
+
+
+def _exchange_from_symbol(symbol: str) -> str:
+    if "." not in symbol:
+        return "UNKNOWN"
+    exchange = symbol.rsplit(".", 1)[1]
+    return exchange if exchange in {"SH", "SZ", "BJ", "HK"} else "UNKNOWN"
