@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     data_lake_root: str = "data/lake"
     eastmoney_timeout_seconds: int = 15
     eastmoney_retries: int = 2
+    xueqiu_cookie: str | None = Field(default=None, repr=False)
+    xueqiu_timeout_seconds: int = 15
 
     @cached_property
     def database_url(self) -> str:
