@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     hithink_finance_api_key: str | None = Field(default=None, repr=False)
     hithink_finance_base_url: str = "https://fuyao.aicubes.cn"
     hithink_finance_timeout_seconds: int = 30
+    hithink_dump_cache_dir: str = "data/hithink_dumps"
 
     @cached_property
     def database_url(self) -> str:

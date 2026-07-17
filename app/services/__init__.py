@@ -13,6 +13,11 @@ from app.services.hithink_collection import (
     DailyBarCollectionResult,
     HithinkDailyBarCollectionService,
 )
+from app.services.hithink_dump_collection import (
+    HithinkAdjustmentCollectionResult,
+    HithinkDumpCollectionResult,
+    HithinkDumpCollectionService,
+)
 from app.services.manual_correction import ManualCorrectionResult, ManualCorrectionService
 from app.services.market import MarketQueryService
 from app.services.operations import OperationsOverviewService
@@ -37,6 +42,9 @@ __all__ = [
     "HithinkDailySyncResult",
     "HithinkDailySyncService",
     "HithinkDailyBarCollectionService",
+    "HithinkAdjustmentCollectionResult",
+    "HithinkDumpCollectionResult",
+    "HithinkDumpCollectionService",
     "ManualCorrectionResult",
     "ManualCorrectionService",
     "MarketBuildResult",

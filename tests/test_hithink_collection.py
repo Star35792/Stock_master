@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from app.data_sources import DailyBarRecord
+from app.data_sources import DailyBarRecord, HithinkFinanceDataSource
 from app.services.hithink_collection import (
     HithinkDailyBarCollectionService,
     _daily_bar_row_hash,
@@ -106,3 +106,65 @@ def test_hithink_collection_uses_security_master_type() -> None:
     assert result.accepted_count == 1
     assert repository.rows[0].security_type == "index"
     assert db.committed is True
+
+
+def test_hithink_historical_paginates_until_empty() -> None:
+    source = HithinkFinanceDataSource(api_key="test")
+    calls: list[int] = []
+
+    def fake_get(path: str, params: dict) -> dict:
+        calls.append(params["offset"])
+        if params["offset"] == 0:
+            return {
+                "item": [
+                    {
+                        "date_ms": 1784217600000,
+                        "open_price": 10,
+                        "high_price": 11,
+                        "low_price": 9,
+                        "close_price": 10.5,
+                    }
+                ]
+            }
+        return {"item": []}
+
+    source._get = fake_get  # type: ignore[method-assign]
+    rows = source.fetch_daily_bars(
+        symbol="600519.SH",
+        start_date=date(2026, 7, 16),
+        end_date=date(2026, 7, 17),
+    )
+
+    assert calls == [0, 1]
+    assert len(rows) == 1
+
+
+def test_hithink_historical_uses_server_next_offset() -> None:
+    source = HithinkFinanceDataSource(api_key="test")
+    calls: list[int] = []
+
+    def fake_get(path: str, params: dict) -> dict:
+        calls.append(params["offset"])
+        if params["offset"] == 0:
+            return {
+                "next_offset": 100,
+                "item": [
+                    {
+                        "date_ms": 1784217600000,
+                        "open_price": 10,
+                        "high_price": 11,
+                        "low_price": 9,
+                        "close_price": 10.5,
+                    }
+                ],
+            }
+        return {"item": []}
+
+    source._get = fake_get  # type: ignore[method-assign]
+    source.fetch_daily_bars(
+        symbol="600519.SH",
+        start_date=date(2026, 7, 16),
+        end_date=date(2026, 7, 17),
+    )
+
+    assert calls == [0, 100]

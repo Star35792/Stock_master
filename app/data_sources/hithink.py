@@ -51,19 +51,36 @@ class HithinkFinanceDataSource:
         if adjust_type not in _ADJUST_TO_HITHINK:
             raise ValueError(f"unsupported adjust_type: {adjust_type}")
 
-        data = self._get(
-            "/api/a-share/prices/historical",
-            {
-                "thscode": symbol.upper(),
-                "interval": "1d",
-                "start": _date_to_ms(start_date),
-                "end": _date_to_ms(end_date),
-                "adjust": _ADJUST_TO_HITHINK[adjust_type],
-            },
-        )
-        return [
-            self._to_daily_bar(symbol.upper(), adjust_type, item) for item in data.get("item", [])
-        ]
+        params = {
+            "thscode": symbol.upper(),
+            "interval": "1d",
+            "start": _date_to_ms(start_date),
+            "end": _date_to_ms(end_date),
+            "adjust": _ADJUST_TO_HITHINK[adjust_type],
+        }
+        offset = 0
+        records: list[DailyBarRecord] = []
+        while True:
+            data = self._get(
+                "/api/a-share/prices/historical",
+                {**params, "offset": offset},
+            )
+            page = data.get("item", [])
+            records.extend(
+                self._to_daily_bar(symbol.upper(), adjust_type, item) for item in page
+            )
+            if not page:
+                return records
+            next_offset = data.get("next_offset")
+            if next_offset is None:
+                total = data.get("total")
+                if total is not None and offset + len(page) >= int(total):
+                    return records
+                next_offset = offset + len(page)
+            next_offset = int(next_offset)
+            if next_offset <= offset:
+                raise HithinkFinanceError("HiThink historical pagination did not advance")
+            offset = next_offset
 
     def fetch_securities(
         self,
