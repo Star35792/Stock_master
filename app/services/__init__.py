@@ -1,3 +1,4 @@
+from app.services.adjustment_build import AdjustmentBuildResult, AdjustmentBuildService
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
 from app.services.basic_price_volume_factors import (
     BasicFactorRunResult,
@@ -18,6 +19,10 @@ from app.services.hithink_dump_collection import (
     HithinkDumpCollectionResult,
     HithinkDumpCollectionService,
 )
+from app.services.hithink_financial_collection import (
+    FinancialCollectionResult,
+    HithinkFinancialCollectionService,
+)
 from app.services.manual_correction import ManualCorrectionResult, ManualCorrectionService
 from app.services.market import MarketQueryService
 from app.services.operations import OperationsOverviewService
@@ -29,6 +34,9 @@ from app.services.risk import PersistedRiskCheck, PortfolioRiskService
 from app.services.strategy_research import StrategyResearchService
 
 __all__ = [
+    "AdjustmentBuildResult",
+    "AdjustmentBuildService",
+    "AlternativeCollectionResult",
     "BasicFactorRunResult",
     "BasicPriceVolumeFactorService",
     "DailyBacktestService",
@@ -37,14 +45,17 @@ __all__ = [
     "CsvDailyBarCollectionService",
     "DataQualityQueryService",
     "FactorQueryService",
+    "FinancialCollectionResult",
     "CrossSectionRunResult",
     "FactorCrossSectionService",
     "HithinkDailySyncResult",
     "HithinkDailySyncService",
     "HithinkDailyBarCollectionService",
     "HithinkAdjustmentCollectionResult",
+    "HithinkAlternativeCollectionService",
     "HithinkDumpCollectionResult",
     "HithinkDumpCollectionService",
+    "HithinkFinancialCollectionService",
     "ManualCorrectionResult",
     "ManualCorrectionService",
     "MarketBuildResult",
@@ -63,3 +74,7 @@ __all__ = [
     "PortfolioRiskService",
     "StrategyResearchService",
 ]
+from app.services.hithink_alternative_collection import (
+    AlternativeCollectionResult,
+    HithinkAlternativeCollectionService,
+)

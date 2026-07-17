@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     hithink_finance_base_url: str = "https://fuyao.aicubes.cn"
     hithink_finance_timeout_seconds: int = 30
     hithink_dump_cache_dir: str = "data/hithink_dumps"
+    data_lake_root: str = "data/lake"
 
     @cached_property
     def database_url(self) -> str:

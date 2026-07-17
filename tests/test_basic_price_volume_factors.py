@@ -68,6 +68,7 @@ def _bar(
         close=Decimal(close),
         pre_close=Decimal(pre_close) if pre_close is not None else None,
         volume=Decimal(volume) if volume is not None else None,
+        amount=(Decimal(volume) * Decimal(close)) if volume is not None else None,
         turnover_rate=Decimal(turnover_rate) if turnover_rate is not None else None,
     )
 
@@ -103,6 +104,14 @@ def test_basic_factor_service_calculates_and_records_factor_runs() -> None:
         symbols=["600519.sh"],
         adjust_type="qfq",
         code_version="abc123",
+        factor_names=[
+            "ret_1d",
+            "volatility_5",
+            "momentum_5",
+            "ma_gap_5",
+            "volume_chg_1d",
+            "turnover_rate",
+        ],
     )
 
     assert result.rows_by_factor == {
@@ -155,6 +164,14 @@ def test_basic_factor_service_skips_missing_fields_and_short_windows() -> None:
         object(),
         start_date=start_date,
         end_date=start_date + timedelta(days=1),
+        factor_names=[
+            "ret_1d",
+            "volatility_5",
+            "momentum_5",
+            "ma_gap_5",
+            "volume_chg_1d",
+            "turnover_rate",
+        ],
     )
 
     assert result.rows_by_factor == {
@@ -191,3 +208,40 @@ def test_basic_factor_service_validates_inputs() -> None:
             end_date=date(2026, 7, 2),
             factor_names=["not_exists"],
         )
+
+
+def test_optimized_default_factors_cover_multiple_horizons() -> None:
+    service = BasicPriceVolumeFactorService(
+        daily_bar_repository=FakeDailyBarRepository([]),
+        definition_repository=FakeFactorDefinitionRepository(),
+        run_repository=FakeFactorRunRepository(),
+        value_repository=FakeFactorValueRepository(),
+    )
+    start = date(2026, 1, 1)
+    bars = [
+        _bar(
+            start + timedelta(days=index),
+            str(100 + index),
+            None,
+            str(1000 + index * 10),
+            None,
+        )
+        for index in range(61)
+    ]
+
+    specs = service._select_specs(None)
+    values = {spec.name: service._calculate_value(spec.name, bars, 60) for spec in specs}
+
+    assert set(values) == {
+        "momentum_20",
+        "momentum_60",
+        "volatility_20",
+        "downside_volatility_20",
+        "max_drawdown_20",
+        "liquidity_20",
+        "volume_stability_20",
+    }
+    assert values["momentum_20"] == Decimal("0.142857142857142857142857143")
+    assert values["momentum_60"] == Decimal("0.6")
+    assert values["max_drawdown_20"] == Decimal("0")
+    assert values["liquidity_20"] is not None

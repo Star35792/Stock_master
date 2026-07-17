@@ -122,6 +122,121 @@ class HithinkFinanceDataSource:
             for trade_date in days
         ]
 
+    def fetch_financial_statements(
+        self,
+        *,
+        symbol: str,
+        statement_type: str,
+        period: str = "annual",
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        paths = {
+            "income": "/api/a-share/financials/income-statements",
+            "balance": "/api/a-share/financials/balance-sheets",
+            "cash_flow": "/api/a-share/financials/cash-flow-statements",
+        }
+        if statement_type not in paths:
+            raise ValueError("statement_type must be one of: income, balance, cash_flow")
+        if period not in {"annual", "quarterly"}:
+            raise ValueError("period must be one of: annual, quarterly")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        data = self._get(
+            paths[statement_type],
+            {
+                "thscode": symbol.strip().upper(),
+                "period": period,
+                "limit": limit,
+            },
+        )
+        return data.get("item", [])
+
+    def fetch_financial_indicators(self, *, symbol: str, report: str) -> dict[str, Any]:
+        year, separator, quarter = report.partition("-")
+        if (
+            separator != "-"
+            or len(year) != 4
+            or not year.isdigit()
+            or len(quarter) != 1
+            or quarter not in "1234"
+        ):
+            raise ValueError("report must match YYYY-[1-4]")
+        return self._get(
+            "/api/a-share/financials/indicators",
+            {"thscode": symbol.strip().upper(), "report": report},
+        )
+
+    def fetch_ths_indices(self, *, tag: str = "industry") -> list[dict[str, Any]]:
+        if tag not in {"cn_concept", "region", "tszs", "industry"}:
+            raise ValueError("unsupported index tag")
+        return self._get(
+            "/api/a-share-index/catalog/ths-index-list", {"tag": tag}
+        ).get("item", [])
+
+    def fetch_index_constituents(self, *, symbol: str) -> list[dict[str, Any]]:
+        return self._get(
+            "/api/a-share-index/constituents/ths-stock-list",
+            {"thscode": symbol.strip().upper()},
+        ).get("item", [])
+
+    def fetch_limit_up_pool(self, *, date_ms: int | None = None) -> dict[str, Any]:
+        page = 1
+        items: list[dict[str, Any]] = []
+        result: dict[str, Any] = {}
+        while True:
+            result = self._get(
+                "/api/a-share/special-data/limit-up-pool",
+                {
+                    "date_ms": date_ms,
+                    "page": page,
+                    "size": 200,
+                    "sort_field": "last_price",
+                    "sort_dir": "desc",
+                },
+            )
+            current = result.get("item", [])
+            items.extend(current)
+            pages = int((result.get("pagination") or {}).get("pages") or 1)
+            if page >= pages or not current:
+                return {**result, "item": items}
+            page += 1
+
+    def fetch_limit_up_ladder(self) -> dict[str, Any]:
+        return self._get("/api/a-share/special-data/limit-up-ladder", {})
+
+    def fetch_anomaly_list(self, *, tag_codes: list[str] | None = None) -> dict[str, Any]:
+        return self._get(
+            "/api/a-share/special-data/anomaly-analysis-list",
+            {"tag_codes": ",".join(tag_codes) if tag_codes else None},
+        )
+
+    def fetch_hot_stock_list(self, *, period: str = "day") -> dict[str, Any]:
+        if period not in {"day", "hour"}:
+            raise ValueError("period must be one of: day, hour")
+        return self._get(
+            "/api/a-share/special-data/hot-stock-list", {"period": period}
+        )
+
+    def fetch_skyrocket_list(self, *, period: str = "day") -> dict[str, Any]:
+        if period not in {"day", "hour"}:
+            raise ValueError("period must be one of: day, hour")
+        return self._get(
+            "/api/a-share/special-data/skyrocket-list", {"period": period}
+        )
+
+    def fetch_dragon_tiger_list(
+        self, *, board_type: str = "all", trade_date: date | None = None
+    ) -> dict[str, Any]:
+        if board_type not in {"all", "org", "hot_money"}:
+            raise ValueError("board_type must be one of: all, org, hot_money")
+        return self._get(
+            "/api/a-share/special-data/dragon-tiger-list",
+            {
+                "board_type": board_type,
+                "date": trade_date.isoformat() if trade_date else None,
+            },
+        )
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         if not self.api_key:
             raise HithinkFinanceError("HITHINK_FINANCE_API_KEY is required")

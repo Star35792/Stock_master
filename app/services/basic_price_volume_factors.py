@@ -25,6 +25,8 @@ class BasicFactorSpec:
     description: str
     inputs: tuple[str, ...]
     window_days: int
+    higher_is_better: bool = True
+    default_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ BASIC_FACTOR_SPECS = (
         description="close / previous trusted close - 1",
         inputs=("market.daily_bar.close",),
         window_days=1,
+        default_enabled=False,
     ),
     BasicFactorSpec(
         name="volatility_5",
@@ -55,6 +58,8 @@ BASIC_FACTOR_SPECS = (
         description="最近5个日收益率的总体标准差",
         inputs=("market.daily_bar.close",),
         window_days=5,
+        higher_is_better=False,
+        default_enabled=False,
     ),
     BasicFactorSpec(
         name="momentum_5",
@@ -62,6 +67,7 @@ BASIC_FACTOR_SPECS = (
         description="close / close_lag_5 - 1",
         inputs=("market.daily_bar.close",),
         window_days=5,
+        default_enabled=False,
     ),
     BasicFactorSpec(
         name="ma_gap_5",
@@ -69,6 +75,7 @@ BASIC_FACTOR_SPECS = (
         description="close / mean(close, 5) - 1",
         inputs=("market.daily_bar.close",),
         window_days=5,
+        default_enabled=False,
     ),
     BasicFactorSpec(
         name="volume_chg_1d",
@@ -76,6 +83,7 @@ BASIC_FACTOR_SPECS = (
         description="volume / volume_lag_1 - 1",
         inputs=("market.daily_bar.volume",),
         window_days=1,
+        default_enabled=False,
     ),
     BasicFactorSpec(
         name="turnover_rate",
@@ -83,6 +91,58 @@ BASIC_FACTOR_SPECS = (
         description="market.daily_bar.turnover_rate",
         inputs=("market.daily_bar.turnover_rate",),
         window_days=1,
+        default_enabled=False,
+    ),
+    BasicFactorSpec(
+        name="momentum_20",
+        display_name="20日动量",
+        description="close / close_lag_20 - 1",
+        inputs=("market.daily_bar.close",),
+        window_days=20,
+    ),
+    BasicFactorSpec(
+        name="momentum_60",
+        display_name="60日动量",
+        description="close / close_lag_60 - 1",
+        inputs=("market.daily_bar.close",),
+        window_days=60,
+    ),
+    BasicFactorSpec(
+        name="volatility_20",
+        display_name="20日波动率",
+        description="population standard deviation of the latest 20 daily returns",
+        inputs=("market.daily_bar.close",),
+        window_days=20,
+        higher_is_better=False,
+    ),
+    BasicFactorSpec(
+        name="downside_volatility_20",
+        display_name="20日下行波动率",
+        description="root mean square of negative returns over 20 observations",
+        inputs=("market.daily_bar.close",),
+        window_days=20,
+        higher_is_better=False,
+    ),
+    BasicFactorSpec(
+        name="max_drawdown_20",
+        display_name="20日最大回撤",
+        description="worst close / running_peak - 1 over 20 observations",
+        inputs=("market.daily_bar.close",),
+        window_days=20,
+    ),
+    BasicFactorSpec(
+        name="liquidity_20",
+        display_name="20日平均成交额",
+        description="mean amount over 20 observations",
+        inputs=("market.daily_bar.amount",),
+        window_days=20,
+    ),
+    BasicFactorSpec(
+        name="volume_stability_20",
+        display_name="20日量能稳定性",
+        description="negative coefficient of variation of volume over 20 observations",
+        inputs=("market.daily_bar.volume",),
+        window_days=20,
     ),
 )
 
@@ -200,11 +260,11 @@ class BasicPriceVolumeFactorService:
 
     def _select_specs(self, factor_names: list[str] | None) -> tuple[BasicFactorSpec, ...]:
         if not factor_names:
-            return BASIC_FACTOR_SPECS
+            return tuple(spec for spec in BASIC_FACTOR_SPECS if spec.default_enabled)
 
         requested = {name.strip() for name in factor_names if name.strip()}
         if not requested:
-            return BASIC_FACTOR_SPECS
+            return tuple(spec for spec in BASIC_FACTOR_SPECS if spec.default_enabled)
         available = {spec.name for spec in BASIC_FACTOR_SPECS}
         unknown = sorted(requested - available)
         if unknown:
@@ -277,27 +337,101 @@ class BasicPriceVolumeFactorService:
                 return None
             return self._ratio_change(bar.close, bars[index - 5].close)
         if factor_name == "volatility_5":
-            if index < 5:
+            return self._return_volatility(bars, index, 5)
+        if factor_name == "momentum_20":
+            return self._momentum(bars, index, 20)
+        if factor_name == "momentum_60":
+            return self._momentum(bars, index, 60)
+        if factor_name == "volatility_20":
+            return self._return_volatility(bars, index, 20)
+        if factor_name == "downside_volatility_20":
+            returns = self._returns(bars, index, 20)
+            if returns is None:
                 return None
-            returns = [
-                self._ratio_change(bars[position].close, bars[position - 1].close)
-                for position in range(index - 4, index + 1)
-            ]
-            if any(value is None for value in returns):
-                return None
-            valid_returns = [value for value in returns if value is not None]
-            mean_return = sum(valid_returns, Decimal()) / Decimal(5)
-            variance = (
-                sum(
-                    ((value - mean_return) ** 2 for value in valid_returns),
-                    Decimal(),
-                )
-                / Decimal(5)
-            )
+            downside = [min(value, Decimal()) for value in returns]
             with localcontext() as context:
                 context.prec = 28
-                return variance.sqrt()
+                return (
+                    sum((value**2 for value in downside), Decimal()) / Decimal(20)
+                ).sqrt()
+        if factor_name == "max_drawdown_20":
+            if index < 19:
+                return None
+            closes = [item.close for item in bars[index - 19 : index + 1]]
+            if any(value is None or value <= 0 for value in closes):
+                return None
+            peak = closes[0]
+            max_drawdown = Decimal()
+            for close in closes:
+                peak = max(peak, close)
+                max_drawdown = min(max_drawdown, close / peak - Decimal(1))
+            return max_drawdown
+        if factor_name == "liquidity_20":
+            return self._rolling_mean(bars, index, "amount", 20)
+        if factor_name == "volume_stability_20":
+            values = self._rolling_values(bars, index, "volume", 20)
+            if values is None:
+                return None
+            mean = sum(values, Decimal()) / Decimal(20)
+            if mean == 0:
+                return None
+            with localcontext() as context:
+                context.prec = 28
+                standard_deviation = (
+                    sum(((value - mean) ** 2 for value in values), Decimal())
+                    / Decimal(20)
+                ).sqrt()
+            return -(standard_deviation / mean)
         raise ValueError(f"unsupported factor: {factor_name}")
+
+    def _momentum(self, bars: list[Any], index: int, window: int) -> Decimal | None:
+        if index < window:
+            return None
+        return self._ratio_change(bars[index].close, bars[index - window].close)
+
+    def _return_volatility(
+        self, bars: list[Any], index: int, window: int
+    ) -> Decimal | None:
+        returns = self._returns(bars, index, window)
+        if returns is None:
+            return None
+        mean = sum(returns, Decimal()) / Decimal(window)
+        with localcontext() as context:
+            context.prec = 28
+            return (
+                sum(((value - mean) ** 2 for value in returns), Decimal())
+                / Decimal(window)
+            ).sqrt()
+
+    def _returns(
+        self, bars: list[Any], index: int, window: int
+    ) -> list[Decimal] | None:
+        if index < window:
+            return None
+        values = [
+            self._ratio_change(bars[position].close, bars[position - 1].close)
+            for position in range(index - window + 1, index + 1)
+        ]
+        if any(value is None for value in values):
+            return None
+        return [value for value in values if value is not None]
+
+    def _rolling_mean(
+        self, bars: list[Any], index: int, field: str, window: int
+    ) -> Decimal | None:
+        values = self._rolling_values(bars, index, field, window)
+        return None if values is None else sum(values, Decimal()) / Decimal(window)
+
+    @staticmethod
+    def _rolling_values(
+        bars: list[Any], index: int, field: str, window: int
+    ) -> list[Decimal] | None:
+        if index < window - 1:
+            return None
+        values = [getattr(item, field, None) for item in bars[index - window + 1 : index + 1]]
+        if any(value is None or value < 0 for value in values):
+            return None
+        return [value for value in values if value is not None]
 
     @staticmethod
     def _ratio_change(
