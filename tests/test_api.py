@@ -63,6 +63,9 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/adjustment-factors" in paths
     assert "/api/v1/trading-calendar" in paths
     assert "/api/v1/securities/{symbol}/lifecycle" in paths
+    assert "/api/v1/factors/definitions" in paths
+    assert "/api/v1/factors/runs" in paths
+    assert "/api/v1/factors/values" in paths
 
 
 def test_daily_bar_rejects_reversed_date_range() -> None:
@@ -145,3 +148,23 @@ def test_data_quality_issue_status_rejects_invalid_status() -> None:
     assert response.json()["detail"] == (
         "status must be one of: open, ignored, fixed, reopened, false_positive"
     )
+
+
+def test_factor_runs_reject_reversed_date_range() -> None:
+    response = client.get(
+        "/api/v1/factors/runs",
+        params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_factor_values_reject_reversed_date_range() -> None:
+    response = client.get(
+        "/api/v1/factors/values",
+        params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"

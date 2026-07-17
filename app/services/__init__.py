@@ -2,6 +2,7 @@ from app.services.csv_collection import CsvDailyBarCollectionService
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService, MarketBuildResult
 from app.services.daily_sync import HithinkDailySyncResult, HithinkDailySyncService
 from app.services.data_quality import DataQualityQueryService
+from app.services.factor import FactorQueryService
 from app.services.hithink_collection import (
     DailyBarCollectionResult,
     HithinkDailyBarCollectionService,
@@ -15,6 +16,7 @@ __all__ = [
     "DailyBarMarketBuildService",
     "CsvDailyBarCollectionService",
     "DataQualityQueryService",
+    "FactorQueryService",
     "HithinkDailySyncResult",
     "HithinkDailySyncService",
     "HithinkDailyBarCollectionService",

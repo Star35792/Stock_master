@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
-from app.services import MarketQueryService
+from app.services import FactorQueryService, MarketQueryService
 
 
 class FakeDailyBarRepository:
@@ -144,6 +144,112 @@ class FakeAdjustmentFactorRepository:
             updated_at=datetime(2026, 7, 17, tzinfo=UTC),
         )
         return [row], 1
+
+
+class FakeFactorDefinitionRepository:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+        self.definition = SimpleNamespace(
+            id=1,
+            name="ret_1d",
+            display_name="1日收益率",
+            description="close / pre_close - 1",
+            frequency="daily",
+            inputs=["market.daily_bar.close", "market.daily_bar.pre_close"],
+            window_days=1,
+            version="v1",
+            dependencies=[],
+            parameters_schema={},
+            is_active=True,
+            created_at=datetime(2026, 7, 17, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 17, tzinfo=UTC),
+        )
+
+    def get_by_name_version(
+        self,
+        db: object,
+        *,
+        name: str,
+        version: str,
+    ) -> SimpleNamespace | None:
+        self.kwargs = {"name": name, "version": version}
+        return self.definition
+
+    def list(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
+        self.kwargs = kwargs
+        return [self.definition], 1
+
+
+class FakeFactorRunRepository:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def _row(self, **overrides: object) -> SimpleNamespace:
+        values = {
+            "id": 1,
+            "definition_id": 1,
+            "factor_name": "ret_1d",
+            "factor_version": "v1",
+            "parameters": {},
+            "code_version": "abc123",
+            "input_start_date": date(2026, 7, 16),
+            "input_end_date": date(2026, 7, 17),
+            "started_at": datetime(2026, 7, 17, tzinfo=UTC),
+            "finished_at": None,
+            "status": "running",
+            "rows_written": 0,
+            "error_message": None,
+            "metadata_": {"source": "unit-test"},
+            "created_at": datetime(2026, 7, 17, tzinfo=UTC),
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    def create(self, db: object, **kwargs: object) -> SimpleNamespace:
+        self.kwargs = kwargs
+        return self._row(
+            parameters=kwargs["parameters"],
+            code_version=kwargs["code_version"],
+            input_start_date=kwargs["input_start_date"],
+            input_end_date=kwargs["input_end_date"],
+            metadata_=kwargs["metadata"],
+        )
+
+    def list(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
+        self.kwargs = kwargs
+        return [self._row()], 1
+
+    def update_status(self, db: object, **kwargs: object) -> SimpleNamespace:
+        self.kwargs = kwargs
+        return self._row(
+            status=kwargs["status"],
+            rows_written=kwargs["rows_written"],
+            error_message=kwargs["error_message"],
+            finished_at=datetime(2026, 7, 17, tzinfo=UTC),
+        )
+
+
+class FakeFactorValueRepository:
+    def __init__(self) -> None:
+        self.kwargs: dict | None = None
+
+    def list(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
+        self.kwargs = kwargs
+        row = SimpleNamespace(
+            id=1,
+            symbol="600519.SH",
+            trade_date=date(2026, 7, 17),
+            factor_name="ret_1d",
+            factor_version="v1",
+            value=Decimal("0.0100000000"),
+            run_id=1,
+            created_at=datetime(2026, 7, 17, tzinfo=UTC),
+            updated_at=datetime(2026, 7, 17, tzinfo=UTC),
+        )
+        return [row], 1
+
+    def upsert_value(self, db: object, **kwargs: object) -> None:
+        self.kwargs = kwargs
 
 
 class FakeSecurityRepository:
@@ -393,5 +499,82 @@ def test_market_service_lists_adjustment_factors() -> None:
     assert result.total == 1
     assert result.items[0].symbol == "600519.SH"
     assert result.items[0].factor == Decimal("0.9123456789")
+    assert repository.kwargs is not None
+    assert repository.kwargs["symbol"] == "600519.SH"
+
+
+def test_factor_service_lists_definitions() -> None:
+    repository = FakeFactorDefinitionRepository()
+    service = FactorQueryService(definition_repository=repository)
+
+    result = service.list_definitions(
+        object(),
+        name="ret_1d",
+        frequency="daily",
+        is_active=True,
+        limit=100,
+        offset=0,
+    )
+
+    assert result.total == 1
+    assert result.items[0].name == "ret_1d"
+    assert result.items[0].inputs == ["market.daily_bar.close", "market.daily_bar.pre_close"]
+    assert repository.kwargs is not None
+    assert repository.kwargs["frequency"] == "daily"
+
+
+def test_factor_service_starts_and_finishes_run() -> None:
+    definition_repository = FakeFactorDefinitionRepository()
+    run_repository = FakeFactorRunRepository()
+    service = FactorQueryService(
+        definition_repository=definition_repository,
+        run_repository=run_repository,
+    )
+
+    run = service.start_run(
+        object(),
+        factor_name="ret_1d",
+        factor_version="v1",
+        parameters={},
+        code_version="abc123",
+        input_start_date=date(2026, 7, 16),
+        input_end_date=date(2026, 7, 17),
+        metadata={"source": "unit-test"},
+    )
+
+    assert run.status == "running"
+    assert run.factor_name == "ret_1d"
+    assert definition_repository.kwargs == {"name": "ret_1d", "version": "v1"}
+
+    finished = service.finish_run(
+        object(),
+        run_id=1,
+        rows_written=2,
+    )
+
+    assert finished is not None
+    assert finished.status == "success"
+    assert finished.rows_written == 2
+    assert run_repository.kwargs is not None
+    assert run_repository.kwargs["status"] == "success"
+
+
+def test_factor_service_lists_values_and_normalizes_symbol() -> None:
+    repository = FakeFactorValueRepository()
+    service = FactorQueryService(value_repository=repository)
+
+    result = service.list_values(
+        object(),
+        factor_name="ret_1d",
+        factor_version="v1",
+        symbol="600519.sh",
+        start_date=date(2026, 7, 17),
+        end_date=date(2026, 7, 17),
+        limit=100,
+        offset=0,
+    )
+
+    assert result.total == 1
+    assert result.items[0].value == Decimal("0.0100000000")
     assert repository.kwargs is not None
     assert repository.kwargs["symbol"] == "600519.SH"
