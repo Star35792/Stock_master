@@ -1,3 +1,4 @@
+from app.services.backtest import DailyBacktestService, PersistedBacktestResult
 from app.services.basic_price_volume_factors import (
     BasicFactorRunResult,
     BasicPriceVolumeFactorService,
@@ -19,6 +20,7 @@ from app.services.reference_data import ReferenceDataSyncResult, ReferenceDataSy
 __all__ = [
     "BasicFactorRunResult",
     "BasicPriceVolumeFactorService",
+    "DailyBacktestService",
     "DailyBarCollectionResult",
     "DailyBarMarketBuildService",
     "CsvDailyBarCollectionService",
@@ -33,6 +35,7 @@ __all__ = [
     "ManualCorrectionService",
     "MarketBuildResult",
     "MarketQueryService",
+    "PersistedBacktestResult",
     "ReferenceDataSyncResult",
     "ReferenceDataSyncService",
 ]
