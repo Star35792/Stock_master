@@ -2,32 +2,34 @@
 
 Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量化平台，按长期维护和扩展来设计。
 
-当前项目优先建设 **可信日线数据中心**：不依赖某一个单一数据源，而是通过多源导入、原始留痕、质量校验和人工修复，形成可供策略与回测使用的本地可信行情库。
+当前项目已经从 **可信日线数据中心** 推进到因子、回测、组合、风控、模拟盘和运维观测的最小闭环。不依赖某一个单一数据源，而是通过多源导入、原始留痕、质量校验和人工修复，形成可供策略、回测和组合执行使用的本地可信数据底座。
 
 ## 当前状态
 
-项目目前处于设计和基础骨架阶段。
+项目当前处于 **V6 可视化和运维** 的最小后端观测阶段，下一项推荐进入 **V7 实盘只读与受控交易**。
 
 已有：
 
-- Python/FastAPI 项目骨架。
-- PostgreSQL / Redis docker-compose。
-- SQLAlchemy / Alembic 依赖配置。
-- V1 可信日线数据中心设计文档。
+- Python/FastAPI/PostgreSQL/SQLAlchemy/Alembic 基础工程。
+- `raw -> market -> factor -> research/backtest -> portfolio/risk -> trade` 分层闭环。
+- 参考数据同步、真实采集、`raw -> market` 构建统一入口。
+- 基础价量因子、横截面处理、因子统计报告。
+- 回测、绩效归因、组合构建、下单前风控。
+- 模拟盘订单、成交、现金和持仓闭环。
+- 运维概览接口，聚合数据质量、任务、因子、回测和模拟盘状态。
 
-尚未完成：
+常用 API：
 
-- CSV/API/QMT 数据导入实现。
-- 数据质量校验实现。
-- market 可信数据生成流程。
-
-已具备最小查询闭环：
-
-- SQLAlchemy 核心模型和 Alembic 初始迁移。
-- `GET /health`。
-- `GET /api/v1/securities`。
-- `GET /api/v1/daily-bars/{symbol}`。
-- `GET /api/v1/data-quality/issues`。
+- `GET /health`
+- `GET /api/v1/securities`
+- `GET /api/v1/daily-bars/{symbol}`
+- `GET /api/v1/daily-bars/missing`
+- `GET /api/v1/data-quality/issues`
+- `GET /api/v1/factors/definitions`
+- `GET /api/v1/factors/runs`
+- `GET /api/v1/factors/values`
+- `GET /api/v1/factors/profiles`
+- `GET /api/v1/operations/overview`
 
 ## 技术栈
 
@@ -37,7 +39,7 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 - SQLAlchemy 2.x
 - Alembic
 - Redis
-- Pandas / Polars（后续）
+- Pandas / Polars
 - Backtrader
 - Plotly
 - Vue3（后续）
@@ -58,8 +60,9 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 2. **V2 复权、ETF 和指数增强**：复权因子、交易日历、ETF/指数扩展。
 3. **V3 因子工厂**：技术面、量价、趋势、资金面等因子沉淀。
 4. **V4 策略与回测**：多因子评分、ETF 轮动、股票选股、绩效分析。
-5. **V5 组合、风控和实盘接口**：QMT/MiniQMT、持仓、订单、成交和风控。
-6. **V6 可视化平台**：FastAPI + Vue3 + 图表分析和数据质量看板。
+5. **V5 组合、风控和模拟盘**：组合构建、下单前风控、模拟订单、成交、现金和持仓。
+6. **V6 可视化和运维**：运维概览接口、数据质量、任务、因子、回测和模拟盘状态。
+7. **V7 实盘只读与受控交易**：真实账户只读同步、人工确认、风控边界和应急开关。
 
 ## 快速开始
 
@@ -78,6 +81,7 @@ uv run uvicorn app.main:app --reload
 ```bash
 uv run --extra dev ruff check app tests alembic
 uv run --extra dev pytest
+uv run alembic current
 ```
 
 ## 目录结构
@@ -97,6 +101,7 @@ app/
 ├── scheduler/      # 定时任务
 ├── services/       # 业务服务
 ├── strategies/     # 策略
+├── trade/          # 券商适配和模拟盘执行抽象
 └── utils/          # 工具
 
 docs/
@@ -111,5 +116,6 @@ docs/
 - 任何外部数据源默认不可靠。
 - 所有来源先进入 `raw` 原始层。
 - 清洗、校验、对账、修复后才能进入 `market` 可信层。
-- 因子、策略、回测和 API 查询只消费 `market` 层。
+- 因子、策略、回测和 API 查询只消费 `market` / `factor` 可信层。
 - 人工修复必须记录审计信息。
+- 实盘写操作必须有人工确认、风控边界和可追溯审计；当前默认只推进模拟盘和只读边界。
