@@ -19,6 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.execute("CREATE SCHEMA IF NOT EXISTS fundamental")
     op.create_table(
         "financial_payload",
         sa.Column("id", sa.BigInteger(), primary_key=True),

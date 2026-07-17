@@ -166,6 +166,12 @@ def _flatten_ladder(items: list[dict]) -> list[dict]:
 def _upsert_alternative_rows(db: Session, rows: list[dict]) -> int:
     if not rows:
         return 0
+    rows = list(
+        {
+            (row["dataset"], row["snapshot_date"], row["item_key"]): row
+            for row in rows
+        }.values()
+    )
     statement = insert(AlternativeDataSnapshot).values(rows)
     statement = statement.on_conflict_do_update(
         index_elements=[
