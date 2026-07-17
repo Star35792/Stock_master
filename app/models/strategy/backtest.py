@@ -119,3 +119,30 @@ class BacktestPosition(CreatedAtMixin, Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     close: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     market_value: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
+
+
+class BacktestPerformance(CreatedAtMixin, Base):
+    __tablename__ = "backtest_performance"
+    __table_args__ = (
+        UniqueConstraint("run_id"),
+        {"schema": "strategy"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("strategy.backtest_run.id"), nullable=False
+    )
+    total_return: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
+    annualized_return: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
+    maximum_drawdown: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
+    annualized_volatility: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
+    sharpe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    calmar_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    daily_win_rate: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
+    profit_loss_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    turnover_rate: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
+    total_commission: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
+    symbol_contributions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    industry_exposure: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    style_exposure: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    code_version: Mapped[str] = mapped_column(String(100), nullable=False)

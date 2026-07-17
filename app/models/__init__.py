@@ -11,6 +11,7 @@ from app.models.market import (
 from app.models.raw import ImportBatch, RawDailyBar
 from app.models.strategy import (
     BacktestEquity,
+    BacktestPerformance,
     BacktestPosition,
     BacktestRun,
     BacktestTradeRecord,
@@ -21,6 +22,7 @@ __all__ = [
     "AdjustmentFactor",
     "BacktestEquity",
     "BacktestPosition",
+    "BacktestPerformance",
     "BacktestRun",
     "BacktestTradeRecord",
     "CorporateAction",
