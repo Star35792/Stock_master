@@ -14,6 +14,7 @@ from app.services.eastmoney_collection import (
 )
 from app.services.factor import FactorQueryService
 from app.services.factor_cross_section import CrossSectionRunResult, FactorCrossSectionService
+from app.services.financial_factors import FinancialFactorRunResult, FinancialFactorService
 from app.services.gap_backfill import GapBackfillResult, MissingDailyBarBackfillService
 from app.services.hithink_alternative_collection import (
     AlternativeCollectionResult,
@@ -60,6 +61,8 @@ __all__ = [
     "CsvDailyBarCollectionService",
     "DataQualityQueryService",
     "FactorQueryService",
+    "FinancialFactorRunResult",
+    "FinancialFactorService",
     "GapBackfillResult",
     "MissingDailyBarBackfillService",
     "FinancialCollectionResult",
