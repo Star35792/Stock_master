@@ -82,6 +82,41 @@ class HithinkFinanceDataSource:
                 raise HithinkFinanceError("HiThink historical pagination did not advance")
             offset = next_offset
 
+    def fetch_price_snapshots(
+        self,
+        *,
+        symbols: list[str] | None = None,
+        fetch_all_market: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if symbols and fetch_all_market:
+            raise ValueError("symbols and fetch_all_market cannot be provided together")
+        if symbols:
+            return self._get(
+                "/api/a-share/prices/snapshot",
+                {"thscodes": ",".join(symbol.strip().upper() for symbol in symbols)},
+            ).get("item", [])
+        if not fetch_all_market:
+            return self._get(
+                "/api/a-share/prices/snapshot",
+                {"limit": limit, "offset": offset},
+            ).get("item", [])
+        if limit < 1 or limit > 10000:
+            raise ValueError("limit must be in [1, 10000]")
+
+        items: list[dict[str, Any]] = []
+        current_offset = offset
+        while True:
+            page = self._get(
+                "/api/a-share/prices/snapshot",
+                {"limit": limit, "offset": current_offset},
+            ).get("item", [])
+            items.extend(page)
+            if len(page) < limit:
+                return items
+            current_offset += limit
+
     def fetch_securities(
         self,
         *,

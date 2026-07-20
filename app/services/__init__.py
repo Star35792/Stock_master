@@ -45,7 +45,13 @@ from app.services.recent_data_completion import (
 )
 from app.services.reference_data import ReferenceDataSyncResult, ReferenceDataSyncService
 from app.services.risk import PersistedRiskCheck, PortfolioRiskService
+from app.services.sentiment_factors import SentimentFactorRunResult, SentimentFactorService
 from app.services.strategy_research import StrategyResearchService
+from app.services.valuation_collection import (
+    HithinkValuationCollectionService,
+    ValuationCollectionResult,
+)
+from app.services.valuation_factors import ValuationFactorRunResult, ValuationFactorService
 
 __all__ = [
     "AdjustmentBuildResult",
@@ -94,5 +100,11 @@ __all__ = [
     "RecentDataCompletionService",
     "PersistedRiskCheck",
     "PortfolioRiskService",
+    "SentimentFactorRunResult",
+    "SentimentFactorService",
     "StrategyResearchService",
+    "HithinkValuationCollectionService",
+    "ValuationCollectionResult",
+    "ValuationFactorRunResult",
+    "ValuationFactorService",
 ]

@@ -18,7 +18,7 @@ FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
 SUPPORTED_SECURITY_TYPES = ("stock",)
 
-_TOTAL_ASSETS = ("total_assets", "total_asset")
+_TOTAL_ASSETS = ("total_assets", "total_asset", "assets_total")
 _TOTAL_LIABILITIES = (
     "total_liabilities",
     "total_liability",
@@ -31,19 +31,54 @@ _TOTAL_EQUITY = (
     "total_shareholders_equity",
     "total_owner_equity",
     "equity_attributable_to_parent",
+    "holder_equity_total",
 )
-_REVENUE = ("operating_revenue", "total_revenue", "revenue")
+_REVENUE = ("operating_revenue", "total_revenue", "revenue", "operating_income")
+_OPERATING_COST = (
+    "operating_cost",
+    "operating_costs",
+    "total_operating_cost",
+    "cost_of_goods_sold",
+    "cogs",
+)
 _NET_PROFIT = (
     "parent_holder_net_profit",
     "net_profit_parent_company",
     "net_profit",
     "net_income",
 )
+_OPERATING_PROFIT = (
+    "operating_profit",
+    "ebit",
+    "earnings_before_interest_and_taxes",
+)
+_INTEREST_EXPENSE = (
+    "interest_expense",
+    "interest_expenses",
+    "interest_cost",
+    "financial_expense",
+    "financial_expenses",
+    "finance_expense",
+    "finance_expenses",
+)
+_CURRENT_ASSETS = (
+    "current_assets",
+    "current_asset",
+    "total_current_assets",
+    "current_assets_total",
+)
+_CURRENT_LIABILITIES = (
+    "current_liabilities",
+    "current_liability",
+    "total_current_liabilities",
+    "current_liabilities_total",
+)
 _OPERATING_CASH_FLOW = (
     "net_cash_flows_from_operating_activities",
     "net_operate_cash_flow",
     "net_operating_cash_flow",
     "operating_cash_flow",
+    "act_cash_flow_net",
 )
 
 
@@ -88,6 +123,18 @@ FINANCIAL_FACTOR_SPECS = (
         higher_is_better=False,
     ),
     FinancialFactorSpec(
+        name="current_ratio",
+        display_name="Current ratio",
+        description="latest reported current assets / current liabilities",
+        inputs=("fundamental.financial_statement.balance.metrics",),
+    ),
+    FinancialFactorSpec(
+        name="interest_coverage",
+        display_name="Interest coverage",
+        description="latest reported operating profit / interest expense",
+        inputs=("fundamental.financial_statement.income.metrics",),
+    ),
+    FinancialFactorSpec(
         name="roe_ttm",
         display_name="ROE TTM",
         description="latest reported net profit / latest reported shareholders equity",
@@ -95,6 +142,27 @@ FINANCIAL_FACTOR_SPECS = (
             "fundamental.financial_statement.income.metrics",
             "fundamental.financial_statement.balance.metrics",
         ),
+    ),
+    FinancialFactorSpec(
+        name="roa_ttm",
+        display_name="ROA TTM",
+        description="latest reported net profit / total assets",
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "fundamental.financial_statement.balance.metrics",
+        ),
+    ),
+    FinancialFactorSpec(
+        name="gross_margin_ttm",
+        display_name="Gross margin TTM",
+        description="latest reported gross profit / revenue",
+        inputs=("fundamental.financial_statement.income.metrics",),
+    ),
+    FinancialFactorSpec(
+        name="operating_margin_ttm",
+        display_name="Operating margin TTM",
+        description="latest reported operating profit / revenue",
+        inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="ocf_to_net_income_ttm",
@@ -106,10 +174,30 @@ FINANCIAL_FACTOR_SPECS = (
         ),
     ),
     FinancialFactorSpec(
+        name="accrual_ratio",
+        display_name="Accrual ratio",
+        description="(net profit - operating cash flow) / average total assets",
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "fundamental.financial_statement.cash_flow.metrics",
+            "fundamental.financial_statement.balance.metrics",
+        ),
+        higher_is_better=False,
+    ),
+    FinancialFactorSpec(
         name="revenue_growth_yoy",
         display_name="Revenue growth YoY",
         description="latest reported revenue / comparable prior-year revenue - 1",
         inputs=("fundamental.financial_statement.income.metrics",),
+    ),
+    FinancialFactorSpec(
+        name="ocf_growth_yoy",
+        display_name="OCF growth YoY",
+        description=(
+            "latest reported operating cash flow / comparable prior-year "
+            "operating cash flow - 1"
+        ),
+        inputs=("fundamental.financial_statement.cash_flow.metrics",),
     ),
     FinancialFactorSpec(
         name="net_profit_growth_yoy",
@@ -323,22 +411,62 @@ class FinancialFactorService:
                 _metric(current, "balance", _TOTAL_LIABILITIES),
                 _metric(current, "balance", _TOTAL_ASSETS),
             )
+        if factor_name == "current_ratio":
+            return self._ratio(
+                _metric(current, "balance", _CURRENT_ASSETS),
+                _metric(current, "balance", _CURRENT_LIABILITIES),
+            )
+        if factor_name == "interest_coverage":
+            return self._ratio(
+                _metric(current, "income", _OPERATING_PROFIT),
+                _abs_metric(current, "income", _INTEREST_EXPENSE),
+            )
         if factor_name == "roe_ttm":
             return self._ratio(
                 _metric(current, "income", _NET_PROFIT),
                 _equity(current),
+            )
+        if factor_name == "roa_ttm":
+            return self._ratio(
+                _metric(current, "income", _NET_PROFIT),
+                _metric(current, "balance", _TOTAL_ASSETS),
+            )
+        if factor_name == "gross_margin_ttm":
+            revenue = _metric(current, "income", _REVENUE)
+            cost = _metric(current, "income", _OPERATING_COST)
+            if revenue is None or cost is None:
+                return None
+            return self._ratio(revenue - cost, revenue)
+        if factor_name == "operating_margin_ttm":
+            return self._ratio(
+                _metric(current, "income", _OPERATING_PROFIT),
+                _metric(current, "income", _REVENUE),
             )
         if factor_name == "ocf_to_net_income_ttm":
             return self._ratio(
                 _metric(current, "cash_flow", _OPERATING_CASH_FLOW),
                 _metric(current, "income", _NET_PROFIT),
             )
+        if factor_name == "accrual_ratio":
+            average_assets = _average_metric(current, previous_year, "balance", _TOTAL_ASSETS)
+            net_profit = _metric(current, "income", _NET_PROFIT)
+            operating_cash_flow = _metric(current, "cash_flow", _OPERATING_CASH_FLOW)
+            if net_profit is None or operating_cash_flow is None:
+                return None
+            return self._ratio(net_profit - operating_cash_flow, average_assets)
         if factor_name == "revenue_growth_yoy":
             if previous_year is None:
                 return None
             return self._ratio_change(
                 _metric(current, "income", _REVENUE),
                 _metric(previous_year, "income", _REVENUE),
+            )
+        if factor_name == "ocf_growth_yoy":
+            if previous_year is None:
+                return None
+            return self._ratio_change(
+                _metric(current, "cash_flow", _OPERATING_CASH_FLOW),
+                _metric(previous_year, "cash_flow", _OPERATING_CASH_FLOW),
             )
         if factor_name == "net_profit_growth_yoy":
             if previous_year is None:
@@ -419,6 +547,32 @@ def _metric(
         if value is not None:
             return value
     return None
+
+
+def _abs_metric(
+    snapshot: FinancialSnapshot,
+    statement_type: str,
+    aliases: tuple[str, ...],
+) -> Decimal | None:
+    value = _metric(snapshot, statement_type, aliases)
+    return abs(value) if value is not None else None
+
+
+def _average_metric(
+    current: FinancialSnapshot,
+    previous: FinancialSnapshot | None,
+    statement_type: str,
+    aliases: tuple[str, ...],
+) -> Decimal | None:
+    current_value = _metric(current, statement_type, aliases)
+    if current_value is None:
+        return None
+    if previous is None:
+        return current_value
+    previous_value = _metric(previous, statement_type, aliases)
+    if previous_value is None:
+        return current_value
+    return (current_value + previous_value) / Decimal(2)
 
 
 def _equity(snapshot: FinancialSnapshot) -> Decimal | None:

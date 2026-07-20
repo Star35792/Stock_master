@@ -12,6 +12,7 @@ Stock Master 当前处于 **V6 可视化和运维** 的最小后端观测阶段�
 4. [数据质量校验与修复设计](data/quality-validation-and-repair.md)
 5. [数据库 Schema 规划](database/schema-plan.md)
 6. [路线图](roadmap.md)
+7. [决策因子体系设计](research/decision-factor-framework.md)
 
 ## 文档分组
 
@@ -20,6 +21,7 @@ docs/
 ├── architecture/   # 总体架构和模块边界
 ├── data/           # 数据契约、导入策略、质量校验
 ├── database/       # schema、表、索引、迁移规划
+├── research/       # 因子、策略和研究方法设计
 └── roadmap.md      # 阶段路线图
 ```
 

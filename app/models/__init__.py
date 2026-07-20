@@ -10,6 +10,7 @@ from app.models.market import (
     ManualCorrection,
     Security,
     TradingCalendar,
+    ValuationSnapshot,
 )
 from app.models.portfolio import PortfolioPlanRecord, PortfolioTargetRecord
 from app.models.raw import ImportBatch, RawDailyBar, RawFinancialPayload, RawVendorSnapshot
@@ -60,4 +61,5 @@ __all__ = [
     "RiskCheckOrder",
     "Security",
     "TradingCalendar",
+    "ValuationSnapshot",
 ]
