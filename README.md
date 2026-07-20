@@ -6,30 +6,29 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 
 ## 当前状态
 
-项目当前处于 **V6 可视化和运维** 的最小后端观测阶段，下一项推荐进入 **V7 实盘只读与受控交易**。
+项目当前处于 **V6 可视化和运维** 的最小工作台阶段。下一步先完成 V4 单策略研究合同和可复现回测切片，再补 V6 运维详情与 V5 组合/风控/模拟盘公共操作闭环；V7 实盘只读与受控交易尚未开始。
 
 已有：
 
 - Python/FastAPI/PostgreSQL/SQLAlchemy/Alembic 基础工程。
 - `raw -> market -> factor -> research/backtest -> portfolio/risk -> trade` 分层闭环。
 - 参考数据同步、真实采集、`raw -> market` 构建统一入口。
-- 基础价量因子、横截面处理、因子统计报告。
-- 回测、绩效归因、组合构建、下单前风控。
+- HiThink、东方财富补充源、CSV、数据湖和近期缺口补采的导入/维护入口。
+- 基础价量、财务、估值、行业、资金流、拥挤度、情绪、宏观、政策、盈利预期和复合因子首版。
+- 横截面处理、IC/Rank IC、forward diagnostics、top quantile turnover 等因子统计报告。
+- 回测、绩效归因、因子选股研究入口、组合构建、下单前风控。
 - 模拟盘订单、成交、现金和持仓闭环。
-- 运维概览接口，聚合数据质量、任务、因子、回测和模拟盘状态。
+- 运维概览接口与 Vue3 运维工作台，聚合数据质量、任务、因子、回测和模拟盘状态。
 
-常用 API：
+核心 API 面：
 
-- `GET /health`
-- `GET /api/v1/securities`
-- `GET /api/v1/daily-bars/{symbol}`
-- `GET /api/v1/daily-bars/missing`
-- `GET /api/v1/data-quality/issues`
-- `GET /api/v1/factors/definitions`
-- `GET /api/v1/factors/runs`
-- `GET /api/v1/factors/values`
-- `GET /api/v1/factors/profiles`
-- `GET /api/v1/operations/overview`
+- 健康检查：`GET /health`
+- 行情与参考数据：`GET /api/v1/securities`、`GET /api/v1/securities/{symbol}/lifecycle`、`GET /api/v1/daily-bars/{symbol}`、`GET /api/v1/daily-bars/missing`、`GET /api/v1/trading-calendar`
+- 数据质量与修复：`GET /api/v1/data-quality/issues`、`PATCH /api/v1/data-quality/issues/{issue_id}/status`、`GET /api/v1/daily-bar-source-compares`、`GET /api/v1/manual-corrections`
+- 复权与公司行为：`GET /api/v1/corporate-actions`、`GET /api/v1/adjustment-factors`
+- 因子：`GET /api/v1/factors/definitions`、`GET /api/v1/factors/runs`、`GET /api/v1/factors/values`、`GET /api/v1/factors/profiles`
+- 研究与回测：`POST /api/v1/strategy-research/factor-selection/backtests`、`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`GET /api/v1/backtests/runs/{run_id}/trades`、`GET /api/v1/backtests/runs/{run_id}/equity`、`GET /api/v1/backtests/runs/{run_id}/positions`、`GET /api/v1/backtests/runs/{run_id}/performance`、`POST /api/v1/backtests/runs/{run_id}/performance`
+- 运维工作台：`GET /api/v1/operations/overview`
 
 ## 技术栈
 
@@ -42,17 +41,17 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 - Pandas / Polars
 - Backtrader
 - Plotly
-- Vue3（后续）
+- Vue3
 
 ## 文档入口
 
-正式设计文档见：
+项目文档入口见：
 
-- [docs/README.md](docs/README.md)
-- [V1 可信日线数据中心架构](docs/architecture/trusted-daily-data-center.md)
-- [日线数据字段契约](docs/data/daily-bar-contract.md)
-- [数据库 Schema 规划](docs/database/schema-plan.md)
-- [路线图](docs/roadmap.md)
+- [AI 协作参考入口](aiDoc/README.md)
+- [V1 可信日线数据中心架构](aiDoc/relations/trusted-daily-data-center.md)
+- [日线数据字段契约](aiDoc/data/daily-bar-contract.md)
+- [数据库 Schema 规划](aiDoc/modules/schema-plan.md)
+- [路线图](aiDoc/plans/roadmap.md)
 
 ## 阶段规划
 
@@ -98,11 +97,13 @@ backend/
 ├── pyproject.toml  # Python 项目配置
 └── docker-compose.yml
 
-docs/
-├── architecture/   # 架构设计
+aiDoc/
 ├── data/           # 数据契约、导入、质量校验
-├── database/       # schema 规划
-└── roadmap.md      # 路线图
+├── modules/        # 模块索引、后端规则、schema 规划
+├── plans/          # 路线图和阶段计划
+├── relations/      # 仓库概览、系统关系、架构设计
+├── research/       # 因子、策略和研究方法设计
+└── memory/         # 跨任务稳定记忆
 
 frontend/
 └── src/            # Vue3 前端工作台

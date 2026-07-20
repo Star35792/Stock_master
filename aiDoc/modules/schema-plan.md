@@ -6,9 +6,9 @@
 
 1. **分层存储**：原始数据、可信数据、系统审计分 schema 存放。
 2. **先留痕再消费**：外部数据先进 `raw`，不能直接写入 `market`。
-3. **字段标准化**：`market` 层字段必须符合 `docs/data/daily-bar-contract.md`。
+3. **字段标准化**：`market` 层字段必须符合 `aiDoc/data/daily-bar-contract.md`。
 4. **质量可追踪**：导入、校验、冲突、修复都必须有记录。
-5. **首批克制**：V1 只做日线数据中心，不提前创建完整因子、策略、实盘交易表。
+5. **首批克制**：V1 只做日线数据中心；后续 schema 已按路线图继续扩展，但仍保持消费方向清晰。
 
 ## 2. Schema 划分
 
@@ -20,7 +20,7 @@ market    可信市场数据层
 system    任务、质量、审计层
 ```
 
-当前 `app/database/base.py` 已包含多个长期 schema，后续实现时需要确保包含 `raw`：
+当前 `app/database/base.py` 已包含多个长期 schema，且代码已经从 V1 扩展到因子、策略、组合、模拟盘、财务和另类数据：
 
 ```python
 SCHEMAS = (
@@ -35,7 +35,7 @@ SCHEMAS = (
 )
 ```
 
-V1 只实际落地 `raw`、`market`、`system`。
+V1 首先落地 `raw`、`market`、`system`；当前代码和迁移已经继续落地 `fundamental`、`factor`、`strategy`、`portfolio`、`trade` 等 schema。
 
 ## 3. 首批表清单
 
@@ -226,7 +226,7 @@ index(exchange, is_open)
 
 可信日线表，供查询、因子、策略、回测使用。
 
-字段契约见 `docs/data/daily-bar-contract.md`。
+字段契约见 `aiDoc/data/daily-bar-contract.md`。
 
 ### 约束与索引
 
@@ -466,15 +466,21 @@ V1 暂不引入以下设计：
 - raw 层严格去重唯一键：先允许完整留痕，等导入服务具备 upsert / conflict handling 后再决定是否启用。
 - PostgreSQL enum 类型：先用 `varchar + check constraint`，便于早期演进。
 
-## 16. 暂不创建的表
+## 16. 当前已扩展表域
 
-V1 暂不创建：
+以下表域已经不再是“暂不创建”，而是当前代码的一部分：
 
-- `factor.*` 因子表。
-- `strategy.*` 策略和回测表。
-- `portfolio.*` 组合和持仓表。
-- `trade.*` 实盘订单和成交表。
+- `factor.*`：因子定义、运行批次、因子值、横截面 profile。
+- `strategy.*`：回测运行、成交、净值、持仓和绩效。
+- `portfolio.*`：组合计划和目标持仓。
+- `trade.*`：当前为模拟盘账户、订单、成交和持仓。
+- `fundamental.*`：财务报表与指标。
+- `market.alternative_data_snapshot`、`market.index_constituent_snapshot` 和 `market.valuation_snapshot`：另类数据、指数成分和估值快照。
+
+仍暂不创建或不作为当前主线：
+
 - 分钟线、Tick、逐笔成交表。
-- 财务全量表。
+- 自动实盘交易表和真实券商写操作流水。
+- 严格版本化的 `market.daily_bar_version`。
 
-等日线可信数据中心跑通后再按路线图扩展。
+新增表域必须继续遵守 `raw -> market -> factor -> research/backtest -> portfolio/risk -> trade` 的消费方向，不能让策略、回测或实盘链路直接绕过可信层。
