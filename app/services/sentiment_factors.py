@@ -60,6 +60,13 @@ SENTIMENT_FACTOR_SPECS = (
         datasets=("hot_stock",),
     ),
     SentimentFactorSpec(
+        name="hot_rank_change",
+        display_name="Hot rank change",
+        description="previous hot stock rank minus latest available hot stock rank",
+        inputs=("market.alternative_data_snapshot.hot_stock.rank",),
+        datasets=("hot_stock",),
+    ),
+    SentimentFactorSpec(
         name="limit_up_strength",
         display_name="Limit-up strength",
         description="latest available limit-up pool strength value",
@@ -326,6 +333,18 @@ class SentimentFactorService:
             return None if row.rank is None or row.rank <= 0 else Decimal(1) / Decimal(row.rank)
         if spec.name == "hot_heat":
             return row.value
+        if spec.name == "hot_rank_change":
+            previous_row = _previous_symbol_row(
+                snapshots_by_dataset_symbol,
+                datasets=spec.datasets,
+                symbol=symbol,
+                trade_date=trade_date,
+            )
+            if row.rank is None or previous_row is None:
+                return None
+            if previous_row.rank is None or row.rank <= 0 or previous_row.rank <= 0:
+                return None
+            return Decimal(previous_row.rank - row.rank)
         if spec.name == "limit_up_strength":
             return row.value
         if spec.name == "dragon_tiger_net_buy_ratio":
@@ -374,6 +393,23 @@ def _latest_symbol_row(
     if not candidates:
         return None
     return max(candidates, key=lambda row: (row.snapshot_date, row.dataset))
+
+
+def _previous_symbol_row(
+    rows_by_dataset_symbol: dict[str, dict[str, list[Any]]],
+    *,
+    datasets: tuple[str, ...],
+    symbol: str,
+    trade_date: date,
+) -> Any | None:
+    candidates = []
+    for dataset in datasets:
+        rows = rows_by_dataset_symbol.get(dataset, {}).get(symbol, [])
+        candidates.extend(row for row in rows if row.snapshot_date < trade_date)
+    if len(candidates) < 2:
+        return None
+    candidates.sort(key=lambda row: (row.snapshot_date, row.dataset))
+    return candidates[-2]
 
 
 def _latest_count(counts_by_date: dict[date, int], trade_date: date) -> int | None:

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -73,6 +73,32 @@ _CURRENT_LIABILITIES = (
     "total_current_liabilities",
     "current_liabilities_total",
 )
+_INTEREST_BEARING_DEBT = (
+    "interest_bearing_debt",
+    "interest_bearing_liabilities",
+    "total_interest_bearing_debt",
+    "total_interest_bearing_liabilities",
+    "interest_bearing_liab",
+)
+_SHORT_TERM_DEBT = (
+    "short_term_borrowing",
+    "short_term_borrowings",
+    "short_term_loan",
+    "short_term_loans",
+    "short_term_debt",
+)
+_LONG_TERM_DEBT = (
+    "long_term_borrowing",
+    "long_term_borrowings",
+    "long_term_loan",
+    "long_term_loans",
+    "long_term_debt",
+)
+_CURRENT_PORTION_LONG_DEBT = (
+    "non_current_liabilities_due_within_one_year",
+    "current_portion_of_long_term_debt",
+)
+_BONDS_PAYABLE = ("bonds_payable", "bond_payable", "notes_payable")
 _OPERATING_CASH_FLOW = (
     "net_cash_flows_from_operating_activities",
     "net_operate_cash_flow",
@@ -135,9 +161,27 @@ FINANCIAL_FACTOR_SPECS = (
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
+        name="operating_cash_debt",
+        display_name="Operating cash debt",
+        description="latest reported operating cash flow / interest-bearing debt",
+        inputs=(
+            "fundamental.financial_statement.cash_flow.metrics",
+            "fundamental.financial_statement.balance.metrics",
+        ),
+    ),
+    FinancialFactorSpec(
         name="roe_ttm",
         display_name="ROE TTM",
         description="latest reported net profit / latest reported shareholders equity",
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "fundamental.financial_statement.balance.metrics",
+        ),
+    ),
+    FinancialFactorSpec(
+        name="roic_ttm",
+        display_name="ROIC TTM",
+        description="latest reported operating profit / invested capital",
         inputs=(
             "fundamental.financial_statement.income.metrics",
             "fundamental.financial_statement.balance.metrics",
@@ -204,6 +248,16 @@ FINANCIAL_FACTOR_SPECS = (
         display_name="Net profit growth YoY",
         description="latest reported net profit / comparable prior-year net profit - 1",
         inputs=("fundamental.financial_statement.income.metrics",),
+    ),
+    FinancialFactorSpec(
+        name="roe_stability_3y",
+        display_name="ROE stability 3Y",
+        description="standard deviation of same-period ROE over latest three fiscal years",
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "fundamental.financial_statement.balance.metrics",
+        ),
+        higher_is_better=False,
     ),
 )
 
@@ -274,6 +328,9 @@ class FinancialFactorService:
             for snapshots in snapshots_by_symbol.values()
             for snapshot in snapshots
         }
+        snapshots_by_symbol_period = self._snapshots_by_symbol_period(
+            snapshots_by_symbol
+        )
 
         rows_by_factor: dict[str, int] = {}
         run_ids: dict[str, int] = {}
@@ -316,6 +373,7 @@ class FinancialFactorService:
                 bars_by_symbol=bars_by_symbol,
                 snapshots_by_symbol=snapshots_by_symbol,
                 comparable_snapshots=comparable_snapshots,
+                snapshots_by_symbol_period=snapshots_by_symbol_period,
                 run_id=run.id,
             )
             self.run_repository.update_status(
@@ -358,6 +416,7 @@ class FinancialFactorService:
         bars_by_symbol: dict[str, list[Any]],
         snapshots_by_symbol: dict[str, list[FinancialSnapshot]],
         comparable_snapshots: dict[tuple[str, int, str], FinancialSnapshot],
+        snapshots_by_symbol_period: dict[tuple[str, str], list[FinancialSnapshot]],
         run_id: int,
     ) -> int:
         rows_written = 0
@@ -385,6 +444,10 @@ class FinancialFactorService:
                             current_snapshot.fiscal_period,
                         )
                     ),
+                    snapshots_by_symbol_period.get(
+                        (symbol, current_snapshot.fiscal_period),
+                        [],
+                    ),
                 )
                 if value is None:
                     continue
@@ -405,6 +468,7 @@ class FinancialFactorService:
         factor_name: str,
         current: FinancialSnapshot,
         previous_year: FinancialSnapshot | None,
+        history: list[FinancialSnapshot],
     ) -> Decimal | None:
         if factor_name == "debt_to_assets":
             return self._ratio(
@@ -421,10 +485,20 @@ class FinancialFactorService:
                 _metric(current, "income", _OPERATING_PROFIT),
                 _abs_metric(current, "income", _INTEREST_EXPENSE),
             )
+        if factor_name == "operating_cash_debt":
+            return self._ratio(
+                _metric(current, "cash_flow", _OPERATING_CASH_FLOW),
+                _interest_bearing_debt(current),
+            )
         if factor_name == "roe_ttm":
             return self._ratio(
                 _metric(current, "income", _NET_PROFIT),
                 _equity(current),
+            )
+        if factor_name == "roic_ttm":
+            return self._ratio(
+                _metric(current, "income", _OPERATING_PROFIT),
+                _invested_capital(current),
             )
         if factor_name == "roa_ttm":
             return self._ratio(
@@ -475,6 +549,8 @@ class FinancialFactorService:
                 _metric(current, "income", _NET_PROFIT),
                 _metric(previous_year, "income", _NET_PROFIT),
             )
+        if factor_name == "roe_stability_3y":
+            return _roe_stability_3y(current, history)
         raise ValueError(f"unsupported factor: {factor_name}")
 
     @staticmethod
@@ -510,6 +586,25 @@ class FinancialFactorService:
                     metrics_by_statement=metrics_by_statement,
                 )
             )
+        for snapshots in result.values():
+            snapshots.sort(
+                key=lambda snapshot: (
+                    snapshot.report_date,
+                    snapshot.period_end,
+                    snapshot.fiscal_year,
+                    snapshot.fiscal_period,
+                )
+            )
+        return dict(result)
+
+    @staticmethod
+    def _snapshots_by_symbol_period(
+        snapshots_by_symbol: dict[str, list[FinancialSnapshot]],
+    ) -> dict[tuple[str, str], list[FinancialSnapshot]]:
+        result: dict[tuple[str, str], list[FinancialSnapshot]] = defaultdict(list)
+        for symbol, snapshots in snapshots_by_symbol.items():
+            for snapshot in snapshots:
+                result[(symbol, snapshot.fiscal_period)].append(snapshot)
         for snapshots in result.values():
             snapshots.sort(
                 key=lambda snapshot: (
@@ -575,6 +670,33 @@ def _average_metric(
     return (current_value + previous_value) / Decimal(2)
 
 
+def _interest_bearing_debt(snapshot: FinancialSnapshot) -> Decimal | None:
+    explicit = _metric(snapshot, "balance", _INTEREST_BEARING_DEBT)
+    if explicit is not None:
+        return explicit
+    components = [
+        _metric(snapshot, "balance", aliases)
+        for aliases in (
+            _SHORT_TERM_DEBT,
+            _LONG_TERM_DEBT,
+            _CURRENT_PORTION_LONG_DEBT,
+            _BONDS_PAYABLE,
+        )
+    ]
+    available = [component for component in components if component is not None]
+    if not available:
+        return None
+    return sum(available, Decimal())
+
+
+def _invested_capital(snapshot: FinancialSnapshot) -> Decimal | None:
+    equity = _equity(snapshot)
+    debt = _interest_bearing_debt(snapshot)
+    if equity is None or debt is None:
+        return None
+    return equity + debt
+
+
 def _equity(snapshot: FinancialSnapshot) -> Decimal | None:
     explicit = _metric(snapshot, "balance", _TOTAL_EQUITY)
     if explicit is not None:
@@ -584,6 +706,44 @@ def _equity(snapshot: FinancialSnapshot) -> Decimal | None:
     if total_assets is None or total_liabilities is None:
         return None
     return total_assets - total_liabilities
+
+
+def _roe(snapshot: FinancialSnapshot) -> Decimal | None:
+    net_profit = _metric(snapshot, "income", _NET_PROFIT)
+    equity = _equity(snapshot)
+    if net_profit is None or equity in {None, Decimal()}:
+        return None
+    return net_profit / equity
+
+
+def _roe_stability_3y(
+    current: FinancialSnapshot,
+    history: list[FinancialSnapshot],
+) -> Decimal | None:
+    visible_history = [
+        snapshot
+        for snapshot in history
+        if snapshot.report_date <= current.report_date
+        and snapshot.fiscal_year <= current.fiscal_year
+    ]
+    latest = sorted(
+        visible_history,
+        key=lambda snapshot: (snapshot.fiscal_year, snapshot.report_date),
+        reverse=True,
+    )[:3]
+    if len(latest) < 3:
+        return None
+    roe_values = [_roe(snapshot) for snapshot in latest]
+    if any(value is None for value in roe_values):
+        return None
+    values = [value for value in roe_values if value is not None]
+    mean = sum(values, Decimal()) / Decimal(len(values))
+    variance = sum(((value - mean) ** 2 for value in values), Decimal()) / Decimal(
+        len(values)
+    )
+    with localcontext() as context:
+        context.prec = 28
+        return variance.sqrt()
 
 
 def _decimal(value: object) -> Decimal | None:

@@ -108,6 +108,7 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
             {
                 "total_assets": "800",
                 "total_liabilities": "300",
+                "interest_bearing_debt": "100",
                 "current_assets": "400",
                 "current_liabilities": "200",
             },
@@ -137,6 +138,7 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
             {
                 "total_assets": "1000",
                 "total_liabilities": "400",
+                "interest_bearing_debt": "150",
                 "current_assets": "500",
                 "current_liabilities": "250",
             },
@@ -186,7 +188,9 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
         "debt_to_assets": 2,
         "current_ratio": 2,
         "interest_coverage": 2,
+        "operating_cash_debt": 2,
         "roe_ttm": 2,
+        "roic_ttm": 2,
         "roa_ttm": 2,
         "gross_margin_ttm": 2,
         "operating_margin_ttm": 2,
@@ -195,12 +199,13 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
         "revenue_growth_yoy": 1,
         "ocf_growth_yoy": 1,
         "net_profit_growth_yoy": 1,
+        "roe_stability_3y": 0,
     }
     assert financial_statement_repository.kwargs == {
         "end_date": date(2026, 5, 6),
         "symbols": ["600519.SH"],
     }
-    assert len(definition_repository.definitions) == 12
+    assert len(definition_repository.definitions) == 15
     assert all(run["status"] == "success" for run in run_repository.finished)
 
     values = {
@@ -211,7 +216,9 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
     assert values[("debt_to_assets", date(2026, 5, 6))] == Decimal("0.4000000000")
     assert values[("current_ratio", date(2026, 5, 6))] == Decimal("2.0000000000")
     assert values[("interest_coverage", date(2026, 5, 6))] == Decimal("5.0000000000")
+    assert values[("operating_cash_debt", date(2026, 5, 6))] == Decimal("2.4000000000")
     assert values[("roe_ttm", date(2026, 5, 6))] == Decimal("0.5000000000")
+    assert values[("roic_ttm", date(2026, 5, 6))] == Decimal("0.5000000000")
     assert values[("roa_ttm", date(2026, 5, 6))] == Decimal("0.3000000000")
     assert values[("gross_margin_ttm", date(2026, 5, 6))] == Decimal("0.4000000000")
     assert values[("operating_margin_ttm", date(2026, 5, 6))] == Decimal("0.3000000000")
@@ -253,14 +260,90 @@ def test_financial_factor_service_skips_missing_denominators() -> None:
         object(),
         start_date=date(2026, 5, 6),
         end_date=date(2026, 5, 6),
-        factor_names=["debt_to_assets", "ocf_to_net_income_ttm"],
+        factor_names=[
+            "debt_to_assets",
+            "operating_cash_debt",
+            "roic_ttm",
+            "ocf_to_net_income_ttm",
+        ],
     )
 
     assert result.rows_by_factor == {
         "debt_to_assets": 0,
+        "operating_cash_debt": 0,
+        "roic_ttm": 0,
         "ocf_to_net_income_ttm": 0,
     }
     assert value_repository.values == []
+
+
+def test_financial_factor_service_calculates_roe_stability_from_three_years() -> None:
+    value_repository = FakeFactorValueRepository()
+    service = FinancialFactorService(
+        daily_bar_repository=FakeDailyBarRepository([_bar(date(2026, 5, 6))]),
+        financial_statement_repository=FakeFinancialStatementRepository(
+            [
+                _statement(
+                    "balance",
+                    2023,
+                    {"total_assets": "800", "total_liabilities": "400"},
+                    report_date=date(2024, 4, 30),
+                ),
+                _statement(
+                    "income",
+                    2023,
+                    {"net_profit": "100"},
+                    report_date=date(2024, 4, 30),
+                ),
+                _statement(
+                    "balance",
+                    2024,
+                    {"total_assets": "1000", "total_liabilities": "500"},
+                    report_date=date(2025, 4, 30),
+                ),
+                _statement(
+                    "income",
+                    2024,
+                    {"net_profit": "125"},
+                    report_date=date(2025, 4, 30),
+                ),
+                _statement(
+                    "balance",
+                    2025,
+                    {"total_assets": "1200", "total_liabilities": "600"},
+                    report_date=date(2026, 4, 30),
+                ),
+                _statement(
+                    "income",
+                    2025,
+                    {"net_profit": "150"},
+                    report_date=date(2026, 4, 30),
+                ),
+            ]
+        ),
+        definition_repository=FakeFactorDefinitionRepository(),
+        run_repository=FakeFactorRunRepository(),
+        value_repository=value_repository,
+    )
+
+    result = service.run(
+        object(),
+        start_date=date(2026, 5, 6),
+        end_date=date(2026, 5, 6),
+        factor_names=["roe_stability_3y"],
+    )
+
+    assert result.rows_by_factor == {"roe_stability_3y": 1}
+    assert value_repository.values == [
+        {
+            "symbol": "600519.SH",
+            "trade_date": date(2026, 5, 6),
+            "factor_name": "roe_stability_3y",
+            "factor_version": "v1",
+            "value": Decimal("0E-10"),
+            "run_id": 1,
+        }
+    ]
 
 
 def test_financial_factor_service_validates_inputs() -> None:

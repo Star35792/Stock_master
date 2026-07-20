@@ -94,6 +94,14 @@ BASIC_FACTOR_SPECS = (
         default_enabled=False,
     ),
     BasicFactorSpec(
+        name="turnover_percentile_120",
+        display_name="120日换手率分位数",
+        description="percentile rank of the latest turnover_rate over 120 observations",
+        inputs=("market.daily_bar.turnover_rate",),
+        window_days=120,
+        default_enabled=False,
+    ),
+    BasicFactorSpec(
         name="momentum_20",
         display_name="20日动量",
         description="close / close_lag_20 - 1",
@@ -143,6 +151,14 @@ BASIC_FACTOR_SPECS = (
         description="negative coefficient of variation of volume over 20 observations",
         inputs=("market.daily_bar.volume",),
         window_days=20,
+    ),
+    BasicFactorSpec(
+        name="abnormal_volume_pressure",
+        display_name="异常成交量压力",
+        description="latest volume / mean(previous 20 volumes) - 1",
+        inputs=("market.daily_bar.volume",),
+        window_days=21,
+        default_enabled=False,
     ),
 )
 
@@ -324,6 +340,11 @@ class BasicPriceVolumeFactorService:
             return self._ratio_change(bar.volume, bars[index - 1].volume)
         if factor_name == "turnover_rate":
             return bar.turnover_rate
+        if factor_name == "turnover_percentile_120":
+            values = self._rolling_values(bars, index, "turnover_rate", 120)
+            if values is None or bar.turnover_rate is None:
+                return None
+            return self._percentile_rank(values, bar.turnover_rate)
         if factor_name == "ma_gap_5":
             if index < 4:
                 return None
@@ -382,6 +403,14 @@ class BasicPriceVolumeFactorService:
                     / Decimal(20)
                 ).sqrt()
             return -(standard_deviation / mean)
+        if factor_name == "abnormal_volume_pressure":
+            values = self._rolling_values(bars, index - 1, "volume", 20)
+            if values is None or bar.volume is None:
+                return None
+            mean = sum(values, Decimal()) / Decimal(len(values))
+            if mean == 0:
+                return None
+            return self._ratio_change(bar.volume, mean)
         raise ValueError(f"unsupported factor: {factor_name}")
 
     def _momentum(self, bars: list[Any], index: int, window: int) -> Decimal | None:
@@ -432,6 +461,19 @@ class BasicPriceVolumeFactorService:
         if any(value is None or value < 0 for value in values):
             return None
         return [value for value in values if value is not None]
+
+    @staticmethod
+    def _percentile_rank(values: list[Decimal], current: Decimal) -> Decimal | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        if len(ordered) == 1:
+            return Decimal(1)
+        less = sum(value < current for value in ordered)
+        equal = sum(value == current for value in ordered)
+        return (
+            Decimal(less) + (Decimal(equal) - Decimal(1)) / Decimal(2)
+        ) / Decimal(len(ordered) - 1)
 
     @staticmethod
     def _ratio_change(

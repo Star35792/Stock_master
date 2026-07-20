@@ -4,6 +4,8 @@ from app.services.basic_price_volume_factors import (
     BasicFactorRunResult,
     BasicPriceVolumeFactorService,
 )
+from app.services.composite_factors import CompositeFactorRunResult, CompositeFactorService
+from app.services.crowding_factors import CrowdingFactorRunResult, CrowdingFactorService
 from app.services.csv_collection import CsvDailyBarCollectionService
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService, MarketBuildResult
 from app.services.daily_sync import HithinkDailySyncResult, HithinkDailySyncService
@@ -33,6 +35,7 @@ from app.services.hithink_financial_collection import (
     FinancialCollectionResult,
     HithinkFinancialCollectionService,
 )
+from app.services.industry_factors import IndustryFactorRunResult, IndustryFactorService
 from app.services.manual_correction import ManualCorrectionResult, ManualCorrectionService
 from app.services.market import MarketQueryService
 from app.services.operations import OperationsOverviewService
@@ -61,6 +64,10 @@ __all__ = [
     "AlternativeCollectionResult",
     "BasicFactorRunResult",
     "BasicPriceVolumeFactorService",
+    "CompositeFactorRunResult",
+    "CompositeFactorService",
+    "CrowdingFactorRunResult",
+    "CrowdingFactorService",
     "DailyBacktestService",
     "DailyBarCollectionResult",
     "DailyBarMarketBuildService",
@@ -72,6 +79,8 @@ __all__ = [
     "GapBackfillResult",
     "MissingDailyBarBackfillService",
     "FinancialCollectionResult",
+    "IndustryFactorRunResult",
+    "IndustryFactorService",
     "CrossSectionRunResult",
     "FactorCrossSectionService",
     "HithinkDailySyncResult",

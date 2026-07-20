@@ -100,6 +100,8 @@ def _snapshot(
 def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
     snapshots = [
         _snapshot("hot_stock", "AAA", date(2026, 7, 17), rank=2, value="100"),
+        _snapshot("hot_stock", "AAA", date(2026, 7, 16), rank=3, value="90"),
+        _snapshot("hot_stock", "BBB", date(2026, 7, 16), rank=7, value="80"),
         _snapshot("hot_stock", "BBB", date(2026, 7, 17), rank=1, value="200"),
         _snapshot("hot_stock", "CCC", date(2026, 7, 18), rank=1, value="900"),
         _snapshot("limit_up_pool", "BBB", date(2026, 7, 17), value="300"),
@@ -148,14 +150,15 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
     assert result.rows_by_factor == {
         "hot_rank_score": 2,
         "hot_heat": 2,
+        "hot_rank_change": 2,
         "limit_up_strength": 2,
         "dragon_tiger_net_buy_ratio": 2,
         "limit_up_breadth": 3,
         "market_sentiment_score": 3,
     }
-    assert result.total_rows == 14
+    assert result.total_rows == 16
     assert result.input_rows == len(snapshots)
-    assert len(definition_repository.definitions) == 6
+    assert len(definition_repository.definitions) == 7
     assert all(run["status"] == "success" for run in run_repository.finished)
     assert daily_bar_repository.factor_kwargs is not None
     assert daily_bar_repository.factor_kwargs["symbols"] == ["AAA"]
@@ -170,6 +173,8 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
     assert values[("hot_rank_score", "BBB")] == Decimal("1.0000000000")
     assert ("hot_rank_score", "CCC") not in values
     assert values[("hot_heat", "BBB")] == Decimal("200.0000000000")
+    assert values[("hot_rank_change", "AAA")] == Decimal("1.0000000000")
+    assert values[("hot_rank_change", "BBB")] == Decimal("6.0000000000")
     assert values[("limit_up_strength", "CCC")] == Decimal("500.0000000000")
     assert values[("dragon_tiger_net_buy_ratio", "AAA")] == Decimal("0.1200000000")
     assert values[("dragon_tiger_net_buy_ratio", "BBB")] == Decimal("0.1000000000")

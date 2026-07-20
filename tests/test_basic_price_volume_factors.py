@@ -111,6 +111,8 @@ def test_basic_factor_service_calculates_and_records_factor_runs() -> None:
             "ma_gap_5",
             "volume_chg_1d",
             "turnover_rate",
+            "turnover_percentile_120",
+            "abnormal_volume_pressure",
         ],
     )
 
@@ -121,14 +123,16 @@ def test_basic_factor_service_calculates_and_records_factor_runs() -> None:
         "ma_gap_5": 2,
         "volume_chg_1d": 5,
         "turnover_rate": 6,
+        "turnover_percentile_120": 0,
+        "abnormal_volume_pressure": 0,
     }
     assert result.total_rows == 20
-    assert len(definition_repository.definitions) == 6
+    assert len(definition_repository.definitions) == 8
     assert all(
         definition.applicable_security_types == ["stock", "etf", "index"]
         for definition in definition_repository.definitions
     )
-    assert len(run_repository.finished) == 6
+    assert len(run_repository.finished) == 8
     assert all(run["status"] == "success" for run in run_repository.finished)
     assert daily_bar_repository.kwargs is not None
     assert daily_bar_repository.kwargs["symbols"] == ["600519.SH"]
@@ -171,6 +175,8 @@ def test_basic_factor_service_skips_missing_fields_and_short_windows() -> None:
             "ma_gap_5",
             "volume_chg_1d",
             "turnover_rate",
+            "turnover_percentile_120",
+            "abnormal_volume_pressure",
         ],
     )
 
@@ -181,6 +187,8 @@ def test_basic_factor_service_skips_missing_fields_and_short_windows() -> None:
         "ma_gap_5": 0,
         "volume_chg_1d": 0,
         "turnover_rate": 0,
+        "turnover_percentile_120": 0,
+        "abnormal_volume_pressure": 0,
     }
     assert len(value_repository.values) == 1
     assert value_repository.values[0]["factor_name"] == "ret_1d"
