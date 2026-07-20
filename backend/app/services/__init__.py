@@ -1,5 +1,9 @@
 from app.services.adjustment_build import AdjustmentBuildResult, AdjustmentBuildService
-from app.services.backtest import DailyBacktestService, PersistedBacktestResult
+from app.services.backtest import (
+    BacktestQueryService,
+    DailyBacktestService,
+    PersistedBacktestResult,
+)
 from app.services.basic_price_volume_factors import (
     BasicFactorRunResult,
     BasicPriceVolumeFactorService,
@@ -86,6 +90,7 @@ __all__ = [
     "CrowdingFactorRunResult",
     "CrowdingFactorService",
     "DailyBacktestService",
+    "BacktestQueryService",
     "DailyBarCollectionResult",
     "DailyBarMarketBuildService",
     "CsvDailyBarCollectionService",

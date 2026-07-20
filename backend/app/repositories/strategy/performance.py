@@ -12,6 +12,16 @@ from app.models.strategy import (
 
 
 class BacktestPerformanceRepository:
+    def get_by_run_id(
+        self,
+        db: Session,
+        *,
+        run_id: int,
+    ) -> BacktestPerformance | None:
+        return db.scalar(
+            select(BacktestPerformance).where(BacktestPerformance.run_id == run_id)
+        )
+
     def load_inputs(
         self,
         db: Session,

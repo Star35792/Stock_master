@@ -67,6 +67,13 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/factors/runs" in paths
     assert "/api/v1/factors/values" in paths
     assert "/api/v1/factors/profiles" in paths
+    assert "/api/v1/backtests/runs" in paths
+    assert "/api/v1/backtests/runs/{run_id}" in paths
+    assert "/api/v1/backtests/runs/{run_id}/trades" in paths
+    assert "/api/v1/backtests/runs/{run_id}/equity" in paths
+    assert "/api/v1/backtests/runs/{run_id}/positions" in paths
+    assert "/api/v1/backtests/runs/{run_id}/performance" in paths
+    assert "/api/v1/strategy-research/factor-selection/backtests" in paths
     assert "/api/v1/operations/overview" in paths
 
 
@@ -176,6 +183,37 @@ def test_factor_profiles_reject_reversed_date_range() -> None:
     response = client.get(
         "/api/v1/factors/profiles",
         params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_backtest_runs_reject_reversed_date_range() -> None:
+    response = client.get(
+        "/api/v1/backtests/runs",
+        params={"start_date": "2026-07-16", "end_date": "2026-07-15"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_factor_selection_backtest_rejects_reversed_date_range() -> None:
+    response = client.post(
+        "/api/v1/strategy-research/factor-selection/backtests",
+        json={
+            "name": "bad-range",
+            "factor_specs": [{"factor_name": "momentum_20", "factor_version": "v1-qfq"}],
+            "top_n": 1,
+            "allowed_security_types": ["stock"],
+            "start_date": "2026-07-20",
+            "end_date": "2026-07-01",
+            "adjust_type": "qfq",
+            "initial_cash": "100000",
+            "code_version": "abc123",
+            "data_version": "market-qfq-20260720",
+        },
     )
 
     assert response.status_code == 422

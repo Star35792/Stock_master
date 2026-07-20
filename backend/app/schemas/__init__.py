@@ -17,10 +17,28 @@ from app.schemas.market import (
     TradingCalendarRead,
 )
 from app.schemas.operations import OperationsOverview
+from app.schemas.strategy import (
+    BacktestEquityRead,
+    BacktestPerformanceAnalyzeRequest,
+    BacktestPerformanceRead,
+    BacktestPositionRead,
+    BacktestRunRead,
+    BacktestTradeRead,
+    FactorScoreSpecRequest,
+    FactorSelectionBacktestRequest,
+    FactorSelectionBacktestResult,
+    StyleFactorRef,
+)
 from app.schemas.system import DataQualityIssueRead, DataQualityIssueStatusUpdate
 
 __all__ = [
     "AdjustmentFactorRead",
+    "BacktestEquityRead",
+    "BacktestPerformanceAnalyzeRequest",
+    "BacktestPerformanceRead",
+    "BacktestPositionRead",
+    "BacktestRunRead",
+    "BacktestTradeRead",
     "CorporateActionRead",
     "DailyBarRead",
     "DailyBarSourceCompareRead",
@@ -29,6 +47,9 @@ __all__ = [
     "FactorDefinitionRead",
     "FactorProfileRead",
     "FactorRunRead",
+    "FactorScoreSpecRequest",
+    "FactorSelectionBacktestRequest",
+    "FactorSelectionBacktestResult",
     "FactorValueRead",
     "ManualCorrectionRead",
     "MissingDailyBarRead",
@@ -36,5 +57,6 @@ __all__ = [
     "SecurityLifecycleRead",
     "Page",
     "SecurityRead",
+    "StyleFactorRef",
     "TradingCalendarRead",
 ]

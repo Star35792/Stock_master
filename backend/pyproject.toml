@@ -2,7 +2,7 @@
 name = "stock-master"
 version = "0.1.0"
 description = "A long-term maintainable quantitative trading platform for A-shares and ETFs."
-readme = "README.md"
+readme = "../README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "alembic>=1.16.0",

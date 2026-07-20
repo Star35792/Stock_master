@@ -69,6 +69,7 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 项目使用 uv 管理 Python 和依赖：
 
 ```bash
+cd backend
 cp .env.example .env
 docker compose up -d
 uv sync --extra dev
@@ -87,28 +88,24 @@ uv run alembic current
 ## 目录结构
 
 ```text
-app/
-├── api/            # HTTP API
-├── backtest/       # 回测
-├── config/         # 配置
-├── database/       # 数据库连接、Session、Base
-├── factors/        # 因子计算
-├── indicators/     # 技术指标
-├── models/         # SQLAlchemy 模型
-├── portfolio/      # 组合与持仓
-├── repositories/   # 数据访问层
-├── risk/           # 风控
-├── scheduler/      # 定时任务
-├── services/       # 业务服务
-├── strategies/     # 策略
-├── trade/          # 券商适配和模拟盘执行抽象
-└── utils/          # 工具
+backend/
+├── app/            # Python/FastAPI 后端应用代码
+├── alembic/        # 数据库迁移
+├── data/           # 本地数据和数据湖文件
+├── scripts/        # 后端导入、因子、维护和调度入口
+├── sql/            # SQL 资源
+├── tests/          # 后端测试
+├── pyproject.toml  # Python 项目配置
+└── docker-compose.yml
 
 docs/
 ├── architecture/   # 架构设计
 ├── data/           # 数据契约、导入、质量校验
 ├── database/       # schema 规划
 └── roadmap.md      # 路线图
+
+frontend/
+└── src/            # Vue3 前端工作台
 ```
 
 ## 核心原则

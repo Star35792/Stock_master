@@ -1,0 +1,90 @@
+export interface DataQualityIssueSnapshot {
+  id: number;
+  dataset: string;
+  symbol: string | null;
+  trade_date: string | null;
+  issue_type: string;
+  severity: string;
+  status: string;
+  created_at: string;
+}
+
+export interface JobLogSnapshot {
+  id: number;
+  job_name: string;
+  job_type: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  rows_failed: number;
+  error_message: string | null;
+}
+
+export interface FactorRunSnapshot {
+  id: number;
+  factor_name: string;
+  factor_version: string;
+  status: string;
+  input_start_date: string | null;
+  input_end_date: string | null;
+  started_at: string;
+  finished_at: string | null;
+  rows_written: number;
+  error_message: string | null;
+}
+
+export interface BacktestRunSnapshot {
+  id: number;
+  name: string;
+  strategy_name: string;
+  status: string;
+  start_date: string;
+  end_date: string;
+  final_equity: string | number | null;
+  total_return: string | number | null;
+  started_at: string;
+  finished_at: string | null;
+  error_message: string | null;
+}
+
+export interface PaperOrderSnapshot {
+  id: number;
+  account_id: number;
+  plan_id: number;
+  check_id: number;
+  symbol: string;
+  side: string;
+  order_quantity: number;
+  trade_date: string;
+  status: string;
+  rejection_reason: string | null;
+  created_at: string;
+}
+
+export interface OperationsOverview {
+  generated_at: string;
+  data_quality: {
+    issue_status_counts: Record<string, number>;
+    open_issue_severity_counts: Record<string, number>;
+    latest_issues: DataQualityIssueSnapshot[];
+  };
+  jobs: {
+    status_counts: Record<string, number>;
+    latest_jobs: JobLogSnapshot[];
+  };
+  factors: {
+    status_counts: Record<string, number>;
+    latest_runs: FactorRunSnapshot[];
+  };
+  backtests: {
+    status_counts: Record<string, number>;
+    latest_runs: BacktestRunSnapshot[];
+  };
+  paper_trading: {
+    account_count: number;
+    fill_count: number;
+    position_count: number;
+    order_status_counts: Record<string, number>;
+    latest_orders: PaperOrderSnapshot[];
+  };
+}

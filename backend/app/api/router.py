@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     adjustment_factors_router,
+    backtests_router,
     corporate_actions_router,
     daily_bars_router,
     data_quality_router,
@@ -10,6 +11,7 @@ from app.api.routes import (
     operations_router,
     securities_router,
     source_compares_router,
+    strategy_research_router,
     trading_calendar_router,
 )
 
@@ -18,6 +20,8 @@ api_router.include_router(securities_router)
 api_router.include_router(daily_bars_router)
 api_router.include_router(data_quality_router)
 api_router.include_router(factors_router)
+api_router.include_router(backtests_router)
+api_router.include_router(strategy_research_router)
 api_router.include_router(source_compares_router)
 api_router.include_router(manual_corrections_router)
 api_router.include_router(corporate_actions_router)

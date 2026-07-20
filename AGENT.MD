@@ -26,18 +26,21 @@
 
 ## 仓库概览
 
-- `app/`: Python/FastAPI 应用代码
-- `app/api/`: HTTP API 路由与接口层
-- `app/services/`: 业务流程编排，如导入、清洗、校验、修复
-- `app/repositories/`: 数据库读写、查询、upsert
-- `app/models/`: SQLAlchemy ORM 模型
-- `app/database/`: SQLAlchemy Base、Session、数据库连接和 schema 定义
-- `app/scheduler/`: 定时任务
-- `app/factors/`: 因子计算，后续阶段启用
-- `app/strategies/`: 策略，后续阶段启用
-- `app/backtest/`: 回测，后续阶段启用
-- `app/portfolio/`: 组合与持仓，后续阶段启用
-- `app/risk/`: 风控，后续阶段启用
+- `backend/`: 主 Python/FastAPI 后端项目
+- `backend/app/`: Python/FastAPI 应用代码
+- `backend/app/api/`: HTTP API 路由与接口层
+- `backend/app/services/`: 业务流程编排，如导入、清洗、校验、修复
+- `backend/app/repositories/`: 数据库读写、查询、upsert
+- `backend/app/models/`: SQLAlchemy ORM 模型
+- `backend/app/database/`: SQLAlchemy Base、Session、数据库连接和 schema 定义
+- `backend/app/scheduler/`: 定时任务
+- `backend/app/factors/`: 因子计算，后续阶段启用
+- `backend/app/strategies/`: 策略，后续阶段启用
+- `backend/app/backtest/`: 回测，后续阶段启用
+- `backend/app/portfolio/`: 组合与持仓，后续阶段启用
+- `backend/app/risk/`: 风控，后续阶段启用
+- `frontend/`: Vue3 前端工作台
+- `libs/hithink_sdk/`: 独立 HiThink SDK / toolkit 包
 - `docs/`: 面向人的项目文档与正式设计记录
 - `aiDoc/`: 面向 AI 协作的结构化上下文
 - `同花顺数据来源参考/`: 外部数据来源参考资料，不是当前项目实现规范

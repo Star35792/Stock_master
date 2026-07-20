@@ -188,7 +188,7 @@ AKShare / CSV / QMT  →  raw.daily_bar  →  校验/对账  →  market.daily_b
 建议代码分层如下：
 
 ```text
-app/
+backend/app/
 ├── api/            # HTTP 接口，只调用 service
 ├── data_sources/   # CSV/API/QMT/AKShare 等来源适配器
 ├── services/       # 导入、清洗、校验、对账、修复流程
