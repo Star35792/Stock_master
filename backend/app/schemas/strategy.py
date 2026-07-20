@@ -90,6 +90,36 @@ class BacktestPerformanceRead(BaseModel):
     created_at: datetime
 
 
+class BacktestBenchmarkRead(BaseModel):
+    run_id: int
+    benchmark: str
+    strategy_total_return: Decimal
+    benchmark_total_return: Decimal
+    excess_return: Decimal
+    strategy_annualized_return: Decimal
+    benchmark_annualized_return: Decimal
+    excess_annualized_return: Decimal
+    start_date: date
+    end_date: date
+
+
+class BacktestComparisonRequest(BaseModel):
+    run_ids: list[int] = Field(min_length=2, max_length=20)
+
+
+class BacktestComparisonItem(BaseModel):
+    run_id: int
+    name: str
+    strategy_name: str
+    start_date: date
+    end_date: date
+    total_return: Decimal
+    annualized_return: Decimal
+    maximum_drawdown: Decimal
+    sharpe_ratio: Decimal | None
+    turnover_rate: Decimal
+
+
 class StyleFactorRef(BaseModel):
     factor_name: str = Field(min_length=1)
     factor_version: str = Field(min_length=1)
@@ -109,8 +139,13 @@ class FactorScoreSpecRequest(BaseModel):
 
 class FactorSelectionBacktestRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    strategy_name: str = Field(default="factor_selection", min_length=1, max_length=100)
     factor_specs: list[FactorScoreSpecRequest] = Field(min_length=1)
     top_n: int = Field(gt=0)
+    signal_lag: int = Field(default=1, ge=1)
+    rebalance_rule: Literal["daily"] = "daily"
+    holding_period: int = Field(default=1, gt=0)
+    benchmark: str | None = Field(default=None, min_length=1, max_length=100)
     allowed_security_types: set[Literal["stock", "etf", "index"]] = Field(
         default_factory=lambda: {"stock"}
     )
@@ -123,6 +158,9 @@ class FactorSelectionBacktestRequest(BaseModel):
     lot_size: int = Field(default=100, gt=0)
     code_version: str = Field(min_length=1)
     data_version: str = Field(min_length=1)
+    validation_mode: Literal["none", "out_of_sample", "rolling"] = "none"
+    training_start_date: date | None = None
+    training_end_date: date | None = None
 
 
 class FactorSelectionBacktestResult(BaseModel):
@@ -137,3 +175,14 @@ class FactorSelectionBacktestResult(BaseModel):
     trade_count: int
     equity_points: int
     position_snapshots: int
+
+
+class BatchFactorSelectionBacktestRequest(BaseModel):
+    runs: list[FactorSelectionBacktestRequest] = Field(min_length=2, max_length=20)
+
+
+class BatchFactorSelectionBacktestItem(BaseModel):
+    index: int
+    status: Literal["success", "failed"]
+    result: FactorSelectionBacktestResult | None = None
+    error_message: str | None = None

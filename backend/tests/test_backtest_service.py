@@ -91,6 +91,7 @@ def test_backtest_service_reads_trusted_market_and_persists_result() -> None:
     assert daily_bar_repository.kwargs["quality_status"] == "trusted"
     assert backtest_repository.create_kwargs is not None
     assert backtest_repository.create_kwargs["parameters"]["signals"][0]["symbol"] == "AAA"
+    assert backtest_repository.create_kwargs["parameters"]["adjust_type"] == "none"
 
 
 def test_backtest_service_validates_signal_boundary() -> None:
@@ -115,3 +116,59 @@ def test_backtest_service_validates_signal_boundary() -> None:
             code_version="abc123",
             data_version="market-none-20260702",
         )
+
+
+def test_backtest_service_persists_research_contract() -> None:
+    backtest_repository = FakeBacktestRepository()
+    service = DailyBacktestService(
+        daily_bar_repository=FakeDailyBarRepository(),
+        backtest_repository=backtest_repository,
+    )
+
+    service.run(
+        object(),
+        name="contract",
+        strategy_name="factor_selection",
+        signals=[
+            TargetWeightSignal(
+                signal_date=date(2026, 7, 1),
+                symbol="aaa",
+                target_weight=Decimal("1"),
+            )
+        ],
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        adjust_type="qfq",
+        initial_cash=Decimal("10000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260702",
+        research_contract={
+            "strategy_name": "factor_selection",
+            "factor_specs": [{"factor_name": "foo", "factor_version": "v1"}],
+            "top_n": 1,
+            "signal_lag": 1,
+            "rebalance_rule": "daily",
+            "holding_period": 1,
+            "benchmark": None,
+            "allowed_security_types": ["stock"],
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-02",
+            "adjust_type": "qfq",
+            "initial_cash": "10000",
+            "commission_rate": "0.0003",
+            "slippage_bps": "2",
+            "lot_size": 100,
+            "code_version": "abc123",
+            "data_version": "market-qfq-20260702",
+        },
+    )
+
+    assert backtest_repository.create_kwargs is not None
+    assert backtest_repository.create_kwargs["parameters"]["strategy_name"] == "factor_selection"
+    assert (
+        backtest_repository.create_kwargs["parameters"]["factor_specs"][0]["factor_name"]
+        == "foo"
+    )

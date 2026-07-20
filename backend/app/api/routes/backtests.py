@@ -6,6 +6,9 @@ from fastapi import APIRouter, HTTPException, Query, status
 from app.api.dependencies import DatabaseSession
 from app.schemas import Page
 from app.schemas.strategy import (
+    BacktestBenchmarkRead,
+    BacktestComparisonItem,
+    BacktestComparisonRequest,
     BacktestEquityRead,
     BacktestPerformanceAnalyzeRequest,
     BacktestPerformanceRead,
@@ -17,6 +20,20 @@ from app.services import BacktestQueryService
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 service = BacktestQueryService()
+
+
+@router.post("/runs/compare", response_model=list[BacktestComparisonItem])
+def compare_backtest_runs(
+    db: DatabaseSession,
+    payload: BacktestComparisonRequest,
+) -> list[BacktestComparisonItem]:
+    try:
+        return service.compare_runs(db, run_ids=payload.run_ids)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 def _raise_not_found(message: str) -> None:
@@ -151,6 +168,19 @@ def get_backtest_performance(
     if performance is None:
         _raise_not_found("backtest performance not found")
     return performance
+
+
+@router.get("/runs/{run_id}/benchmark", response_model=BacktestBenchmarkRead)
+def get_backtest_benchmark(
+    db: DatabaseSession,
+    run_id: int,
+) -> BacktestBenchmarkRead:
+    try:
+        return service.get_benchmark_comparison(db, run_id=run_id)
+    except ValueError as exc:
+        detail = str(exc)
+        code = 404 if detail == "backtest run not found" else 422
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @router.post("/runs/{run_id}/performance", response_model=BacktestPerformanceRead)

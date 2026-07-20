@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,8 @@ from app.repositories.market import DailyBarRepository
 from app.repositories.strategy import BacktestPerformanceRepository, BacktestRepository
 from app.schemas.common import Page
 from app.schemas.strategy import (
+    BacktestBenchmarkRead,
+    BacktestComparisonItem,
     BacktestEquityRead,
     BacktestPerformanceRead,
     BacktestPositionRead,
@@ -49,6 +52,7 @@ class DailyBacktestService:
         lot_size: int,
         code_version: str,
         data_version: str,
+        research_contract: dict[str, Any] | None = None,
     ) -> PersistedBacktestResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -71,25 +75,40 @@ class DailyBacktestService:
             for signal in signals
         ]
         symbols = sorted({signal.symbol for signal in normalized_signals})
+        serialized_signals = [
+            {
+                "signal_date": signal.signal_date.isoformat(),
+                "symbol": signal.symbol,
+                "target_weight": str(signal.target_weight),
+            }
+            for signal in sorted(
+                normalized_signals,
+                key=lambda signal: (
+                    signal.signal_date,
+                    signal.symbol,
+                    str(signal.target_weight),
+                ),
+            )
+        ]
+        parameters = {
+            "adjust_type": adjust_type,
+            "commission_rate": str(commission_rate),
+            "slippage_bps": str(slippage_bps),
+            "lot_size": lot_size,
+            "symbols": symbols,
+            "signals": serialized_signals,
+        }
+        if research_contract is not None:
+            parameters = {
+                **research_contract,
+                "symbols": symbols,
+                "signals": serialized_signals,
+            }
         run = self.backtest_repository.create_run(
             db,
             name=name,
             strategy_name=strategy_name,
-            parameters={
-                "adjust_type": adjust_type,
-                "commission_rate": str(commission_rate),
-                "slippage_bps": str(slippage_bps),
-                "lot_size": lot_size,
-                "symbols": symbols,
-                "signals": [
-                    {
-                        "signal_date": signal.signal_date.isoformat(),
-                        "symbol": signal.symbol,
-                        "target_weight": str(signal.target_weight),
-                    }
-                    for signal in normalized_signals
-                ],
-            },
+            parameters=parameters,
             code_version=code_version,
             data_version=data_version,
             start_date=start_date,
@@ -114,6 +133,7 @@ class DailyBacktestService:
             self.backtest_repository.save_result(db, run=run, result=result)
         except Exception as exc:
             self.backtest_repository.fail_run(db, run=run, error_message=str(exc))
+            db.commit()
             raise
         return PersistedBacktestResult(run_id=run.id, result=result)
 
@@ -124,6 +144,7 @@ class BacktestQueryService:
         backtest_repository: BacktestRepository | None = None,
         performance_repository: BacktestPerformanceRepository | None = None,
         performance_service: BacktestPerformanceService | None = None,
+        daily_bar_repository: DailyBarRepository | None = None,
     ) -> None:
         self.backtest_repository = backtest_repository or BacktestRepository()
         self.performance_repository = (
@@ -132,6 +153,89 @@ class BacktestQueryService:
         self.performance_service = performance_service or BacktestPerformanceService(
             performance_repository=self.performance_repository
         )
+        self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
+
+    def get_benchmark_comparison(
+        self, db: Session, *, run_id: int
+    ) -> BacktestBenchmarkRead:
+        run = self.backtest_repository.get_run(db, run_id=run_id)
+        if run is None:
+            raise ValueError("backtest run not found")
+        if run.status != "success":
+            raise ValueError("backtest run must be successful")
+        benchmark = run.parameters.get("benchmark")
+        if not benchmark:
+            raise ValueError("benchmark is not configured for this backtest")
+        bars = self.daily_bar_repository.list_by_symbol(
+            db,
+            symbol=benchmark.upper(),
+            adjust_type=run.parameters.get("adjust_type", "qfq"),
+            start_date=run.start_date,
+            end_date=run.end_date,
+            quality_status="trusted",
+            limit=5000,
+            offset=0,
+        )[0]
+        if len(bars) < 2:
+            raise ValueError("trusted benchmark data is insufficient")
+        first_close = bars[0].close
+        last_close = bars[-1].close
+        benchmark_return = last_close / first_close - Decimal(1)
+        strategy_return = run.total_return
+        periods = len(bars) - 1
+        strategy_annualized = self._annualized_return(strategy_return, periods)
+        benchmark_annualized = self._annualized_return(benchmark_return, periods)
+        return BacktestBenchmarkRead(
+            run_id=run.id,
+            benchmark=benchmark.upper(),
+            strategy_total_return=strategy_return,
+            benchmark_total_return=benchmark_return,
+            excess_return=strategy_return - benchmark_return,
+            strategy_annualized_return=strategy_annualized,
+            benchmark_annualized_return=benchmark_annualized,
+            excess_annualized_return=strategy_annualized - benchmark_annualized,
+            start_date=bars[0].trade_date,
+            end_date=bars[-1].trade_date,
+        )
+
+    @staticmethod
+    def _annualized_return(total_return: Decimal, periods: int) -> Decimal:
+        if periods <= 0 or total_return <= Decimal(-1):
+            return Decimal()
+        return Decimal(str(float(Decimal(1) + total_return) ** (252 / periods) - 1))
+
+    def compare_runs(
+        self, db: Session, *, run_ids: list[int]
+    ) -> list[BacktestComparisonItem]:
+        if len(run_ids) < 2:
+            raise ValueError("at least two run_ids are required")
+        if len(set(run_ids)) != len(run_ids):
+            raise ValueError("run_ids must be unique")
+        items = []
+        for run_id in run_ids:
+            run = self.backtest_repository.get_run(db, run_id=run_id)
+            if run is None:
+                raise ValueError(f"backtest run not found: {run_id}")
+            if run.status != "success":
+                raise ValueError(f"backtest run must be successful: {run_id}")
+            performance = self.performance_repository.get_by_run_id(db, run_id=run_id)
+            if performance is None:
+                raise ValueError(f"backtest performance not found: {run_id}")
+            items.append(
+                BacktestComparisonItem(
+                    run_id=run.id,
+                    name=run.name,
+                    strategy_name=run.strategy_name,
+                    start_date=run.start_date,
+                    end_date=run.end_date,
+                    total_return=performance.total_return,
+                    annualized_return=performance.annualized_return,
+                    maximum_drawdown=performance.maximum_drawdown,
+                    sharpe_ratio=performance.sharpe_ratio,
+                    turnover_rate=performance.turnover_rate,
+                )
+            )
+        return sorted(items, key=lambda item: (-item.total_return, item.run_id))
 
     def list_runs(
         self,

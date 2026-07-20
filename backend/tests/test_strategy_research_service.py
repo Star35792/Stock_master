@@ -16,7 +16,7 @@ class FakeFactorValueRepository:
             return [
                 SimpleNamespace(
                     trade_date=date(2026, 7, 1),
-                    symbol="AAA",
+                    symbol="aaa",
                     value=Decimal("1"),
                 ),
                 SimpleNamespace(
@@ -25,18 +25,20 @@ class FakeFactorValueRepository:
                     value=Decimal("2"),
                 ),
             ]
-        return [
-            SimpleNamespace(
-                trade_date=date(2026, 7, 1),
-                symbol="AAA",
-                value=Decimal("3"),
-            ),
-            SimpleNamespace(
-                trade_date=date(2026, 7, 1),
-                symbol="BBB",
-                value=Decimal("1"),
-            ),
-        ]
+        if kwargs["factor_name"] == "quality_20":
+            return [
+                SimpleNamespace(
+                    trade_date=date(2026, 7, 1),
+                    symbol="AAA",
+                    value=Decimal("3"),
+                ),
+                SimpleNamespace(
+                    trade_date=date(2026, 7, 1),
+                    symbol="BBB",
+                    value=Decimal("1"),
+                ),
+            ]
+        return []
 
 
 class FakeSecurityRepository:
@@ -75,11 +77,16 @@ def test_strategy_research_service_runs_factor_selection_backtest() -> None:
     result = service.run_factor_selection(
         object(),
         name="factor-selection-smoke",
+        strategy_name="factor_selection",
         factor_specs=[
-            FactorScoreSpec("momentum_20", "v1-qfq", weight=Decimal("0.6")),
             FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("0.4")),
+            FactorScoreSpec("momentum_20", "v1-qfq", weight=Decimal("0.6")),
         ],
         top_n=1,
+        signal_lag=1,
+        rebalance_rule="daily",
+        holding_period=1,
+        benchmark="000300.SH",
         allowed_security_types={"stock"},
         start_date=date(2026, 7, 1),
         end_date=date(2026, 7, 1),
@@ -99,3 +106,50 @@ def test_strategy_research_service_runs_factor_selection_backtest() -> None:
     assert backtest_service.kwargs["initial_cash"] == Decimal("100000")
     assert factor_value_repository.requests[0]["factor_name"] == "momentum_20"
     assert factor_value_repository.requests[1]["factor_name"] == "quality_20"
+    contract = backtest_service.kwargs["research_contract"]
+    assert contract["benchmark"] == "000300.SH"
+    assert contract["allowed_security_types"] == ["stock"]
+    assert contract["factor_specs"] == [
+        {
+            "factor_name": "momentum_20",
+            "factor_version": "v1-qfq",
+            "weight": "0.6",
+            "higher_is_better": True,
+        },
+        {
+            "factor_name": "quality_20",
+            "factor_version": "v1-qfq",
+            "weight": "0.4",
+            "higher_is_better": True,
+        },
+    ]
+
+
+def test_strategy_research_service_rejects_missing_factor_values() -> None:
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        backtest_service=FakeBacktestService(),
+    )
+
+    try:
+        service.run_factor_selection(
+            object(),
+            name="missing-factor",
+            factor_specs=[FactorScoreSpec("missing", "v1")],
+            top_n=1,
+            allowed_security_types={"stock"},
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 1),
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc123",
+            data_version="market-qfq-20260720",
+        )
+    except ValueError as exc:
+        assert "factor values not found for missing@v1" in str(exc)
+    else:
+        raise AssertionError("missing factor values must be rejected")

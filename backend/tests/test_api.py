@@ -1,6 +1,11 @@
+from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from app.api.routes import health as health_module
+from app.api.routes import strategy_research as strategy_research_module
 from app.main import app
 
 client = TestClient(app)
@@ -73,7 +78,10 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/backtests/runs/{run_id}/equity" in paths
     assert "/api/v1/backtests/runs/{run_id}/positions" in paths
     assert "/api/v1/backtests/runs/{run_id}/performance" in paths
+    assert "/api/v1/backtests/runs/{run_id}/benchmark" in paths
+    assert "/api/v1/backtests/runs/compare" in paths
     assert "/api/v1/strategy-research/factor-selection/backtests" in paths
+    assert "/api/v1/strategy-research/factor-selection/backtests/batch" in paths
     assert "/api/v1/operations/overview" in paths
 
 
@@ -218,3 +226,81 @@ def test_factor_selection_backtest_rejects_reversed_date_range() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_factor_selection_backtest_forwards_research_contract(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_run(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            run_id=7,
+            result=SimpleNamespace(
+                initial_cash=Decimal("100000"),
+                final_equity=Decimal("101000"),
+                total_return=Decimal("0.01"),
+                trades=[],
+                equity_curve=[],
+                positions=[],
+            ),
+        )
+
+    monkeypatch.setattr(
+        strategy_research_module.service,
+        "run_factor_selection",
+        fake_run,
+    )
+    response = client.post(
+        "/api/v1/strategy-research/factor-selection/backtests",
+        json={
+            "name": "contract-api",
+            "strategy_name": "factor_selection_v4",
+            "factor_specs": [
+                {
+                    "factor_name": "momentum_20",
+                    "factor_version": "v1-qfq",
+                    "weight": "0.7",
+                }
+            ],
+            "top_n": 1,
+            "signal_lag": 1,
+            "rebalance_rule": "daily",
+            "holding_period": 1,
+            "benchmark": "000300.SH",
+            "allowed_security_types": ["stock"],
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-02",
+            "adjust_type": "qfq",
+            "initial_cash": "100000",
+            "code_version": "abc123",
+            "data_version": "market-qfq-20260720",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["strategy_name"] == "factor_selection_v4"
+    assert captured["strategy_name"] == "factor_selection_v4"
+    assert captured["benchmark"] == "000300.SH"
+    assert captured["start_date"] == date(2026, 7, 1)
+
+
+def test_validation_backtest_requires_training_period_before_test_period() -> None:
+    response = client.post(
+        "/api/v1/strategy-research/factor-selection/backtests",
+        json={
+            "name": "bad-validation-window",
+            "factor_specs": [{"factor_name": "momentum_20", "factor_version": "v1"}],
+            "top_n": 1,
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-10",
+            "initial_cash": "100000",
+            "code_version": "abc123",
+            "data_version": "market-qfq-20260720",
+            "validation_mode": "out_of_sample",
+            "training_start_date": "2026-06-01",
+            "training_end_date": "2026-07-01",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "training period must end before the backtest period"

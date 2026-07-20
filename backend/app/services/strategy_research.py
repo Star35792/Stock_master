@@ -1,5 +1,7 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -25,8 +27,13 @@ class StrategyResearchService:
         db: Session,
         *,
         name: str,
+        strategy_name: str = "factor_selection",
         factor_specs: list[FactorScoreSpec],
         top_n: int,
+        signal_lag: int = 1,
+        rebalance_rule: str = "daily",
+        holding_period: int = 1,
+        benchmark: str | None = None,
         allowed_security_types: set[str],
         start_date: date,
         end_date: date,
@@ -37,36 +44,87 @@ class StrategyResearchService:
         lot_size: int,
         code_version: str,
         data_version: str,
+        validation_mode: str = "none",
+        training_start_date: date | None = None,
+        training_end_date: date | None = None,
     ) -> PersistedBacktestResult:
         if not factor_specs:
             raise ValueError("factor_specs must not be empty")
+        if signal_lag != 1:
+            raise ValueError("only signal_lag=1 is supported")
+        if rebalance_rule != "daily":
+            raise ValueError("only rebalance_rule=daily is supported")
+        if holding_period != 1:
+            raise ValueError("only holding_period=1 is supported")
+        normalized_specs = sorted(
+            factor_specs,
+            key=lambda spec: (
+                spec.factor_name,
+                spec.factor_version,
+                str(spec.weight),
+                spec.higher_is_better,
+            ),
+        )
         factor_rows = {
-            spec: self.factor_value_repository.list_for_cross_section(
-                db,
-                factor_name=spec.factor_name,
-                factor_version=spec.factor_version,
-                start_date=start_date,
-                end_date=end_date,
+            spec: self._normalize_factor_rows(
+                self.factor_value_repository.list_for_cross_section(
+                    db,
+                    factor_name=spec.factor_name,
+                    factor_version=spec.factor_version,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             )
-            for spec in factor_specs
+            for spec in normalized_specs
         }
+        for spec, rows in factor_rows.items():
+            if not rows:
+                raise ValueError(
+                    f"factor values not found for {spec.factor_name}@{spec.factor_version}"
+                )
         symbols = {
             row.symbol
             for rows in factor_rows.values()
             for row in rows
         }
         security_types = self.security_repository.get_security_types(db, symbols)
+        normalized_security_types = {
+            symbol.upper(): security_type
+            for symbol, security_type in security_types.items()
+        }
         signals = MultiFactorStrategy(
             top_n=top_n,
             allowed_security_types=allowed_security_types,
         ).generate(
             factor_rows=factor_rows,
-            security_types=security_types,
+            security_types=normalized_security_types,
+        )
+        contract = self._build_research_contract(
+            strategy_name=strategy_name,
+            factor_specs=normalized_specs,
+            top_n=top_n,
+            signal_lag=signal_lag,
+            rebalance_rule=rebalance_rule,
+            holding_period=holding_period,
+            benchmark=benchmark,
+            allowed_security_types=allowed_security_types,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            initial_cash=initial_cash,
+            commission_rate=commission_rate,
+            slippage_bps=slippage_bps,
+            lot_size=lot_size,
+            code_version=code_version,
+            data_version=data_version,
+            validation_mode=validation_mode,
+            training_start_date=training_start_date,
+            training_end_date=training_end_date,
         )
         return self.backtest_service.run(
             db,
             name=name,
-            strategy_name="factor_selection",
+            strategy_name=strategy_name,
             signals=signals,
             start_date=start_date,
             end_date=end_date,
@@ -77,4 +135,73 @@ class StrategyResearchService:
             lot_size=lot_size,
             code_version=code_version,
             data_version=data_version,
+            research_contract=contract,
         )
+
+    @staticmethod
+    def _normalize_factor_rows(rows: list[Any]) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(
+                trade_date=row.trade_date,
+                symbol=row.symbol.upper(),
+                value=row.value,
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _build_research_contract(
+        *,
+        strategy_name: str,
+        factor_specs: list[FactorScoreSpec],
+        top_n: int,
+        signal_lag: int,
+        rebalance_rule: str,
+        holding_period: int,
+        benchmark: str | None,
+        allowed_security_types: set[str],
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        initial_cash: Decimal,
+        commission_rate: Decimal,
+        slippage_bps: Decimal,
+        lot_size: int,
+        code_version: str,
+        data_version: str,
+        validation_mode: str,
+        training_start_date: date | None,
+        training_end_date: date | None,
+    ) -> dict[str, Any]:
+        return {
+            "strategy_name": strategy_name,
+            "factor_specs": [
+                {
+                    "factor_name": spec.factor_name,
+                    "factor_version": spec.factor_version,
+                    "weight": str(spec.weight),
+                    "higher_is_better": spec.higher_is_better,
+                }
+                for spec in factor_specs
+            ],
+            "top_n": top_n,
+            "signal_lag": signal_lag,
+            "rebalance_rule": rebalance_rule,
+            "holding_period": holding_period,
+            "benchmark": benchmark,
+            "allowed_security_types": sorted(allowed_security_types),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "adjust_type": adjust_type,
+            "initial_cash": str(initial_cash),
+            "commission_rate": str(commission_rate),
+            "slippage_bps": str(slippage_bps),
+            "lot_size": lot_size,
+            "code_version": code_version,
+            "data_version": data_version,
+            "validation_mode": validation_mode,
+            "training_start_date": (
+                training_start_date.isoformat() if training_start_date else None
+            ),
+            "training_end_date": training_end_date.isoformat() if training_end_date else None,
+        }
