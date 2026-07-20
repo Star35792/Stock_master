@@ -113,8 +113,8 @@ def _normalize_rows(
 ) -> list[dict]:
     rows = []
     for rank, item in enumerate(items, 1):
-        code = str(item.get("code") or "")
-        item_key = code or str(item.get("name") or rank)
+        code = str(_first_present(item, "code", "f12") or "")
+        item_key = code or str(_first_present(item, "name", "f14") or rank)
         rows.append(
             {
                 "dataset": dataset,
@@ -122,12 +122,20 @@ def _normalize_rows(
                 "item_key": item_key,
                 "symbol": _symbol(code),
                 "rank": rank,
-                "value": _money(item.get("main_net_inflow")),
+                "value": _money(_first_present(item, "main_net_inflow", "f62")),
                 "attributes": item,
                 "source_name": source_name,
             }
         )
     return rows
+
+
+def _first_present(item: dict, *keys: str) -> object:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _symbol(code: str) -> str | None:

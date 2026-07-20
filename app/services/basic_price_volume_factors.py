@@ -160,6 +160,31 @@ BASIC_FACTOR_SPECS = (
         window_days=21,
         default_enabled=False,
     ),
+    BasicFactorSpec(
+        name="reversal_5",
+        display_name="5日反转",
+        description="negative 5-trading-day momentum",
+        inputs=("market.daily_bar.close",),
+        window_days=5,
+        default_enabled=False,
+    ),
+    BasicFactorSpec(
+        name="beta_60",
+        display_name="60日Beta",
+        description="60-return beta to equal-weight trusted universe return",
+        inputs=("market.daily_bar.close",),
+        window_days=60,
+        default_enabled=False,
+    ),
+    BasicFactorSpec(
+        name="residual_volatility_60",
+        display_name="60日残差波动率",
+        description="standard deviation of residual returns after 60-return market beta",
+        inputs=("market.daily_bar.close",),
+        window_days=60,
+        higher_is_better=False,
+        default_enabled=False,
+    ),
 )
 
 
@@ -212,6 +237,7 @@ class BasicPriceVolumeFactorService:
         bars_by_symbol: dict[str, list[Any]] = defaultdict(list)
         for bar in bars:
             bars_by_symbol[bar.symbol].append(bar)
+        market_returns_by_date = self._market_returns_by_date(bars_by_symbol)
 
         rows_by_factor: dict[str, int] = {}
         run_ids: dict[str, int] = {}
@@ -251,6 +277,7 @@ class BasicPriceVolumeFactorService:
                 db,
                 spec=spec,
                 bars_by_symbol=bars_by_symbol,
+                market_returns_by_date=market_returns_by_date,
                 start_date=start_date,
                 end_date=end_date,
                 run_id=run.id,
@@ -293,6 +320,7 @@ class BasicPriceVolumeFactorService:
         *,
         spec: BasicFactorSpec,
         bars_by_symbol: dict[str, list[Any]],
+        market_returns_by_date: dict[date, Decimal],
         start_date: date,
         end_date: date,
         run_id: int,
@@ -308,7 +336,12 @@ class BasicPriceVolumeFactorService:
             for index, bar in enumerate(eligible_bars):
                 if bar.trade_date < start_date or bar.trade_date > end_date:
                     continue
-                value = self._calculate_value(spec.name, eligible_bars, index)
+                value = self._calculate_value(
+                    spec.name,
+                    eligible_bars,
+                    index,
+                    market_returns_by_date=market_returns_by_date,
+                )
                 if value is None:
                     continue
                 self.value_repository.upsert_value(
@@ -328,6 +361,8 @@ class BasicPriceVolumeFactorService:
         factor_name: str,
         bars: list[Any],
         index: int,
+        *,
+        market_returns_by_date: dict[date, Decimal] | None = None,
     ) -> Decimal | None:
         bar = bars[index]
         if factor_name == "ret_1d":
@@ -357,6 +392,9 @@ class BasicPriceVolumeFactorService:
             if index < 5:
                 return None
             return self._ratio_change(bar.close, bars[index - 5].close)
+        if factor_name == "reversal_5":
+            momentum = self._momentum(bars, index, 5)
+            return None if momentum is None else -momentum
         if factor_name == "volatility_5":
             return self._return_volatility(bars, index, 5)
         if factor_name == "momentum_20":
@@ -411,7 +449,144 @@ class BasicPriceVolumeFactorService:
             if mean == 0:
                 return None
             return self._ratio_change(bar.volume, mean)
+        if factor_name == "beta_60":
+            return self._beta_to_market(
+                bars,
+                index,
+                market_returns_by_date or {},
+                window=60,
+            )
+        if factor_name == "residual_volatility_60":
+            return self._residual_volatility(
+                bars,
+                index,
+                market_returns_by_date or {},
+                window=60,
+            )
         raise ValueError(f"unsupported factor: {factor_name}")
+
+    def _beta_to_market(
+        self,
+        bars: list[Any],
+        index: int,
+        market_returns_by_date: dict[date, Decimal],
+        *,
+        window: int,
+    ) -> Decimal | None:
+        aligned = self._aligned_symbol_market_returns(
+            bars,
+            index,
+            market_returns_by_date,
+            window=window,
+        )
+        if aligned is None:
+            return None
+        symbol_returns, market_returns = aligned
+        market_mean = sum(market_returns, Decimal()) / Decimal(len(market_returns))
+        symbol_mean = sum(symbol_returns, Decimal()) / Decimal(len(symbol_returns))
+        market_variance = sum(
+            ((value - market_mean) ** 2 for value in market_returns),
+            Decimal(),
+        )
+        if market_variance == 0:
+            return None
+        covariance = sum(
+            (
+                (symbol_return - symbol_mean) * (market_return - market_mean)
+                for symbol_return, market_return in zip(
+                    symbol_returns,
+                    market_returns,
+                    strict=True,
+                )
+            ),
+            Decimal(),
+        )
+        return covariance / market_variance
+
+    def _residual_volatility(
+        self,
+        bars: list[Any],
+        index: int,
+        market_returns_by_date: dict[date, Decimal],
+        *,
+        window: int,
+    ) -> Decimal | None:
+        beta = self._beta_to_market(
+            bars,
+            index,
+            market_returns_by_date,
+            window=window,
+        )
+        aligned = self._aligned_symbol_market_returns(
+            bars,
+            index,
+            market_returns_by_date,
+            window=window,
+        )
+        if beta is None or aligned is None:
+            return None
+        symbol_returns, market_returns = aligned
+        residuals = [
+            symbol_return - beta * market_return
+            for symbol_return, market_return in zip(
+                symbol_returns,
+                market_returns,
+                strict=True,
+            )
+        ]
+        mean = sum(residuals, Decimal()) / Decimal(len(residuals))
+        with localcontext() as context:
+            context.prec = 28
+            return (
+                sum(((value - mean) ** 2 for value in residuals), Decimal())
+                / Decimal(len(residuals))
+            ).sqrt()
+
+    def _aligned_symbol_market_returns(
+        self,
+        bars: list[Any],
+        index: int,
+        market_returns_by_date: dict[date, Decimal],
+        *,
+        window: int,
+    ) -> tuple[list[Decimal], list[Decimal]] | None:
+        symbol_returns = self._returns(bars, index, window)
+        if symbol_returns is None:
+            return None
+        dates = [
+            bars[position].trade_date
+            for position in range(index - window + 1, index + 1)
+        ]
+        market_returns = [market_returns_by_date.get(trade_date) for trade_date in dates]
+        if any(value is None for value in market_returns):
+            return None
+        return symbol_returns, [value for value in market_returns if value is not None]
+
+    @staticmethod
+    def _market_returns_by_date(
+        bars_by_symbol: dict[str, list[Any]],
+    ) -> dict[date, Decimal]:
+        returns_by_date: dict[date, list[Decimal]] = defaultdict(list)
+        for bars in bars_by_symbol.values():
+            eligible_bars = [
+                bar
+                for bar in bars
+                if bar.security_type in SUPPORTED_SECURITY_TYPES
+            ]
+            eligible_bars.sort(key=lambda bar: bar.trade_date)
+            for index in range(1, len(eligible_bars)):
+                current = eligible_bars[index]
+                previous = eligible_bars[index - 1]
+                if current.close is None or previous.close in {None, Decimal()}:
+                    continue
+                returns_by_date[current.trade_date].append(
+                    current.close / previous.close - Decimal(1)
+                )
+        return {
+            trade_date: sum(values, Decimal()) / Decimal(len(values))
+            for trade_date, values in returns_by_date.items()
+            if values
+        }
 
     def _momentum(self, bars: list[Any], index: int, window: int) -> Decimal | None:
         if index < window:

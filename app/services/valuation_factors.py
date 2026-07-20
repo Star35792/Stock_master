@@ -12,7 +12,11 @@ from app.repositories.factor import (
     FactorValueRepository,
 )
 from app.repositories.fundamental import FinancialStatementRepository
-from app.repositories.market import DailyBarRepository, ValuationSnapshotRepository
+from app.repositories.market import (
+    DailyBarRepository,
+    SecurityRepository,
+    ValuationSnapshotRepository,
+)
 
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
@@ -40,6 +44,54 @@ _NET_PROFIT = (
     "net_profit_parent_company",
     "net_profit",
     "net_income",
+)
+_OPERATING_PROFIT = (
+    "operating_profit",
+    "ebit",
+    "earnings_before_interest_and_taxes",
+)
+_OPERATING_CASH_FLOW = (
+    "net_cash_flows_from_operating_activities",
+    "net_operate_cash_flow",
+    "net_operating_cash_flow",
+    "operating_cash_flow",
+    "act_cash_flow_net",
+)
+_CAPITAL_EXPENDITURE = (
+    "capital_expenditure",
+    "capex",
+    "cash_paid_for_fixed_assets_intangible_assets_and_other_long_term_assets",
+)
+_INTEREST_BEARING_DEBT = (
+    "interest_bearing_debt",
+    "interest_bearing_liabilities",
+    "total_interest_bearing_debt",
+    "total_interest_bearing_liabilities",
+)
+_SHORT_TERM_DEBT = (
+    "short_term_borrowing",
+    "short_term_borrowings",
+    "short_term_debt",
+)
+_LONG_TERM_DEBT = (
+    "long_term_borrowing",
+    "long_term_borrowings",
+    "long_term_debt",
+)
+_CASH_AND_EQUIVALENTS = (
+    "cash_and_cash_equivalents",
+    "cash_equivalents",
+    "monetary_funds",
+    "cash",
+)
+_EBITDA = (
+    "ebitda",
+    "earnings_before_interest_tax_depreciation_and_amortization",
+)
+_DEPRECIATION_AMORTIZATION = (
+    "depreciation_and_amortization",
+    "depreciation_amortization",
+    "depr_amort",
 )
 
 
@@ -111,6 +163,37 @@ VALUATION_FACTOR_SPECS = (
             "market.valuation_snapshot.total_market_cap",
         ),
     ),
+    ValuationFactorSpec(
+        name="fcf_yield",
+        display_name="FCF yield",
+        description="latest reported free cash flow / latest available total market cap",
+        inputs=(
+            "fundamental.financial_statement.cash_flow.metrics",
+            "market.valuation_snapshot.total_market_cap",
+        ),
+    ),
+    ValuationFactorSpec(
+        name="ev_to_ebitda",
+        display_name="EV to EBITDA",
+        description="enterprise value / latest reported EBITDA",
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "fundamental.financial_statement.balance.metrics",
+            "fundamental.financial_statement.cash_flow.metrics",
+            "market.valuation_snapshot.total_market_cap",
+        ),
+        higher_is_better=False,
+    ),
+    ValuationFactorSpec(
+        name="industry_valuation_gap",
+        display_name="Industry valuation gap",
+        description="earnings-yield percentile minus current-industry median percentile",
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "market.valuation_snapshot.total_market_cap",
+            "market.security.industry",
+        ),
+    ),
 )
 
 
@@ -119,6 +202,7 @@ class ValuationFactorService:
         self,
         daily_bar_repository: DailyBarRepository | None = None,
         valuation_repository: ValuationSnapshotRepository | None = None,
+        security_repository: SecurityRepository | None = None,
         financial_statement_repository: FinancialStatementRepository | None = None,
         definition_repository: FactorDefinitionRepository | None = None,
         run_repository: FactorRunRepository | None = None,
@@ -126,6 +210,7 @@ class ValuationFactorService:
     ) -> None:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.valuation_repository = valuation_repository or ValuationSnapshotRepository()
+        self.security_repository = security_repository or SecurityRepository()
         self.financial_statement_repository = (
             financial_statement_repository or FinancialStatementRepository()
         )
@@ -185,6 +270,7 @@ class ValuationFactorService:
             symbols=statement_symbols,
         )
         statements_by_symbol = _snapshots_by_symbol(statements)
+        industries = self.security_repository.get_industries(db, set(bars_by_symbol))
 
         rows_by_factor: dict[str, int] = {}
         run_ids: dict[str, int] = {}
@@ -230,6 +316,7 @@ class ValuationFactorService:
                 bars_by_symbol=bars_by_symbol,
                 valuations_by_symbol=valuations_by_symbol,
                 statements_by_symbol=statements_by_symbol,
+                industries=industries,
                 run_id=run.id,
             )
             self.run_repository.update_status(
@@ -274,9 +361,19 @@ class ValuationFactorService:
         bars_by_symbol: dict[str, list[Any]],
         valuations_by_symbol: dict[str, list[Any]],
         statements_by_symbol: dict[str, list[FinancialSnapshot]],
+        industries: dict[str, str],
         run_id: int,
     ) -> int:
         rows_written = 0
+        if spec.name == "industry_valuation_gap":
+            gap_values = self._industry_valuation_gaps(
+                bars_by_symbol=bars_by_symbol,
+                valuations_by_symbol=valuations_by_symbol,
+                statements_by_symbol=statements_by_symbol,
+                industries=industries,
+            )
+        else:
+            gap_values = {}
         for symbol, bars in bars_by_symbol.items():
             valuations = valuations_by_symbol.get(symbol, [])
             statements = statements_by_symbol.get(symbol, [])
@@ -299,7 +396,14 @@ class ValuationFactorService:
                     statement_index += 1
                 if current_valuation is None:
                     continue
-                value = self._calculate_value(spec.name, current_valuation, current_statement)
+                if spec.name == "industry_valuation_gap":
+                    value = gap_values.get((symbol, bar.trade_date))
+                else:
+                    value = self._calculate_value(
+                        spec.name,
+                        current_valuation,
+                        current_statement,
+                    )
                 if value is None:
                     continue
                 self.value_repository.upsert_value(
@@ -313,6 +417,65 @@ class ValuationFactorService:
                 )
                 rows_written += 1
         return rows_written
+
+    def _industry_valuation_gaps(
+        self,
+        *,
+        bars_by_symbol: dict[str, list[Any]],
+        valuations_by_symbol: dict[str, list[Any]],
+        statements_by_symbol: dict[str, list[FinancialSnapshot]],
+        industries: dict[str, str],
+    ) -> dict[tuple[str, date], Decimal]:
+        earnings_yield_by_date: dict[date, dict[str, Decimal]] = defaultdict(dict)
+        for symbol, bars in bars_by_symbol.items():
+            valuations = valuations_by_symbol.get(symbol, [])
+            statements = statements_by_symbol.get(symbol, [])
+            valuation_index = 0
+            statement_index = 0
+            current_valuation = None
+            current_statement = None
+            for bar in bars:
+                while (
+                    valuation_index < len(valuations)
+                    and valuations[valuation_index].trade_date < bar.trade_date
+                ):
+                    current_valuation = valuations[valuation_index]
+                    valuation_index += 1
+                while (
+                    statement_index < len(statements)
+                    and statements[statement_index].report_date < bar.trade_date
+                ):
+                    current_statement = statements[statement_index]
+                    statement_index += 1
+                if current_valuation is None or current_statement is None:
+                    continue
+                value = self._calculate_value(
+                    "earnings_yield",
+                    current_valuation,
+                    current_statement,
+                )
+                if value is not None:
+                    earnings_yield_by_date[bar.trade_date][symbol] = value
+
+        result: dict[tuple[str, date], Decimal] = {}
+        for trade_date, symbol_values in earnings_yield_by_date.items():
+            percentiles = _cross_section_percentiles(symbol_values)
+            industry_percentiles: dict[str, list[Decimal]] = defaultdict(list)
+            for symbol, percentile in percentiles.items():
+                industry = industries.get(symbol)
+                if industry:
+                    industry_percentiles[industry].append(percentile)
+            industry_medians = {
+                industry: _median(values)
+                for industry, values in industry_percentiles.items()
+                if values
+            }
+            for symbol, percentile in percentiles.items():
+                industry = industries.get(symbol)
+                median = industry_medians.get(industry or "")
+                if median is not None:
+                    result[(symbol, trade_date)] = percentile - median
+        return result
 
     def _calculate_value(
         self,
@@ -336,6 +499,13 @@ class ValuationFactorService:
                 _metric(statement, "income", _REVENUE),
                 valuation.total_market_cap,
             )
+        if factor_name == "fcf_yield":
+            return self._ratio(_free_cash_flow(statement), valuation.total_market_cap)
+        if factor_name == "ev_to_ebitda":
+            return self._ratio(
+                _enterprise_value(statement, valuation.total_market_cap),
+                _ebitda(statement),
+            )
         raise ValueError(f"unsupported factor: {factor_name}")
 
     @staticmethod
@@ -352,6 +522,28 @@ def _group_by_symbol(rows: list[Any]) -> dict[str, list[Any]]:
     for values in grouped.values():
         values.sort(key=lambda row: row.trade_date)
     return dict(grouped)
+
+
+def _cross_section_percentiles(values_by_symbol: dict[str, Decimal]) -> dict[str, Decimal]:
+    if len(values_by_symbol) == 1:
+        symbol = next(iter(values_by_symbol))
+        return {symbol: Decimal("0.5")}
+    sorted_values = sorted(values_by_symbol.items(), key=lambda item: (item[1], item[0]))
+    result = {}
+    for symbol, value in values_by_symbol.items():
+        below = sum(other_value < value for _, other_value in sorted_values)
+        equal = sum(other_value == value for _, other_value in sorted_values)
+        average_rank = Decimal(below) + (Decimal(equal - 1) / Decimal(2))
+        result[symbol] = average_rank / Decimal(len(sorted_values) - 1)
+    return result
+
+
+def _median(values: list[Decimal]) -> Decimal:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / Decimal(2)
 
 
 def _snapshots_by_symbol(rows: list[Any]) -> dict[str, list[FinancialSnapshot]]:
@@ -420,6 +612,51 @@ def _equity(snapshot: FinancialSnapshot) -> Decimal | None:
     if total_assets is None or total_liabilities is None:
         return None
     return total_assets - total_liabilities
+
+
+def _free_cash_flow(snapshot: FinancialSnapshot) -> Decimal | None:
+    operating_cash_flow = _metric(snapshot, "cash_flow", _OPERATING_CASH_FLOW)
+    capital_expenditure = _metric(snapshot, "cash_flow", _CAPITAL_EXPENDITURE)
+    if operating_cash_flow is None or capital_expenditure is None:
+        return None
+    return operating_cash_flow - abs(capital_expenditure)
+
+
+def _enterprise_value(
+    snapshot: FinancialSnapshot,
+    market_cap: Decimal | None,
+) -> Decimal | None:
+    if market_cap is None:
+        return None
+    debt = _interest_bearing_debt(snapshot)
+    cash = _metric(snapshot, "balance", _CASH_AND_EQUIVALENTS)
+    if debt is None or cash is None:
+        return None
+    return market_cap + debt - cash
+
+
+def _interest_bearing_debt(snapshot: FinancialSnapshot) -> Decimal | None:
+    explicit = _metric(snapshot, "balance", _INTEREST_BEARING_DEBT)
+    if explicit is not None:
+        return explicit
+    parts = [
+        _metric(snapshot, "balance", _SHORT_TERM_DEBT),
+        _metric(snapshot, "balance", _LONG_TERM_DEBT),
+    ]
+    if any(value is not None for value in parts):
+        return sum((value for value in parts if value is not None), Decimal())
+    return None
+
+
+def _ebitda(snapshot: FinancialSnapshot) -> Decimal | None:
+    explicit = _metric(snapshot, "income", _EBITDA)
+    if explicit is not None:
+        return explicit
+    operating_profit = _metric(snapshot, "income", _OPERATING_PROFIT)
+    depreciation = _metric(snapshot, "cash_flow", _DEPRECIATION_AMORTIZATION)
+    if operating_profit is None or depreciation is None:
+        return None
+    return operating_profit + depreciation
 
 
 def _decimal(value: object) -> Decimal | None:

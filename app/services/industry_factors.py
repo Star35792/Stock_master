@@ -63,6 +63,15 @@ INDUSTRY_FACTOR_SPECS = (
         inputs=("market.daily_bar.close", "market.security.industry"),
         horizon_days=20,
     ),
+    IndustryFactorSpec(
+        name="industry_turnover_share_change_20",
+        display_name="Industry turnover share change 20",
+        description=(
+            "current-industry total amount share minus its 20-observation lag"
+        ),
+        inputs=("market.daily_bar.amount", "market.security.industry"),
+        horizon_days=20,
+    ),
 )
 
 
@@ -210,12 +219,26 @@ class IndustryFactorService:
         specs: tuple[IndustryFactorSpec, ...],
     ) -> dict[str, dict[date, dict[str, Decimal]]]:
         result: dict[str, dict[date, dict[str, Decimal]]] = {}
+        turnover_specs = {
+            spec.name: spec
+            for spec in specs
+            if spec.name == "industry_turnover_share_change_20"
+        }
+        for spec in turnover_specs.values():
+            result[spec.name] = self._build_industry_turnover_share_change(
+                bars_by_symbol=bars_by_symbol,
+                industries=industries,
+                horizon_days=spec.horizon_days,
+            )
+
         horizons = {spec.horizon_days for spec in specs}
         returns_by_horizon = {
             horizon: self._build_symbol_returns(bars_by_symbol, horizon_days=horizon)
             for horizon in horizons
         }
         for spec in specs:
+            if spec.name in turnover_specs:
+                continue
             industry_values_by_date: dict[date, dict[str, list[Decimal]]] = defaultdict(
                 lambda: defaultdict(list)
             )
@@ -241,6 +264,51 @@ class IndustryFactorService:
                     else:
                         raise ValueError(f"unsupported factor: {spec.name}")
                     result[spec.name][trade_date][industry] = metric
+        return result
+
+    @staticmethod
+    def _build_industry_turnover_share_change(
+        *,
+        bars_by_symbol: dict[str, list[Any]],
+        industries: dict[str, str],
+        horizon_days: int,
+    ) -> dict[date, dict[str, Decimal]]:
+        industry_amount_by_date: dict[date, dict[str, Decimal]] = defaultdict(
+            lambda: defaultdict(Decimal)
+        )
+        total_amount_by_date: dict[date, Decimal] = defaultdict(Decimal)
+        for symbol, bars in bars_by_symbol.items():
+            industry = industries.get(symbol)
+            if not industry:
+                continue
+            for bar in bars:
+                if bar.amount is None:
+                    continue
+                industry_amount_by_date[bar.trade_date][industry] += bar.amount
+                total_amount_by_date[bar.trade_date] += bar.amount
+
+        shares_by_date: dict[date, dict[str, Decimal]] = {}
+        for trade_date, industry_amounts in industry_amount_by_date.items():
+            total_amount = total_amount_by_date[trade_date]
+            if total_amount <= 0:
+                continue
+            shares_by_date[trade_date] = {
+                industry: amount / total_amount
+                for industry, amount in industry_amounts.items()
+            }
+
+        ordered_dates = sorted(shares_by_date)
+        result: dict[date, dict[str, Decimal]] = {}
+        for index in range(horizon_days, len(ordered_dates)):
+            trade_date = ordered_dates[index]
+            lag_date = ordered_dates[index - horizon_days]
+            current_shares = shares_by_date[trade_date]
+            lag_shares = shares_by_date[lag_date]
+            result[trade_date] = {
+                industry: share - lag_shares[industry]
+                for industry, share in current_shares.items()
+                if industry in lag_shares
+            }
         return result
 
     @staticmethod

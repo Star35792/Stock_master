@@ -104,6 +104,24 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
     statements = [
         _statement(
             "balance",
+            2022,
+            {
+                "accounts_receivable": "100",
+                "inventory": "120",
+            },
+            report_date=date(2023, 4, 30),
+        ),
+        _statement(
+            "income",
+            2022,
+            {
+                "operating_revenue": "729",
+                "net_profit": "150",
+            },
+            report_date=date(2023, 4, 30),
+        ),
+        _statement(
+            "balance",
             2024,
             {
                 "total_assets": "800",
@@ -111,6 +129,8 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
                 "interest_bearing_debt": "100",
                 "current_assets": "400",
                 "current_liabilities": "200",
+                "accounts_receivable": "160",
+                "inventory": "180",
             },
             report_date=date(2025, 4, 30),
         ),
@@ -141,6 +161,8 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
                 "interest_bearing_debt": "150",
                 "current_assets": "500",
                 "current_liabilities": "250",
+                "accounts_receivable": "220",
+                "inventory": "270",
             },
             report_date=date(2026, 4, 30),
         ),
@@ -200,12 +222,17 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
         "ocf_growth_yoy": 1,
         "net_profit_growth_yoy": 1,
         "roe_stability_3y": 0,
+        "revenue_cagr_3y": 1,
+        "net_profit_cagr_3y": 1,
+        "receivable_growth_revenue_gap": 1,
+        "inventory_growth_revenue_gap": 1,
+        "financial_anomaly_score": 2,
     }
     assert financial_statement_repository.kwargs == {
         "end_date": date(2026, 5, 6),
         "symbols": ["600519.SH"],
     }
-    assert len(definition_repository.definitions) == 15
+    assert len(definition_repository.definitions) == 20
     assert all(run["status"] == "success" for run in run_repository.finished)
 
     values = {
@@ -227,6 +254,17 @@ def test_financial_factor_service_calculates_statement_factors() -> None:
     assert values[("revenue_growth_yoy", date(2026, 5, 6))] == Decimal("0.2500000000")
     assert values[("ocf_growth_yoy", date(2026, 5, 6))] == Decimal("0.5000000000")
     assert values[("net_profit_growth_yoy", date(2026, 5, 6))] == Decimal("0.5000000000")
+    assert values[("revenue_cagr_3y", date(2026, 5, 6))] == Decimal("0.1969081611")
+    assert values[("net_profit_cagr_3y", date(2026, 5, 6))] == Decimal("0.2599210499")
+    assert values[("receivable_growth_revenue_gap", date(2026, 5, 6))] == Decimal(
+        "0.1250000000"
+    )
+    assert values[("inventory_growth_revenue_gap", date(2026, 5, 6))] == Decimal(
+        "0.2500000000"
+    )
+    assert values[("financial_anomaly_score", date(2026, 5, 6))] == Decimal(
+        "0.1666666667"
+    )
     assert ("revenue_growth_yoy", date(2026, 4, 30)) not in values
     assert all(item["factor_version"] == "v1" for item in value_repository.values)
 

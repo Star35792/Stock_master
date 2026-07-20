@@ -16,6 +16,7 @@ from app.repositories.market import DailyBarRepository, SecurityRepository
 
 VALUE_QUANT = Decimal("0.0000000001")
 PROFILE_VERSION = "v1"
+FORWARD_RETURN_HORIZONS = (1, 5, 20)
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,14 @@ class CrossSectionRunResult:
     @property
     def total_rows(self) -> int:
         return sum(self.rows_by_transform.values())
+
+
+@dataclass(frozen=True)
+class QuantileForwardDiagnostics:
+    top_return: Decimal | None
+    bottom_return: Decimal | None
+    long_short_return: Decimal | None
+    monotonicity: Decimal | None
 
 
 class FactorCrossSectionService:
@@ -106,7 +115,7 @@ class FactorCrossSectionService:
             )
             size_by_date = self._group_values(size_rows)
 
-        forward_returns_by_date = self._next_returns_by_date(
+        forward_returns_by_horizon = self._forward_returns_by_horizon(
             db,
             values_by_date=values_by_date,
             start_date=start_date,
@@ -120,7 +129,7 @@ class FactorCrossSectionService:
             factor_version=factor_version,
             values_by_date=values_by_date,
             universe_by_date=universe_by_date,
-            forward_returns_by_date=forward_returns_by_date,
+            forward_returns_by_horizon=forward_returns_by_horizon,
             code_version=code_version,
         )
         transforms = {
@@ -212,7 +221,7 @@ class FactorCrossSectionService:
         factor_version: str,
         values_by_date: dict[date, dict[str, Decimal]],
         universe_by_date: dict[date, int],
-        forward_returns_by_date: dict[date, dict[str, Decimal]],
+        forward_returns_by_horizon: dict[int, dict[date, dict[str, Decimal]]],
         code_version: str,
     ) -> int:
         rows_written = 0
@@ -239,6 +248,13 @@ class FactorCrossSectionService:
                 top_quantile_turnover = Decimal(1) - (
                     Decimal(retained) / Decimal(len(current_top_symbols))
                 )
+            forward_returns_1d = forward_returns_by_horizon.get(1, {}).get(
+                trade_date, {}
+            )
+            quantile_diagnostics_1d = self._quantile_forward_diagnostics(
+                symbol_values,
+                forward_returns_1d,
+            )
             self.profile_repository.upsert(
                 db,
                 factor_name=factor_name,
@@ -259,14 +275,50 @@ class FactorCrossSectionService:
                 ic_1d=self._quantize_optional(
                     self._information_coefficient(
                         symbol_values,
-                        forward_returns_by_date.get(trade_date, {}),
+                        forward_returns_1d,
                     )
                 ),
                 rank_ic_1d=self._quantize_optional(
                     self._rank_information_coefficient(
                         symbol_values,
-                        forward_returns_by_date.get(trade_date, {}),
+                        forward_returns_1d,
                     )
+                ),
+                ic_5d=self._quantize_optional(
+                    self._information_coefficient(
+                        symbol_values,
+                        forward_returns_by_horizon.get(5, {}).get(trade_date, {}),
+                    )
+                ),
+                rank_ic_5d=self._quantize_optional(
+                    self._rank_information_coefficient(
+                        symbol_values,
+                        forward_returns_by_horizon.get(5, {}).get(trade_date, {}),
+                    )
+                ),
+                ic_20d=self._quantize_optional(
+                    self._information_coefficient(
+                        symbol_values,
+                        forward_returns_by_horizon.get(20, {}).get(trade_date, {}),
+                    )
+                ),
+                rank_ic_20d=self._quantize_optional(
+                    self._rank_information_coefficient(
+                        symbol_values,
+                        forward_returns_by_horizon.get(20, {}).get(trade_date, {}),
+                    )
+                ),
+                top_quantile_forward_return_1d=self._quantize_optional(
+                    quantile_diagnostics_1d.top_return
+                ),
+                bottom_quantile_forward_return_1d=self._quantize_optional(
+                    quantile_diagnostics_1d.bottom_return
+                ),
+                long_short_forward_return_1d=self._quantize_optional(
+                    quantile_diagnostics_1d.long_short_return
+                ),
+                quantile_monotonicity_1d=self._quantize_optional(
+                    quantile_diagnostics_1d.monotonicity
                 ),
                 top_quantile_turnover=self._quantize_optional(top_quantile_turnover),
                 code_version=code_version,
@@ -275,7 +327,7 @@ class FactorCrossSectionService:
             rows_written += 1
         return rows_written
 
-    def _next_returns_by_date(
+    def _forward_returns_by_horizon(
         self,
         db: Session,
         *,
@@ -284,14 +336,14 @@ class FactorCrossSectionService:
         end_date: date,
         adjust_type: str,
         symbols: list[str] | None,
-    ) -> dict[date, dict[str, Decimal]]:
+    ) -> dict[int, dict[date, dict[str, Decimal]]]:
         if not values_by_date:
             return {}
         target_dates = set(values_by_date)
         bars = self.daily_bar_repository.list_for_factor_calculation(
             db,
             start_date=start_date,
-            end_date=end_date + timedelta(days=14),
+            end_date=end_date + timedelta(days=45),
             adjust_type=adjust_type,
             symbols=symbols,
             quality_status="trusted",
@@ -300,15 +352,30 @@ class FactorCrossSectionService:
         for bar in bars:
             bars_by_symbol[bar.symbol].append(bar)
 
-        returns_by_date: dict[date, dict[str, Decimal]] = defaultdict(dict)
+        returns_by_horizon: dict[int, dict[date, dict[str, Decimal]]] = {
+            horizon: defaultdict(dict) for horizon in FORWARD_RETURN_HORIZONS
+        }
         for symbol, symbol_bars in bars_by_symbol.items():
-            for previous, current in zip(symbol_bars, symbol_bars[1:], strict=False):
-                if previous.trade_date not in target_dates:
+            symbol_bars.sort(key=lambda bar: bar.trade_date)
+            for index, current_bar in enumerate(symbol_bars):
+                if current_bar.trade_date not in target_dates:
                     continue
-                forward_return = self._ratio_change(current.close, previous.close)
-                if forward_return is not None:
-                    returns_by_date[previous.trade_date][symbol] = forward_return
-        return dict(returns_by_date)
+                for horizon in FORWARD_RETURN_HORIZONS:
+                    future_index = index + horizon
+                    if future_index >= len(symbol_bars):
+                        continue
+                    forward_return = self._ratio_change(
+                        symbol_bars[future_index].close,
+                        current_bar.close,
+                    )
+                    if forward_return is not None:
+                        returns_by_horizon[horizon][current_bar.trade_date][symbol] = (
+                            forward_return
+                        )
+        return {
+            horizon: dict(returns_by_date)
+            for horizon, returns_by_date in returns_by_horizon.items()
+        }
 
     def _write_values(
         self,
@@ -483,6 +550,63 @@ class FactorCrossSectionService:
         return self._correlation(
             [factor_ranks[symbol] for symbol in common_symbols],
             [return_ranks[symbol] for symbol in common_symbols],
+        )
+
+    def _quantile_forward_diagnostics(
+        self,
+        factor_values: dict[str, Decimal],
+        forward_returns: dict[str, Decimal],
+    ) -> QuantileForwardDiagnostics:
+        common = [
+            (symbol, factor_values[symbol], forward_returns[symbol])
+            for symbol in sorted(set(factor_values) & set(forward_returns))
+        ]
+        if len(common) < 2:
+            return QuantileForwardDiagnostics(None, None, None, None)
+
+        ordered = sorted(common, key=lambda item: (item[1], item[0]))
+        quantile_count = max(
+            1,
+            int(
+                (Decimal(len(ordered)) * Decimal("0.2")).to_integral_value(
+                    rounding=ROUND_CEILING
+                )
+            ),
+        )
+        bottom_return = self._mean([item[2] for item in ordered[:quantile_count]])
+        top_return = self._mean([item[2] for item in ordered[-quantile_count:]])
+        long_short_return = (
+            None
+            if top_return is None or bottom_return is None
+            else top_return - bottom_return
+        )
+        monotonicity = self._quantile_monotonicity(ordered)
+        return QuantileForwardDiagnostics(
+            top_return=top_return,
+            bottom_return=bottom_return,
+            long_short_return=long_short_return,
+            monotonicity=monotonicity,
+        )
+
+    def _quantile_monotonicity(
+        self,
+        ordered_values: list[tuple[str, Decimal, Decimal]],
+        bucket_count: int = 5,
+    ) -> Decimal | None:
+        count = len(ordered_values)
+        if count < 2:
+            return None
+        actual_bucket_count = min(bucket_count, count)
+        buckets: list[list[Decimal]] = [[] for _ in range(actual_bucket_count)]
+        for index, (_, _, forward_return) in enumerate(ordered_values):
+            bucket_index = index * actual_bucket_count // count
+            buckets[bucket_index].append(forward_return)
+        bucket_returns = [self._mean(bucket) for bucket in buckets if bucket]
+        if len(bucket_returns) < 2 or any(value is None for value in bucket_returns):
+            return None
+        return self._correlation(
+            [Decimal(index) for index in range(len(bucket_returns))],
+            [value for value in bucket_returns if value is not None],
         )
 
     def _correlation(self, left: list[Decimal], right: list[Decimal]) -> Decimal | None:

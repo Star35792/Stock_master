@@ -4,12 +4,20 @@ from app.services.basic_price_volume_factors import (
     BasicFactorRunResult,
     BasicPriceVolumeFactorService,
 )
+from app.services.capital_flow_factors import (
+    CapitalFlowFactorRunResult,
+    CapitalFlowFactorService,
+)
 from app.services.composite_factors import CompositeFactorRunResult, CompositeFactorService
 from app.services.crowding_factors import CrowdingFactorRunResult, CrowdingFactorService
 from app.services.csv_collection import CsvDailyBarCollectionService
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService, MarketBuildResult
 from app.services.daily_sync import HithinkDailySyncResult, HithinkDailySyncService
 from app.services.data_quality import DataQualityQueryService
+from app.services.earnings_revision_factors import (
+    EarningsRevisionFactorRunResult,
+    EarningsRevisionFactorService,
+)
 from app.services.eastmoney_collection import (
     EastmoneyFlowCollectionResult,
     EastmoneyFlowCollectionService,
@@ -36,11 +44,16 @@ from app.services.hithink_financial_collection import (
     HithinkFinancialCollectionService,
 )
 from app.services.industry_factors import IndustryFactorRunResult, IndustryFactorService
+from app.services.macro_factors import MacroFactorRunResult, MacroFactorService
 from app.services.manual_correction import ManualCorrectionResult, ManualCorrectionService
 from app.services.market import MarketQueryService
 from app.services.operations import OperationsOverviewService
 from app.services.paper_trading import PaperTradingResult, PaperTradingService
 from app.services.performance import BacktestPerformanceService, PersistedPerformanceReport
+from app.services.policy_event_factors import (
+    PolicyEventFactorRunResult,
+    PolicyEventFactorService,
+)
 from app.services.portfolio import PersistedPortfolioPlan, PortfolioConstructionService
 from app.services.recent_data_completion import (
     RecentDataCompletionResult,
@@ -61,9 +74,13 @@ __all__ = [
     "AdjustmentBuildService",
     "EastmoneyFlowCollectionResult",
     "EastmoneyFlowCollectionService",
+    "EarningsRevisionFactorRunResult",
+    "EarningsRevisionFactorService",
     "AlternativeCollectionResult",
     "BasicFactorRunResult",
     "BasicPriceVolumeFactorService",
+    "CapitalFlowFactorRunResult",
+    "CapitalFlowFactorService",
     "CompositeFactorRunResult",
     "CompositeFactorService",
     "CrowdingFactorRunResult",
@@ -81,6 +98,8 @@ __all__ = [
     "FinancialCollectionResult",
     "IndustryFactorRunResult",
     "IndustryFactorService",
+    "MacroFactorRunResult",
+    "MacroFactorService",
     "CrossSectionRunResult",
     "FactorCrossSectionService",
     "HithinkDailySyncResult",
@@ -99,6 +118,8 @@ __all__ = [
     "BacktestPerformanceService",
     "PaperTradingResult",
     "PaperTradingService",
+    "PolicyEventFactorRunResult",
+    "PolicyEventFactorService",
     "PersistedPerformanceReport",
     "PersistedPortfolioPlan",
     "PortfolioConstructionService",

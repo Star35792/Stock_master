@@ -68,16 +68,13 @@ class FakeDailyBarRepository:
         db: object,
         **kwargs: object,
     ) -> list[SimpleNamespace]:
-        return [
-            _bar("A", date(2026, 7, 17), "100"),
-            _bar("A", date(2026, 7, 18), "101"),
-            _bar("B", date(2026, 7, 17), "100"),
-            _bar("B", date(2026, 7, 18), "102"),
-            _bar("C", date(2026, 7, 17), "100"),
-            _bar("C", date(2026, 7, 18), "103"),
-            _bar("D", date(2026, 7, 17), "100"),
-            _bar("D", date(2026, 7, 18), "104"),
-        ]
+        rows = []
+        symbols = {"A": 1, "B": 2, "C": 3, "D": 4}
+        for offset in range(21):
+            trade_date = date.fromordinal(date(2026, 7, 17).toordinal() + offset)
+            for symbol, slope in symbols.items():
+                rows.append(_bar(symbol, trade_date, str(100 + offset * slope)))
+        return rows
 
 
 class FakeSecurityRepository:
@@ -155,6 +152,22 @@ def test_cross_section_service_transforms_and_profiles_factor() -> None:
     assert profile_repository.profiles[0]["missing_rate"] == Decimal("0.2000000000")
     assert profile_repository.profiles[0]["ic_1d"] > Decimal("0")
     assert profile_repository.profiles[0]["rank_ic_1d"] == Decimal("1.0000000000")
+    assert profile_repository.profiles[0]["ic_5d"] > Decimal("0")
+    assert profile_repository.profiles[0]["rank_ic_5d"] == Decimal("1.0000000000")
+    assert profile_repository.profiles[0]["ic_20d"] > Decimal("0")
+    assert profile_repository.profiles[0]["rank_ic_20d"] == Decimal("1.0000000000")
+    assert profile_repository.profiles[0]["top_quantile_forward_return_1d"] == Decimal(
+        "0.0400000000"
+    )
+    assert profile_repository.profiles[0]["bottom_quantile_forward_return_1d"] == Decimal(
+        "0.0100000000"
+    )
+    assert profile_repository.profiles[0]["long_short_forward_return_1d"] == Decimal(
+        "0.0300000000"
+    )
+    assert profile_repository.profiles[0]["quantile_monotonicity_1d"] == Decimal(
+        "1.0000000000"
+    )
     assert profile_repository.profiles[0]["top_quantile_turnover"] is None
     assert len(definition_repository.definitions) == 5
     assert len(run_repository.finished) == 5

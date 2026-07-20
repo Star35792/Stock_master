@@ -57,3 +57,17 @@ def test_eastmoney_flow_rows_parse_units_and_sector_symbols() -> None:
     assert rows[0]["symbol"] is None
     assert rows[0]["value"] == 553000000
     assert _money("12.5万") == 125000
+
+
+def test_eastmoney_flow_rows_parse_native_field_names() -> None:
+    rows = _normalize_rows(
+        "eastmoney_main_fund_rank",
+        [{"f12": "600519", "f14": "贵州茅台", "f62": "1.5亿", "f184": "2.5"}],
+        date(2026, 7, 17),
+        "eastmoney",
+    )
+
+    assert rows[0]["item_key"] == "600519"
+    assert rows[0]["symbol"] == "600519.SH"
+    assert rows[0]["value"] == 150000000
+    assert rows[0]["attributes"]["f184"] == "2.5"

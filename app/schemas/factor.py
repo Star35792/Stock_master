@@ -79,6 +79,14 @@ class FactorProfileRead(BaseModel):
     extreme_count: int
     ic_1d: Decimal | None
     rank_ic_1d: Decimal | None
+    ic_5d: Decimal | None = None
+    rank_ic_5d: Decimal | None = None
+    ic_20d: Decimal | None = None
+    rank_ic_20d: Decimal | None = None
+    top_quantile_forward_return_1d: Decimal | None = None
+    bottom_quantile_forward_return_1d: Decimal | None = None
+    long_short_forward_return_1d: Decimal | None = None
+    quantile_monotonicity_1d: Decimal | None = None
     top_quantile_turnover: Decimal | None
     code_version: str
     created_at: datetime

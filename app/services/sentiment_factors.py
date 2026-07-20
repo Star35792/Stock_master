@@ -16,7 +16,7 @@ from app.repositories.market import AlternativeDataSnapshotRepository, DailyBarR
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
 SUPPORTED_SECURITY_TYPES = ("stock",)
-LOOKBACK_DAYS = 14
+LOOKBACK_DAYS = 120
 
 
 @dataclass(frozen=True)
@@ -92,6 +92,28 @@ SENTIMENT_FACTOR_SPECS = (
         market_wide=True,
     ),
     SentimentFactorSpec(
+        name="limit_up_failure_rate",
+        display_name="Limit-up failure rate",
+        description=(
+            "latest failed limit-up count / latest failed plus sealed limit-up count"
+        ),
+        inputs=(
+            "market.alternative_data_snapshot.failed_limit_up",
+            "market.alternative_data_snapshot.limit_up_pool",
+        ),
+        datasets=("failed_limit_up", "limit_up_pool"),
+        market_wide=True,
+        higher_is_better=False,
+    ),
+    SentimentFactorSpec(
+        name="consecutive_limit_up_height",
+        display_name="Consecutive limit-up height",
+        description="latest maximum consecutive limit-up board height",
+        inputs=("market.alternative_data_snapshot.limit_up_ladder",),
+        datasets=("limit_up_ladder",),
+        market_wide=True,
+    ),
+    SentimentFactorSpec(
         name="market_sentiment_score",
         display_name="Market sentiment score",
         description=(
@@ -105,6 +127,33 @@ SENTIMENT_FACTOR_SPECS = (
         ),
         datasets=("hot_stock", "skyrocket", "limit_up_pool"),
         market_wide=True,
+    ),
+    SentimentFactorSpec(
+        name="sentiment_temperature_percentile",
+        display_name="Sentiment temperature percentile",
+        description="percentile rank of latest market sentiment score in lookback window",
+        inputs=(
+            "market.alternative_data_snapshot.hot_stock",
+            "market.alternative_data_snapshot.skyrocket",
+            "market.alternative_data_snapshot.limit_up_pool",
+        ),
+        datasets=("hot_stock", "skyrocket", "limit_up_pool"),
+        market_wide=True,
+        higher_is_better=False,
+    ),
+    SentimentFactorSpec(
+        name="overheat_reversal_signal",
+        display_name="Overheat reversal signal",
+        description="1 when sentiment temperature is high and failed limit-up rate is elevated",
+        inputs=(
+            "market.alternative_data_snapshot.hot_stock",
+            "market.alternative_data_snapshot.skyrocket",
+            "market.alternative_data_snapshot.limit_up_pool",
+            "market.alternative_data_snapshot.failed_limit_up",
+        ),
+        datasets=("hot_stock", "skyrocket", "limit_up_pool", "failed_limit_up"),
+        market_wide=True,
+        higher_is_better=False,
     ),
 )
 
@@ -308,18 +357,52 @@ class SentimentFactorService:
                 return None
             count = _latest_count(counts_by_dataset_date.get("limit_up_pool", {}), trade_date)
             return None if count is None else Decimal(count) / Decimal(universe_size)
+        if spec.name == "limit_up_failure_rate":
+            return _limit_up_failure_rate(counts_by_dataset_date, trade_date)
+        if spec.name == "consecutive_limit_up_height":
+            return _consecutive_limit_up_height(
+                snapshots_by_dataset_symbol.get("limit_up_ladder", {}),
+                trade_date,
+            )
         if spec.name == "market_sentiment_score":
             universe_size = universe_by_date.get(trade_date)
             if not universe_size:
                 return None
-            counts = [
-                _latest_count(counts_by_dataset_date.get(dataset, {}), trade_date)
-                for dataset in ("hot_stock", "skyrocket", "limit_up_pool")
-            ]
-            available = [count for count in counts if count is not None]
-            if not available:
+            return _market_sentiment_score(
+                counts_by_dataset_date,
+                trade_date,
+                universe_size,
+            )
+        if spec.name == "sentiment_temperature_percentile":
+            universe_size = universe_by_date.get(trade_date)
+            if not universe_size:
                 return None
-            return Decimal(sum(available)) / Decimal(universe_size)
+            scores = _sentiment_history_scores(
+                counts_by_dataset_date,
+                trade_date,
+                universe_size,
+            )
+            if not scores:
+                return None
+            return _percentile_rank(scores, scores[-1])
+        if spec.name == "overheat_reversal_signal":
+            universe_size = universe_by_date.get(trade_date)
+            if not universe_size:
+                return None
+            scores = _sentiment_history_scores(
+                counts_by_dataset_date,
+                trade_date,
+                universe_size,
+            )
+            failure_rate = _limit_up_failure_rate(counts_by_dataset_date, trade_date)
+            if not scores or failure_rate is None:
+                return None
+            temperature = _percentile_rank(scores, scores[-1])
+            return (
+                Decimal(1)
+                if temperature >= Decimal("0.8") and failure_rate >= Decimal("0.3")
+                else Decimal()
+            )
 
         row = _latest_symbol_row(
             snapshots_by_dataset_symbol,
@@ -421,6 +504,91 @@ def _latest_count(counts_by_date: dict[date, int], trade_date: date) -> int | No
     return counts_by_date[max(available_dates)]
 
 
+def _market_sentiment_score(
+    counts_by_dataset_date: dict[str, dict[date, int]],
+    trade_date: date,
+    universe_size: int,
+) -> Decimal | None:
+    counts = [
+        _latest_count(counts_by_dataset_date.get(dataset, {}), trade_date)
+        for dataset in ("hot_stock", "skyrocket", "limit_up_pool")
+    ]
+    available = [count for count in counts if count is not None]
+    if not available:
+        return None
+    return Decimal(sum(available)) / Decimal(universe_size)
+
+
+def _limit_up_failure_rate(
+    counts_by_dataset_date: dict[str, dict[date, int]],
+    trade_date: date,
+) -> Decimal | None:
+    failed = _latest_count(counts_by_dataset_date.get("failed_limit_up", {}), trade_date)
+    sealed = _latest_count(counts_by_dataset_date.get("limit_up_pool", {}), trade_date)
+    if failed is None or sealed is None or failed + sealed == 0:
+        return None
+    return Decimal(failed) / Decimal(failed + sealed)
+
+
+def _sentiment_history_scores(
+    counts_by_dataset_date: dict[str, dict[date, int]],
+    trade_date: date,
+    universe_size: int,
+) -> list[Decimal]:
+    snapshot_dates = sorted(
+        {
+            snapshot_date
+            for dataset in ("hot_stock", "skyrocket", "limit_up_pool")
+            for snapshot_date in counts_by_dataset_date.get(dataset, {})
+            if snapshot_date < trade_date
+        }
+    )
+    scores = []
+    for snapshot_date in snapshot_dates:
+        score = _market_sentiment_score(
+            counts_by_dataset_date,
+            snapshot_date + timedelta(days=1),
+            universe_size,
+        )
+        if score is not None:
+            scores.append(score)
+    return scores
+
+
+def _consecutive_limit_up_height(
+    rows_by_symbol: dict[str, list[Any]],
+    trade_date: date,
+) -> Decimal | None:
+    rows = [
+        row
+        for rows in rows_by_symbol.values()
+        for row in rows
+        if row.snapshot_date < trade_date
+    ]
+    if not rows:
+        return None
+    latest_date = max(row.snapshot_date for row in rows)
+    heights = [
+        height
+        for row in rows
+        if row.snapshot_date == latest_date
+        for height in [_limit_up_height(row)]
+        if height is not None
+    ]
+    return max(heights) if heights else None
+
+
+def _limit_up_height(row: Any) -> Decimal | None:
+    if row.value is not None:
+        return row.value
+    attributes = row.attributes or {}
+    return _decimal(
+        attributes.get("continue_day_cnt")
+        or attributes.get("height")
+        or attributes.get("board")
+    )
+
+
 def _dragon_tiger_net_buy_ratio(row: Any) -> Decimal | None:
     attributes = row.attributes or {}
     explicit = _decimal(
@@ -439,6 +607,15 @@ def _dragon_tiger_net_buy_ratio(row: Any) -> Decimal | None:
     if denominator == 0:
         return None
     return net_value / denominator
+
+
+def _percentile_rank(values: list[Decimal], current: Decimal) -> Decimal:
+    if len(values) == 1:
+        return Decimal("0.5")
+    below = sum(value < current for value in values)
+    equal = sum(value == current for value in values)
+    average_rank = Decimal(below) + (Decimal(equal - 1) / Decimal(2))
+    return average_rank / Decimal(len(values) - 1)
 
 
 def _decimal(value: object) -> Decimal | None:

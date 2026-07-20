@@ -62,12 +62,18 @@ class FakeFactorValueRepository:
         self.values.append(kwargs)
 
 
-def _bar(symbol: str, trade_date: date, close: str) -> SimpleNamespace:
+def _bar(
+    symbol: str,
+    trade_date: date,
+    close: str,
+    amount: str = "100",
+) -> SimpleNamespace:
     return SimpleNamespace(
         symbol=symbol,
         security_type="stock",
         trade_date=trade_date,
         close=Decimal(close),
+        amount=Decimal(amount),
     )
 
 
@@ -78,8 +84,8 @@ def test_industry_factor_service_calculates_momentum_and_breadth() -> None:
         bars.extend(
             [
                 _bar("A", trade_date, str(100 + day)),
-                _bar("B", trade_date, str(200 - day)),
-                _bar("C", trade_date, str(50 + day * 2)),
+                _bar("B", trade_date, str(200 - day), str(100 + day)),
+                _bar("C", trade_date, str(50 + day * 2), str(300 - day)),
             ]
         )
 
@@ -106,6 +112,7 @@ def test_industry_factor_service_calculates_momentum_and_breadth() -> None:
     assert result.rows_by_factor == {
         "industry_momentum_60": 108,
         "industry_breadth_20": 108,
+        "industry_turnover_share_change_20": 108,
     }
     values = {
         (item["factor_name"], item["symbol"]): item["value"]
@@ -116,6 +123,11 @@ def test_industry_factor_service_calculates_momentum_and_breadth() -> None:
     assert values[("industry_momentum_60", "C")] > Decimal("0")
     assert values[("industry_breadth_20", "A")] == Decimal("0.5000000000")
     assert values[("industry_breadth_20", "B")] == Decimal("0.5000000000")
+    assert values[("industry_turnover_share_change_20", "A")] > Decimal("0")
+    assert values[("industry_turnover_share_change_20", "A")] == values[
+        ("industry_turnover_share_change_20", "B")
+    ]
+    assert values[("industry_turnover_share_change_20", "C")] < Decimal("0")
 
 
 def test_industry_factor_service_validates_inputs() -> None:

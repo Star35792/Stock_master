@@ -106,6 +106,9 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
         _snapshot("hot_stock", "CCC", date(2026, 7, 18), rank=1, value="900"),
         _snapshot("limit_up_pool", "BBB", date(2026, 7, 17), value="300"),
         _snapshot("limit_up_pool", "CCC", date(2026, 7, 17), value="500"),
+        _snapshot("failed_limit_up", "AAA", date(2026, 7, 17), value="100"),
+        _snapshot("limit_up_ladder", "BBB", date(2026, 7, 17), value="2"),
+        _snapshot("limit_up_ladder", "CCC", date(2026, 7, 17), value="3"),
         _snapshot("skyrocket", "AAA", date(2026, 7, 17), rank=1),
         _snapshot("skyrocket", "CCC", date(2026, 7, 17), rank=2),
         _snapshot(
@@ -154,16 +157,20 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
         "limit_up_strength": 2,
         "dragon_tiger_net_buy_ratio": 2,
         "limit_up_breadth": 3,
+        "limit_up_failure_rate": 3,
+        "consecutive_limit_up_height": 3,
         "market_sentiment_score": 3,
+        "sentiment_temperature_percentile": 3,
+        "overheat_reversal_signal": 3,
     }
-    assert result.total_rows == 16
+    assert result.total_rows == 28
     assert result.input_rows == len(snapshots)
-    assert len(definition_repository.definitions) == 7
+    assert len(definition_repository.definitions) == 11
     assert all(run["status"] == "success" for run in run_repository.finished)
     assert daily_bar_repository.factor_kwargs is not None
     assert daily_bar_repository.factor_kwargs["symbols"] == ["AAA"]
     assert snapshot_repository.kwargs is not None
-    assert snapshot_repository.kwargs["start_date"] == date(2026, 7, 4)
+    assert snapshot_repository.kwargs["start_date"] == date(2026, 3, 20)
 
     values = {
         (item["factor_name"], item["symbol"]): item["value"]
@@ -179,7 +186,11 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
     assert values[("dragon_tiger_net_buy_ratio", "AAA")] == Decimal("0.1200000000")
     assert values[("dragon_tiger_net_buy_ratio", "BBB")] == Decimal("0.1000000000")
     assert values[("limit_up_breadth", "AAA")] == Decimal("0.6666666667")
+    assert values[("limit_up_failure_rate", "AAA")] == Decimal("0.3333333333")
+    assert values[("consecutive_limit_up_height", "AAA")] == Decimal("3.0000000000")
     assert values[("market_sentiment_score", "CCC")] == Decimal("2.0000000000")
+    assert values[("sentiment_temperature_percentile", "CCC")] == Decimal("1.0000000000")
+    assert values[("overheat_reversal_signal", "CCC")] == Decimal("1.0000000000")
     assert all(item["factor_version"] == "v1" for item in value_repository.values)
 
 

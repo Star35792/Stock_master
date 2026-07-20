@@ -73,6 +73,19 @@ def _bar(
     )
 
 
+def _symbol_bar(symbol: str, trade_date: date, close: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        symbol=symbol,
+        security_type="stock",
+        trade_date=trade_date,
+        close=Decimal(close),
+        pre_close=None,
+        volume=Decimal("1000"),
+        amount=Decimal("1000") * Decimal(close),
+        turnover_rate=Decimal("0.01"),
+    )
+
+
 def test_basic_factor_service_calculates_and_records_factor_runs() -> None:
     start_date = date(2026, 7, 1)
     closes = ("100", "101", "102", "103", "104", "110")
@@ -253,3 +266,44 @@ def test_optimized_default_factors_cover_multiple_horizons() -> None:
     assert values["momentum_60"] == Decimal("0.6")
     assert values["max_drawdown_20"] == Decimal("0")
     assert values["liquidity_20"] is not None
+
+
+def test_basic_factor_service_calculates_reversal_beta_and_residual_risk() -> None:
+    start = date(2026, 1, 1)
+    bars = []
+    for index in range(61):
+        trade_date = start + timedelta(days=index)
+        bars.extend(
+            [
+                _symbol_bar("AAA", trade_date, str(100 + index)),
+                _symbol_bar("BBB", trade_date, str(100 + index * 2)),
+            ]
+        )
+    value_repository = FakeFactorValueRepository()
+    service = BasicPriceVolumeFactorService(
+        daily_bar_repository=FakeDailyBarRepository(bars),
+        definition_repository=FakeFactorDefinitionRepository(),
+        run_repository=FakeFactorRunRepository(),
+        value_repository=value_repository,
+    )
+
+    result = service.run(
+        object(),
+        start_date=start + timedelta(days=60),
+        end_date=start + timedelta(days=60),
+        factor_names=["reversal_5", "beta_60", "residual_volatility_60"],
+    )
+
+    assert result.rows_by_factor == {
+        "reversal_5": 2,
+        "beta_60": 2,
+        "residual_volatility_60": 2,
+    }
+    values = {
+        (item["factor_name"], item["symbol"]): item["value"]
+        for item in value_repository.values
+    }
+    assert values[("reversal_5", "AAA")] == Decimal("-0.0322580645")
+    assert values[("beta_60", "AAA")] > Decimal("0")
+    assert values[("beta_60", "BBB")] > values[("beta_60", "AAA")]
+    assert values[("residual_volatility_60", "AAA")] >= Decimal("0")

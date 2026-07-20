@@ -41,6 +41,16 @@ class FakeFinancialStatementRepository:
         return self.rows
 
 
+class FakeSecurityRepository:
+    def __init__(self, industries: dict[str, str]) -> None:
+        self.industries = industries
+        self.symbols: set[str] | None = None
+
+    def get_industries(self, db: object, symbols: set[str]) -> dict[str, str]:
+        self.symbols = symbols
+        return {symbol: self.industries[symbol] for symbol in symbols}
+
+
 class FakeFactorDefinitionRepository:
     def __init__(self) -> None:
         self.definitions: list[SimpleNamespace] = []
@@ -123,12 +133,30 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         [
             _statement(
                 "balance",
-                {"total_assets": "1000", "total_liabilities": "400"},
+                {
+                    "total_assets": "1000",
+                    "total_liabilities": "400",
+                    "interest_bearing_debt": "300",
+                    "cash_and_cash_equivalents": "100",
+                },
                 report_date=date(2026, 4, 30),
             ),
             _statement(
                 "income",
-                {"operating_revenue": "1200", "net_profit": "300"},
+                {
+                    "operating_revenue": "1200",
+                    "net_profit": "300",
+                    "operating_profit": "500",
+                },
+                report_date=date(2026, 4, 30),
+            ),
+            _statement(
+                "cash_flow",
+                {
+                    "net_operating_cash_flow": "260",
+                    "capital_expenditure": "60",
+                    "depreciation_and_amortization": "100",
+                },
                 report_date=date(2026, 4, 30),
             ),
         ]
@@ -141,6 +169,7 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
             [_bar(date(2026, 4, 30)), _bar(date(2026, 5, 6))]
         ),
         valuation_repository=valuation_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository({"600519.SH": "Baijiu"}),
         financial_statement_repository=statement_repository,  # type: ignore[arg-type]
         definition_repository=definition_repository,
         run_repository=run_repository,
@@ -161,6 +190,9 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         "earnings_yield": 1,
         "book_to_price": 1,
         "sales_to_price": 1,
+        "fcf_yield": 1,
+        "ev_to_ebitda": 1,
+        "industry_valuation_gap": 1,
     }
     assert valuation_repository.kwargs is not None
     assert valuation_repository.kwargs["start_date"] == date(2026, 4, 16)
@@ -168,7 +200,7 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         "end_date": date(2026, 5, 6),
         "symbols": ["600519.SH"],
     }
-    assert len(definition_repository.definitions) == 4
+    assert len(definition_repository.definitions) == 7
     assert all(run["status"] == "success" for run in run_repository.finished)
 
     values = {
@@ -180,12 +212,16 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
     assert values[("earnings_yield", date(2026, 5, 6))] == Decimal("0.0600000000")
     assert values[("book_to_price", date(2026, 5, 6))] == Decimal("0.1200000000")
     assert values[("sales_to_price", date(2026, 5, 6))] == Decimal("0.2400000000")
+    assert values[("fcf_yield", date(2026, 5, 6))] == Decimal("0.0400000000")
+    assert values[("ev_to_ebitda", date(2026, 5, 6))] == Decimal("8.6666666667")
+    assert values[("industry_valuation_gap", date(2026, 5, 6))] == Decimal("0E-10")
 
 
 def test_valuation_factor_service_validates_inputs() -> None:
     service = ValuationFactorService(
         daily_bar_repository=FakeDailyBarRepository([]),
         valuation_repository=FakeValuationSnapshotRepository([]),  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository({}),
         financial_statement_repository=FakeFinancialStatementRepository([]),
         definition_repository=FakeFactorDefinitionRepository(),
         run_repository=FakeFactorRunRepository(),

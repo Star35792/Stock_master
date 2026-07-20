@@ -106,6 +106,13 @@ _OPERATING_CASH_FLOW = (
     "operating_cash_flow",
     "act_cash_flow_net",
 )
+_ACCOUNTS_RECEIVABLE = (
+    "accounts_receivable",
+    "account_receivable",
+    "notes_and_accounts_receivable",
+    "receivables",
+)
+_INVENTORY = ("inventory", "inventories")
 
 
 @dataclass(frozen=True)
@@ -256,6 +263,49 @@ FINANCIAL_FACTOR_SPECS = (
         inputs=(
             "fundamental.financial_statement.income.metrics",
             "fundamental.financial_statement.balance.metrics",
+        ),
+        higher_is_better=False,
+    ),
+    FinancialFactorSpec(
+        name="revenue_cagr_3y",
+        display_name="Revenue CAGR 3Y",
+        description="three-year compound annual growth rate of reported revenue",
+        inputs=("fundamental.financial_statement.income.metrics",),
+    ),
+    FinancialFactorSpec(
+        name="net_profit_cagr_3y",
+        display_name="Net profit CAGR 3Y",
+        description="three-year compound annual growth rate of reported net profit",
+        inputs=("fundamental.financial_statement.income.metrics",),
+    ),
+    FinancialFactorSpec(
+        name="receivable_growth_revenue_gap",
+        display_name="Receivable growth revenue gap",
+        description="accounts receivable YoY growth minus revenue YoY growth",
+        inputs=(
+            "fundamental.financial_statement.balance.metrics",
+            "fundamental.financial_statement.income.metrics",
+        ),
+        higher_is_better=False,
+    ),
+    FinancialFactorSpec(
+        name="inventory_growth_revenue_gap",
+        display_name="Inventory growth revenue gap",
+        description="inventory YoY growth minus revenue YoY growth",
+        inputs=(
+            "fundamental.financial_statement.balance.metrics",
+            "fundamental.financial_statement.income.metrics",
+        ),
+        higher_is_better=False,
+    ),
+    FinancialFactorSpec(
+        name="financial_anomaly_score",
+        display_name="Financial anomaly score",
+        description="share of triggered balance-sheet and cash-flow anomaly checks",
+        inputs=(
+            "fundamental.financial_statement.balance.metrics",
+            "fundamental.financial_statement.income.metrics",
+            "fundamental.financial_statement.cash_flow.metrics",
         ),
         higher_is_better=False,
     ),
@@ -551,6 +601,30 @@ class FinancialFactorService:
             )
         if factor_name == "roe_stability_3y":
             return _roe_stability_3y(current, history)
+        if factor_name == "revenue_cagr_3y":
+            return _cagr_3y(current, history, "income", _REVENUE)
+        if factor_name == "net_profit_cagr_3y":
+            return _cagr_3y(current, history, "income", _NET_PROFIT)
+        if factor_name == "receivable_growth_revenue_gap":
+            return _growth_gap(
+                self,
+                current,
+                previous_year,
+                "balance",
+                _ACCOUNTS_RECEIVABLE,
+                _REVENUE,
+            )
+        if factor_name == "inventory_growth_revenue_gap":
+            return _growth_gap(
+                self,
+                current,
+                previous_year,
+                "balance",
+                _INVENTORY,
+                _REVENUE,
+            )
+        if factor_name == "financial_anomaly_score":
+            return _financial_anomaly_score(self, current, previous_year)
         raise ValueError(f"unsupported factor: {factor_name}")
 
     @staticmethod
@@ -744,6 +818,117 @@ def _roe_stability_3y(
     with localcontext() as context:
         context.prec = 28
         return variance.sqrt()
+
+
+def _cagr_3y(
+    current: FinancialSnapshot,
+    history: list[FinancialSnapshot],
+    statement_type: str,
+    aliases: tuple[str, ...],
+) -> Decimal | None:
+    current_value = _metric(current, statement_type, aliases)
+    if current_value is None or current_value <= 0:
+        return None
+    base = next(
+        (
+            snapshot
+            for snapshot in history
+            if snapshot.fiscal_year == current.fiscal_year - 3
+            and snapshot.fiscal_period == current.fiscal_period
+            and snapshot.report_date <= current.report_date
+        ),
+        None,
+    )
+    if base is None:
+        return None
+    base_value = _metric(base, statement_type, aliases)
+    if base_value is None or base_value <= 0:
+        return None
+    with localcontext() as context:
+        context.prec = 28
+        return (current_value / base_value) ** (Decimal(1) / Decimal(3)) - Decimal(1)
+
+
+def _growth_gap(
+    service: FinancialFactorService,
+    current: FinancialSnapshot,
+    previous_year: FinancialSnapshot | None,
+    balance_aliases_statement_type: str,
+    balance_aliases: tuple[str, ...],
+    revenue_aliases: tuple[str, ...],
+) -> Decimal | None:
+    if previous_year is None:
+        return None
+    balance_growth = service._ratio_change(
+        _metric(current, balance_aliases_statement_type, balance_aliases),
+        _metric(previous_year, balance_aliases_statement_type, balance_aliases),
+    )
+    revenue_growth = service._ratio_change(
+        _metric(current, "income", revenue_aliases),
+        _metric(previous_year, "income", revenue_aliases),
+    )
+    if balance_growth is None or revenue_growth is None:
+        return None
+    return balance_growth - revenue_growth
+
+
+def _financial_anomaly_score(
+    service: FinancialFactorService,
+    current: FinancialSnapshot,
+    previous_year: FinancialSnapshot | None,
+) -> Decimal | None:
+    checks = [
+        _greater_than(service._ratio(
+            _metric(current, "balance", _TOTAL_LIABILITIES),
+            _metric(current, "balance", _TOTAL_ASSETS),
+        ), Decimal("0.8")),
+        _less_than(service._ratio(
+            _metric(current, "balance", _CURRENT_ASSETS),
+            _metric(current, "balance", _CURRENT_LIABILITIES),
+        ), Decimal("1")),
+        _less_than(service._ratio(
+            _metric(current, "income", _OPERATING_PROFIT),
+            _abs_metric(current, "income", _INTEREST_EXPENSE),
+        ), Decimal("1")),
+        _less_than(service._ratio(
+            _metric(current, "cash_flow", _OPERATING_CASH_FLOW),
+            _metric(current, "income", _NET_PROFIT),
+        ), Decimal("0")),
+        _greater_than(
+            _growth_gap(
+                service,
+                current,
+                previous_year,
+                "balance",
+                _ACCOUNTS_RECEIVABLE,
+                _REVENUE,
+            ),
+            Decimal("0.2"),
+        ),
+        _greater_than(
+            _growth_gap(
+                service,
+                current,
+                previous_year,
+                "balance",
+                _INVENTORY,
+                _REVENUE,
+            ),
+            Decimal("0.2"),
+        ),
+    ]
+    available = [check for check in checks if check is not None]
+    if not available:
+        return None
+    return Decimal(sum(available)) / Decimal(len(available))
+
+
+def _greater_than(value: Decimal | None, threshold: Decimal) -> bool | None:
+    return None if value is None else value > threshold
+
+
+def _less_than(value: Decimal | None, threshold: Decimal) -> bool | None:
+    return None if value is None else value < threshold
 
 
 def _decimal(value: object) -> Decimal | None:
