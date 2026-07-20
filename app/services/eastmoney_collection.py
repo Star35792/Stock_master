@@ -151,12 +151,20 @@ def _symbol(code: str) -> str | None:
 def _money(value: object) -> Decimal | None:
     if value in (None, ""):
         return None
-    text = str(value).strip()
+    text = str(value).strip().replace(",", "")
+    if text in {"-", "--", "N/A", "n/a", "None"}:
+        return None
     multiplier = Decimal(1)
-    if text.endswith("亿"):
-        text, multiplier = text[:-1], Decimal(100000000)
-    elif text.endswith("万"):
-        text, multiplier = text[:-1], Decimal(10000)
+    for suffix, unit_multiplier in (
+        ("亿", Decimal(100000000)),
+        ("ÒÚ", Decimal(100000000)),
+        ("万", Decimal(10000)),
+        ("Íò", Decimal(10000)),
+    ):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+            multiplier = unit_multiplier
+            break
     try:
         return Decimal(text) * multiplier
     except InvalidOperation:

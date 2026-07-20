@@ -57,6 +57,9 @@ def test_eastmoney_flow_rows_parse_units_and_sector_symbols() -> None:
     assert rows[0]["symbol"] is None
     assert rows[0]["value"] == 553000000
     assert _money("12.5万") == 125000
+    assert _money("1,234.5万") == 12345000
+    assert _money("--") is None
+    assert _money("1.5ÒÚ") == 150000000
 
 
 def test_eastmoney_flow_rows_parse_native_field_names() -> None:
