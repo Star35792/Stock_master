@@ -141,6 +141,8 @@ export interface OperationsAlertItem {
   count: number;
   title: string;
   detail: string;
+  rule: string;
+  next_action: string;
 }
 
 export interface OperationsAlertSummary {

@@ -163,6 +163,10 @@ class OperationsOverviewService:
                     count=critical_count,
                     title="Critical data quality issues",
                     detail="Unresolved critical data quality issues require review",
+                    rule="open or reopened data quality issues with severity=critical",
+                    next_action=(
+                        "open the failures center and review data quality issue details"
+                    ),
                 )
             )
         error_count = open_severity_counts.get("error", 0)
@@ -174,6 +178,8 @@ class OperationsOverviewService:
                     count=error_count,
                     title="Data quality errors",
                     detail="Open error-level data quality issues remain unresolved",
+                    rule="open or reopened data quality issues with severity=error",
+                    next_action="inspect affected dataset, symbol, trade_date, and rerun plan",
                 )
             )
         failed_jobs = self.repository.count_failed_jobs(db)
@@ -185,6 +191,21 @@ class OperationsOverviewService:
                     count=failed_jobs,
                     title="Failed jobs",
                     detail="Batch and scheduler jobs reported failures or partial failures",
+                    rule="job logs with status in failed or partial",
+                    next_action="review failed rows, error message, and source metadata",
+                )
+            )
+        running_jobs = self.repository.count_running_jobs(db)
+        if running_jobs > 0:
+            alert_items.append(
+                OperationsAlertItem(
+                    key="running_jobs",
+                    severity="info",
+                    count=running_jobs,
+                    title="Running jobs",
+                    detail="Batch or scheduler jobs are currently running",
+                    rule="job logs with status=running",
+                    next_action="monitor progress before deciding whether manual review is needed",
                 )
             )
         failed_factor_runs = self.repository.count_failed_factor_runs(db)
@@ -196,6 +217,8 @@ class OperationsOverviewService:
                     count=failed_factor_runs,
                     title="Failed factor runs",
                     detail="Factor runs ended in failed or partial status",
+                    rule="factor runs with status in failed or partial",
+                    next_action="review factor parameters, input window, and upstream data quality",
                 )
             )
         failed_backtests = self.repository.count_failed_backtest_runs(db)
@@ -207,6 +230,8 @@ class OperationsOverviewService:
                     count=failed_backtests,
                     title="Failed backtests",
                     detail="Backtest runs ended in failed status",
+                    rule="backtest runs with status=failed",
+                    next_action="inspect run detail, data_version, parameters, and error message",
                 )
             )
         rejected_orders = self.repository.count_rejected_paper_orders(db)
@@ -218,6 +243,23 @@ class OperationsOverviewService:
                     count=rejected_orders,
                     title="Rejected paper orders",
                     detail="Paper trading orders were rejected by risk or account checks",
+                    rule="paper orders with status=rejected",
+                    next_action="review risk rule results before changing any portfolio inputs",
+                )
+            )
+        pending_orders = self.repository.count_pending_paper_orders(db)
+        if pending_orders > 0:
+            alert_items.append(
+                OperationsAlertItem(
+                    key="pending_paper_orders",
+                    severity="info",
+                    count=pending_orders,
+                    title="Pending paper orders",
+                    detail="Paper trading orders are waiting for fill or cancellation",
+                    rule="paper orders with status=pending",
+                    next_action=(
+                        "monitor simulated order lifecycle and avoid duplicate manual actions"
+                    ),
                 )
             )
         return OperationsAlertSummary(

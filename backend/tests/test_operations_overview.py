@@ -169,6 +169,9 @@ class FakeOperationsOverviewRepository:
     def count_failed_jobs(self, db: object) -> int:
         return 1
 
+    def count_running_jobs(self, db: object) -> int:
+        return 1
+
     def failed_factor_runs(self, db: object, *, limit: int) -> list[SimpleNamespace]:
         return [
             SimpleNamespace(
@@ -246,6 +249,9 @@ class FakeOperationsOverviewRepository:
         ][:limit]
 
     def count_rejected_paper_orders(self, db: object) -> int:
+        return 1
+
+    def count_pending_paper_orders(self, db: object) -> int:
         return 1
 
     def get_unresolved_data_quality_issue(
@@ -341,13 +347,20 @@ def test_operations_alerts_collects_current_alert_candidates() -> None:
     assert [item.key for item in alerts.items] == [
         "data_quality_error",
         "failed_jobs",
+        "running_jobs",
         "failed_factor_runs",
         "failed_backtests",
         "rejected_paper_orders",
+        "pending_paper_orders",
     ]
     assert alerts.items[0].severity == "warning"
     assert alerts.items[0].count == 1
-    assert alerts.items[3].severity == "critical"
+    assert alerts.items[0].rule == "open or reopened data quality issues with severity=error"
+    assert alerts.items[2].severity == "info"
+    assert alerts.items[4].severity == "critical"
+    assert alerts.items[-1].next_action == (
+        "monitor simulated order lifecycle and avoid duplicate manual actions"
+    )
 
 
 def test_operations_rerun_plan_maps_missing_bar_to_backfill() -> None:

@@ -95,6 +95,9 @@ class OperationsOverviewRepository:
     def count_failed_jobs(self, db: Session) -> int:
         return self._count_where(db, JobLog, JobLog.status.in_(["failed", "partial"]))
 
+    def count_running_jobs(self, db: Session) -> int:
+        return self._count_where(db, JobLog, JobLog.status == "running")
+
     def get_failed_job(self, db: Session, *, job_id: int) -> JobLog | None:
         return db.scalar(
             select(JobLog).where(
@@ -187,6 +190,9 @@ class OperationsOverviewRepository:
 
     def count_rejected_paper_orders(self, db: Session) -> int:
         return self._count_where(db, PaperOrder, PaperOrder.status == "rejected")
+
+    def count_pending_paper_orders(self, db: Session) -> int:
+        return self._count_where(db, PaperOrder, PaperOrder.status == "pending")
 
     def rejected_paper_orders(self, db: Session, *, limit: int) -> list[SimpleNamespace]:
         rows = db.execute(

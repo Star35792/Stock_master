@@ -142,15 +142,17 @@ def test_operations_alerts_returns_candidates(monkeypatch) -> None:
         return {
             "generated_at": "2026-07-20T00:00:00Z",
             "items": [
-                {
-                    "key": "failed_backtests",
-                    "severity": "critical",
-                    "count": 1,
-                    "title": "Failed backtests",
-                    "detail": "Backtest runs ended in failed status",
-                }
-            ],
-        }
+                    {
+                        "key": "failed_backtests",
+                        "severity": "critical",
+                        "count": 1,
+                        "title": "Failed backtests",
+                        "detail": "Backtest runs ended in failed status",
+                        "rule": "backtest runs with status=failed",
+                        "next_action": "inspect run detail and error message",
+                    }
+                ],
+            }
 
     monkeypatch.setattr(operations_module.service, "get_alerts", fake_get_alerts)
     response = client.get("/api/v1/operations/alerts")

@@ -28,6 +28,16 @@ function alertClass(severity: string) {
           <strong>{{ alert.title }}</strong>
         </div>
         <p>{{ alert.detail }}</p>
+        <dl class="alert-explain">
+          <div>
+            <dt>规则</dt>
+            <dd>{{ alert.rule }}</dd>
+          </div>
+          <div>
+            <dt>建议</dt>
+            <dd>{{ alert.next_action }}</dd>
+          </div>
+        </dl>
         <small>{{ formatNumber(alert.count) }} 条相关记录</small>
       </article>
       <article v-if="alerts.items.length === 0" class="empty-panel">当前没有告警候选。</article>

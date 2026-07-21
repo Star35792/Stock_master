@@ -278,6 +278,8 @@ class OperationsAlertItem(BaseModel):
     count: int
     title: str
     detail: str
+    rule: str
+    next_action: str
 
 
 class OperationsAlertSummary(BaseModel):
