@@ -16,11 +16,19 @@ from app.schemas.market import (
     SecurityRead,
     TradingCalendarRead,
 )
-from app.schemas.operations import OperationsOverview
+from app.schemas.operations import (
+    OperationsAlertSummary,
+    OperationsFailureDetail,
+    OperationsFailureReport,
+    OperationsOverview,
+    OperationsRerunPlan,
+)
 from app.schemas.strategy import (
     BacktestBenchmarkRead,
     BacktestComparisonItem,
     BacktestComparisonRequest,
+    BacktestDriftRead,
+    BacktestDriftRequest,
     BacktestEquityRead,
     BacktestPerformanceAnalyzeRequest,
     BacktestPerformanceRead,
@@ -49,6 +57,8 @@ __all__ = [
     "BacktestTradeRead",
     "BatchFactorSelectionBacktestItem",
     "BatchFactorSelectionBacktestRequest",
+    "BacktestDriftRead",
+    "BacktestDriftRequest",
     "CorporateActionRead",
     "DailyBarRead",
     "DailyBarSourceCompareRead",
@@ -64,6 +74,10 @@ __all__ = [
     "ManualCorrectionRead",
     "MissingDailyBarRead",
     "OperationsOverview",
+    "OperationsAlertSummary",
+    "OperationsFailureReport",
+    "OperationsFailureDetail",
+    "OperationsRerunPlan",
     "SecurityLifecycleRead",
     "Page",
     "SecurityRead",

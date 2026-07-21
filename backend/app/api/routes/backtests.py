@@ -9,6 +9,8 @@ from app.schemas.strategy import (
     BacktestBenchmarkRead,
     BacktestComparisonItem,
     BacktestComparisonRequest,
+    BacktestDriftRead,
+    BacktestDriftRequest,
     BacktestEquityRead,
     BacktestPerformanceAnalyzeRequest,
     BacktestPerformanceRead,
@@ -20,6 +22,23 @@ from app.services import BacktestQueryService
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 service = BacktestQueryService()
+
+
+@router.post("/runs/drift", response_model=BacktestDriftRead)
+def detect_backtest_drift(
+    db: DatabaseSession,
+    payload: BacktestDriftRequest,
+) -> BacktestDriftRead:
+    try:
+        return service.detect_drift(
+            db,
+            baseline_run_id=payload.baseline_run_id,
+            candidate_run_ids=payload.candidate_run_ids,
+            return_tolerance=payload.return_tolerance,
+            drawdown_tolerance=payload.drawdown_tolerance,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/runs/compare", response_model=list[BacktestComparisonItem])

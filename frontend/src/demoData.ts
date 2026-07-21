@@ -1,4 +1,10 @@
-import type { OperationsOverview } from "./types";
+import type {
+  OperationsAlertSummary,
+  OperationsFailureDetail,
+  OperationsFailureReport,
+  OperationsOverview,
+  OperationsRerunPlan,
+} from "./types";
 
 export const demoOverview: OperationsOverview = {
   generated_at: "2026-07-20T05:30:00Z",
@@ -167,5 +173,278 @@ export const demoOverview: OperationsOverview = {
         created_at: "2026-07-20T02:30:00Z",
       },
     ],
+  },
+};
+
+export const demoAlerts: OperationsAlertSummary = {
+  generated_at: "2026-07-20T05:30:00Z",
+  items: [
+    {
+      key: "open-critical-quality-issues",
+      severity: "critical",
+      count: 1,
+      title: "存在关键数据质量问题",
+      detail: "有 reopened 或 critical 级别的数据质量问题，需要人工确认后再放行下游研究。",
+    },
+    {
+      key: "failed-jobs",
+      severity: "warning",
+      count: 2,
+      title: "近期任务失败",
+      detail: "最近导入或计算任务出现失败记录，可进入失败中心查看失败行和错误信息。",
+    },
+    {
+      key: "rejected-paper-orders",
+      severity: "info",
+      count: 3,
+      title: "模拟盘拒单",
+      detail: "模拟盘存在被风控拒绝的订单，当前工作台仅展示规则命中情况。",
+    },
+  ],
+};
+
+export const demoFailureReport: OperationsFailureReport = {
+  generated_at: "2026-07-20T05:30:00Z",
+  data_quality_issues: {
+    total: 2,
+    limit: 5,
+    has_more: false,
+    items: [
+      {
+        id: 321,
+        dataset: "daily_bar",
+        symbol: "510300.SH",
+        trade_date: "2026-07-17",
+        issue_type: "missing_bar",
+        severity: "error",
+        status: "open",
+        created_at: "2026-07-20T04:10:00Z",
+        raw_id: null,
+        adjust_type: "qfq",
+        source_name: "hithink",
+        description: "daily_bar 缺少 2026-07-17 的可信行情行",
+        expected_value: { trade_date: "2026-07-17" },
+        actual_value: null,
+      },
+      {
+        id: 315,
+        dataset: "corporate_action",
+        symbol: "000001.SZ",
+        trade_date: "2026-07-16",
+        issue_type: "manual_review",
+        severity: "critical",
+        status: "reopened",
+        created_at: "2026-07-19T15:12:00Z",
+        raw_id: 8821,
+        adjust_type: null,
+        source_name: "manual",
+        description: "公司行为需要人工复核",
+        expected_value: { status: "verified" },
+        actual_value: { status: "conflict" },
+      },
+    ],
+  },
+  jobs: {
+    total: 1,
+    limit: 5,
+    has_more: false,
+    items: [
+      {
+        id: 90,
+        job_name: "daily-sync",
+        job_type: "schedule",
+        status: "failed",
+        started_at: "2026-07-19T01:00:00Z",
+        finished_at: "2026-07-19T01:09:00Z",
+        rows_failed: 11,
+        error_message: "source timeout",
+        batch_id: 501,
+        rows_read: 3911,
+        rows_inserted: 3880,
+        rows_updated: 20,
+        metadata: { source: "hithink" },
+      },
+    ],
+  },
+  factor_runs: {
+    total: 1,
+    limit: 5,
+    has_more: false,
+    items: [
+      {
+        id: 77,
+        factor_name: "ret_20d",
+        factor_version: "v1-qfq",
+        status: "partial",
+        input_start_date: "2026-06-01",
+        input_end_date: "2026-07-17",
+        started_at: "2026-07-20T01:41:00Z",
+        finished_at: "2026-07-20T01:46:00Z",
+        rows_written: 3955,
+        error_message: "missing source rows for 11 symbols",
+        parameters: { window: 20, adjust_type: "qfq" },
+        code_version: "demo",
+        metadata: { missing_symbols: 11 },
+      },
+    ],
+  },
+  backtest_runs: {
+    total: 1,
+    limit: 5,
+    has_more: false,
+    items: [
+      {
+        id: 44,
+        name: "low-vol-quality-regression",
+        strategy_name: "factor_score",
+        status: "failed",
+        start_date: "2025-01-01",
+        end_date: "2026-07-17",
+        final_equity: null,
+        total_return: null,
+        started_at: "2026-07-19T10:20:00Z",
+        finished_at: "2026-07-19T10:21:00Z",
+        error_message: "factor data incomplete",
+        parameters: { rebalance: "monthly" },
+        code_version: "demo",
+        data_version: "market-20260720",
+        initial_cash: "1000000",
+      },
+    ],
+  },
+  paper_orders: {
+    total: 1,
+    limit: 5,
+    has_more: false,
+    items: [
+      {
+        id: 119,
+        account_id: 1,
+        plan_id: 32,
+        check_id: 87,
+        symbol: "159915.SZ",
+        side: "sell",
+        order_quantity: 500,
+        reference_price: "2.31",
+        trade_date: "2026-07-20",
+        status: "rejected",
+        rejection_reason: "risk limit exceeded",
+        created_at: "2026-07-20T02:30:00Z",
+        risk_current_drawdown: "0.082",
+        risk_limits: { max_drawdown: "0.08" },
+        risk_code_version: "demo",
+        risk_order_rejection_reasons: ["max_drawdown_exceeded"],
+        risk_order_rule_results: [{ rule: "max_drawdown", passed: false }],
+      },
+    ],
+  },
+};
+
+export const demoFailureDetails: Record<
+  OperationsFailureDetail["failure_type"],
+  Record<number, OperationsFailureDetail>
+> = {
+  data_quality_issue: {
+    321: {
+      failure_type: "data_quality_issue",
+      data_quality_issue: demoFailureReport.data_quality_issues.items[0],
+    },
+    315: {
+      failure_type: "data_quality_issue",
+      data_quality_issue: demoFailureReport.data_quality_issues.items[1],
+    },
+  },
+  job: {
+    90: {
+      failure_type: "job",
+      job: demoFailureReport.jobs.items[0],
+    },
+  },
+  factor_run: {
+    77: {
+      failure_type: "factor_run",
+      factor_run: demoFailureReport.factor_runs.items[0],
+    },
+  },
+  backtest_run: {
+    44: {
+      failure_type: "backtest_run",
+      backtest_run: demoFailureReport.backtest_runs.items[0],
+    },
+  },
+  paper_order: {
+    119: {
+      failure_type: "paper_order",
+      paper_order: demoFailureReport.paper_orders.items[0],
+    },
+  },
+};
+
+export const demoRerunPlans: Record<
+  OperationsRerunPlan["failure_type"],
+  Record<number, OperationsRerunPlan>
+> = {
+  data_quality_issue: {
+    321: {
+      failure_type: "data_quality_issue",
+      failure_id: 321,
+      supported: true,
+      action_type: "daily_bar_gap_backfill",
+      reason: "missing_bar 且 adjust_type=qfq，可生成日线缺口回补建议。",
+      parameters: {
+        symbol: "510300.SH",
+        trade_date: "2026-07-17",
+        adjust_type: "qfq",
+        source_name: "hithink",
+      },
+    },
+    315: {
+      failure_type: "data_quality_issue",
+      failure_id: 315,
+      supported: false,
+      action_type: "manual_review",
+      reason: "公司行为冲突需要人工复核，不能自动重跑。",
+      parameters: {},
+    },
+  },
+  job: {
+    90: {
+      failure_type: "job",
+      failure_id: 90,
+      supported: false,
+      action_type: "manual_review",
+      reason: "任务失败目前只展示诊断信息，不提供执行入口。",
+      parameters: {},
+    },
+  },
+  factor_run: {
+    77: {
+      failure_type: "factor_run",
+      failure_id: 77,
+      supported: false,
+      action_type: "manual_review",
+      reason: "因子运行依赖上游数据修复，当前只给出人工排查建议。",
+      parameters: {},
+    },
+  },
+  backtest_run: {
+    44: {
+      failure_type: "backtest_run",
+      failure_id: 44,
+      supported: false,
+      action_type: "manual_review",
+      reason: "回测失败不在运维工作台中自动重跑。",
+      parameters: {},
+    },
+  },
+  paper_order: {
+    119: {
+      failure_type: "paper_order",
+      failure_id: 119,
+      supported: false,
+      action_type: "manual_review",
+      reason: "模拟盘拒单是风控结果，不能通过工作台绕过。",
+      parameters: {},
+    },
   },
 };

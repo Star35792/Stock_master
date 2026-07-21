@@ -66,11 +66,21 @@ class FakePerformanceRepository:
 
 
 class ComparisonPerformanceRepository(FakePerformanceRepository):
+    def __init__(
+        self,
+        metrics_by_run_id: dict[int, tuple[Decimal, Decimal]] | None = None,
+    ) -> None:
+        self.metrics_by_run_id = metrics_by_run_id or {
+            1: (Decimal("0.20"), Decimal("-0.05")),
+            2: (Decimal("0.10"), Decimal("-0.05")),
+        }
+
     def get_by_run_id(self, db: object, *, run_id: int):
+        total_return, maximum_drawdown = self.metrics_by_run_id[run_id]
         return SimpleNamespace(
-            total_return=Decimal("0.20") if run_id == 1 else Decimal("0.10"),
+            total_return=total_return,
             annualized_return=Decimal("0.20"),
-            maximum_drawdown=Decimal("-0.05"),
+            maximum_drawdown=maximum_drawdown,
             sharpe_ratio=Decimal("1.5"),
             turnover_rate=Decimal("0.3"),
         )
@@ -161,3 +171,108 @@ def test_backtest_query_service_compares_successful_runs() -> None:
     ).compare_runs(object(), run_ids=[2, 1])
 
     assert [item.run_id for item in result] == [1, 2]
+
+
+def test_backtest_query_service_detects_thresholded_drift() -> None:
+    repository = FakeBacktestRepository()
+    repository.get_run = lambda db, *, run_id: SimpleNamespace(
+        id=run_id,
+        name=f"run-{run_id}",
+        strategy_name="factor_selection",
+        status="success",
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        parameters={"top_n": 10, "code_version": f"code-{run_id}"},
+        data_version="market-qfq-20260720",
+    )
+    service = BacktestQueryService(
+        backtest_repository=repository,
+        performance_repository=ComparisonPerformanceRepository(),
+    )
+
+    within_tolerance = service.detect_drift(
+        object(),
+        baseline_run_id=1,
+        candidate_run_ids=[2],
+        return_tolerance=Decimal("0.10"),
+        drawdown_tolerance=Decimal("0"),
+    )
+    above_tolerance = service.detect_drift(
+        object(),
+        baseline_run_id=1,
+        candidate_run_ids=[2],
+        return_tolerance=Decimal("0.09"),
+        drawdown_tolerance=Decimal("0"),
+    )
+
+    assert within_tolerance.return_spread == Decimal("0.10")
+    assert within_tolerance.drawdown_spread == Decimal("0.00")
+    assert within_tolerance.drift_detected is False
+    assert above_tolerance.drift_detected is True
+
+
+def test_backtest_query_service_uses_baseline_relative_drift_spread() -> None:
+    repository = FakeBacktestRepository()
+    repository.get_run = lambda db, *, run_id: SimpleNamespace(
+        id=run_id,
+        name=f"run-{run_id}",
+        strategy_name="factor_selection",
+        status="success",
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        parameters={"top_n": 10, "code_version": f"code-{run_id}"},
+        data_version="market-qfq-20260720",
+    )
+    service = BacktestQueryService(
+        backtest_repository=repository,
+        performance_repository=ComparisonPerformanceRepository(
+            {
+                1: (Decimal("0.20"), Decimal("-0.10")),
+                2: (Decimal("0.25"), Decimal("-0.13")),
+                3: (Decimal("0.15"), Decimal("-0.07")),
+            }
+        ),
+    )
+
+    result = service.detect_drift(
+        object(),
+        baseline_run_id=1,
+        candidate_run_ids=[2, 3],
+        return_tolerance=Decimal("0.05"),
+        drawdown_tolerance=Decimal("0.03"),
+    )
+
+    assert result.return_spread == Decimal("0.05")
+    assert result.drawdown_spread == Decimal("0.03")
+    assert result.drift_detected is False
+
+
+def test_backtest_query_service_rejects_incomparable_drift_runs() -> None:
+    repository = FakeBacktestRepository()
+    repository.get_run = lambda db, *, run_id: SimpleNamespace(
+        id=run_id,
+        name=f"run-{run_id}",
+        strategy_name="factor_selection",
+        status="success",
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        parameters={"top_n": 10, "code_version": f"code-{run_id}"},
+        data_version=f"market-qfq-v{run_id}",
+    )
+    service = BacktestQueryService(
+        backtest_repository=repository,
+        performance_repository=ComparisonPerformanceRepository(),
+    )
+
+    try:
+        service.detect_drift(
+            object(),
+            baseline_run_id=1,
+            candidate_run_ids=[2],
+            return_tolerance=Decimal(0),
+            drawdown_tolerance=Decimal(0),
+        )
+    except ValueError as exc:
+        assert "not comparable with baseline 1: 2" in str(exc)
+    else:
+        raise AssertionError("runs with different data versions must be rejected")

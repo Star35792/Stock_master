@@ -4,7 +4,9 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from app.api.routes import backtests as backtests_module
 from app.api.routes import health as health_module
+from app.api.routes import operations as operations_module
 from app.api.routes import strategy_research as strategy_research_module
 from app.main import app
 
@@ -82,7 +84,231 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/backtests/runs/compare" in paths
     assert "/api/v1/strategy-research/factor-selection/backtests" in paths
     assert "/api/v1/strategy-research/factor-selection/backtests/batch" in paths
+    assert "/api/v1/strategy-research/rolling-windows" in paths
+    assert "/api/v1/backtests/runs/drift" in paths
     assert "/api/v1/operations/overview" in paths
+    assert "/api/v1/operations/alerts" in paths
+    assert "/api/v1/operations/failures" in paths
+    assert "/api/v1/operations/failures/{failure_type}/{failure_id}" in paths
+    assert "/api/v1/operations/failures/{failure_type}/{failure_id}/rerun-plan" in paths
+
+
+def test_operations_failures_forwards_limit(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_get_failures(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "generated_at": "2026-07-20T00:00:00Z",
+            "data_quality_issues": {
+                "total": 0,
+                "limit": kwargs["limit"],
+                "has_more": False,
+                "items": [],
+            },
+            "jobs": {"total": 0, "limit": kwargs["limit"], "has_more": False, "items": []},
+            "factor_runs": {
+                "total": 0,
+                "limit": kwargs["limit"],
+                "has_more": False,
+                "items": [],
+            },
+            "backtest_runs": {
+                "total": 0,
+                "limit": kwargs["limit"],
+                "has_more": False,
+                "items": [],
+            },
+            "paper_orders": {
+                "total": 0,
+                "limit": kwargs["limit"],
+                "has_more": False,
+                "items": [],
+            },
+        }
+
+    monkeypatch.setattr(operations_module.service, "get_failures", fake_get_failures)
+    response = client.get("/api/v1/operations/failures", params={"limit": 7})
+
+    assert response.status_code == 200
+    assert captured["limit"] == 7
+
+
+def test_operations_alerts_returns_candidates(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_get_alerts(db):
+        captured["called"] = True
+        return {
+            "generated_at": "2026-07-20T00:00:00Z",
+            "items": [
+                {
+                    "key": "failed_backtests",
+                    "severity": "critical",
+                    "count": 1,
+                    "title": "Failed backtests",
+                    "detail": "Backtest runs ended in failed status",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(operations_module.service, "get_alerts", fake_get_alerts)
+    response = client.get("/api/v1/operations/alerts")
+
+    assert response.status_code == 200
+    assert captured["called"] is True
+
+
+def test_operations_failure_detail_forwards_type_and_id(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_get_failure_detail(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "failure_type": kwargs["failure_type"],
+            "paper_order": None,
+            "data_quality_issue": None,
+            "job": None,
+            "factor_run": None,
+            "backtest_run": None,
+        }
+
+    monkeypatch.setattr(
+        operations_module.service,
+        "get_failure_detail",
+        fake_get_failure_detail,
+    )
+    response = client.get("/api/v1/operations/failures/paper_order/7")
+
+    assert response.status_code == 200
+    assert captured == {"failure_type": "paper_order", "failure_id": 7}
+
+
+def test_operations_failure_detail_maps_missing_to_404(monkeypatch) -> None:
+    monkeypatch.setattr(
+        operations_module.service,
+        "get_failure_detail",
+        lambda db, **kwargs: None,
+    )
+    response = client.get("/api/v1/operations/failures/paper_order/7")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "operations failure not found"
+
+
+def test_operations_failure_rerun_plan_forwards_type_and_id(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_get_rerun_plan(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "failure_type": kwargs["failure_type"],
+            "failure_id": kwargs["failure_id"],
+            "supported": True,
+            "action_type": "daily_bar_gap_backfill",
+            "reason": "missing daily bar can be backfilled for the affected symbol/date",
+            "parameters": {"symbols": ["AAA"]},
+        }
+
+    monkeypatch.setattr(operations_module.service, "get_rerun_plan", fake_get_rerun_plan)
+    response = client.get("/api/v1/operations/failures/data_quality_issue/2/rerun-plan")
+
+    assert response.status_code == 200
+    assert captured == {"failure_type": "data_quality_issue", "failure_id": 2}
+
+
+def test_operations_failure_rerun_plan_maps_missing_to_404(monkeypatch) -> None:
+    monkeypatch.setattr(
+        operations_module.service,
+        "get_rerun_plan",
+        lambda db, **kwargs: None,
+    )
+    response = client.get("/api/v1/operations/failures/paper_order/7/rerun-plan")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "operations failure not found"
+
+
+def test_rolling_window_generation(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_generate(db, **kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "index": 0,
+                "training_start_date": date(2026, 1, 2),
+                "training_end_date": date(2026, 1, 8),
+                "test_start_date": date(2026, 1, 9),
+                "test_end_date": date(2026, 1, 13),
+            }
+        ]
+
+    monkeypatch.setattr(
+        strategy_research_module.service,
+        "generate_rolling_windows",
+        fake_generate,
+    )
+    response = client.post(
+        "/api/v1/strategy-research/rolling-windows",
+        json={
+            "exchange": "SH",
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-20",
+            "training_days": 5,
+            "test_days": 3,
+            "step_days": 3,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()[0]["training_start_date"] == "2026-01-02"
+    assert captured["exchange"] == "SH"
+
+
+def test_backtest_drift_forwards_baseline_contract(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_detect(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "baseline_run_id": kwargs["baseline_run_id"],
+            "candidate_run_ids": kwargs["candidate_run_ids"],
+            "return_tolerance": kwargs["return_tolerance"],
+            "drawdown_tolerance": kwargs["drawdown_tolerance"],
+            "return_spread": Decimal("0.01"),
+            "drawdown_spread": Decimal("0.02"),
+            "drift_detected": True,
+        }
+
+    monkeypatch.setattr(backtests_module.service, "detect_drift", fake_detect)
+    response = client.post(
+        "/api/v1/backtests/runs/drift",
+        json={
+            "baseline_run_id": 1,
+            "candidate_run_ids": [2],
+            "return_tolerance": "0.005",
+            "drawdown_tolerance": "0.01",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["drift_detected"] is True
+    assert captured["baseline_run_id"] == 1
+    assert captured["candidate_run_ids"] == [2]
+
+
+def test_backtest_drift_maps_incomparable_runs_to_422(monkeypatch) -> None:
+    def fake_detect(db, **kwargs):
+        raise ValueError("backtest run is not comparable with baseline 1: 2")
+
+    monkeypatch.setattr(backtests_module.service, "detect_drift", fake_detect)
+    response = client.post(
+        "/api/v1/backtests/runs/drift",
+        json={"baseline_run_id": 1, "candidate_run_ids": [2]},
+    )
+
+    assert response.status_code == 422
+    assert "not comparable" in response.json()["detail"]
 
 
 def test_daily_bar_rejects_reversed_date_range() -> None:

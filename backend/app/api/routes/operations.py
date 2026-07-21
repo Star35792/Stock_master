@@ -1,9 +1,15 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
-from app.schemas.operations import OperationsOverview
+from app.schemas.operations import (
+    OperationsAlertSummary,
+    OperationsFailureDetail,
+    OperationsFailureReport,
+    OperationsOverview,
+    OperationsRerunPlan,
+)
 from app.services import OperationsOverviewService
 
 router = APIRouter(prefix="/operations", tags=["operations"])
@@ -16,3 +22,69 @@ def get_operations_overview(
     limit: Annotated[int, Query(ge=1, le=50)] = 5,
 ) -> OperationsOverview:
     return service.get_overview(db, limit=limit)
+
+
+@router.get("/alerts", response_model=OperationsAlertSummary)
+def get_operations_alerts(db: DatabaseSession) -> OperationsAlertSummary:
+    return service.get_alerts(db)
+
+
+@router.get("/failures", response_model=OperationsFailureReport)
+def get_operations_failures(
+    db: DatabaseSession,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> OperationsFailureReport:
+    return service.get_failures(db, limit=limit)
+
+
+@router.get("/failures/{failure_type}/{failure_id}", response_model=OperationsFailureDetail)
+def get_operations_failure_detail(
+    failure_type: Literal[
+        "data_quality_issue",
+        "job",
+        "factor_run",
+        "backtest_run",
+        "paper_order",
+    ],
+    failure_id: int,
+    db: DatabaseSession,
+) -> OperationsFailureDetail:
+    detail = service.get_failure_detail(
+        db,
+        failure_type=failure_type,
+        failure_id=failure_id,
+    )
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="operations failure not found",
+        )
+    return detail
+
+
+@router.get(
+    "/failures/{failure_type}/{failure_id}/rerun-plan",
+    response_model=OperationsRerunPlan,
+)
+def get_operations_failure_rerun_plan(
+    failure_type: Literal[
+        "data_quality_issue",
+        "job",
+        "factor_run",
+        "backtest_run",
+        "paper_order",
+    ],
+    failure_id: int,
+    db: DatabaseSession,
+) -> OperationsRerunPlan:
+    plan = service.get_rerun_plan(
+        db,
+        failure_type=failure_type,
+        failure_id=failure_id,
+    )
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="operations failure not found",
+        )
+    return plan

@@ -12,6 +12,7 @@ from app.schemas.common import Page
 from app.schemas.strategy import (
     BacktestBenchmarkRead,
     BacktestComparisonItem,
+    BacktestDriftRead,
     BacktestEquityRead,
     BacktestPerformanceRead,
     BacktestPositionRead,
@@ -236,6 +237,78 @@ class BacktestQueryService:
                 )
             )
         return sorted(items, key=lambda item: (-item.total_return, item.run_id))
+
+    def detect_drift(
+        self,
+        db: Session,
+        *,
+        baseline_run_id: int,
+        candidate_run_ids: list[int],
+        return_tolerance: Decimal,
+        drawdown_tolerance: Decimal,
+    ) -> BacktestDriftRead:
+        if baseline_run_id in candidate_run_ids:
+            raise ValueError("baseline_run_id must not appear in candidate_run_ids")
+        if len(set(candidate_run_ids)) != len(candidate_run_ids):
+            raise ValueError("candidate_run_ids must be unique")
+        run_ids = [baseline_run_id, *candidate_run_ids]
+        runs = []
+        for run_id in run_ids:
+            run = self.backtest_repository.get_run(db, run_id=run_id)
+            if run is None:
+                raise ValueError(f"backtest run not found: {run_id}")
+            if run.status != "success":
+                raise ValueError(f"backtest run must be successful: {run_id}")
+            runs.append(run)
+        baseline = runs[0]
+        baseline_parameters = self._drift_comparison_parameters(baseline.parameters)
+        for candidate in runs[1:]:
+            comparable = (
+                candidate.strategy_name == baseline.strategy_name
+                and candidate.start_date == baseline.start_date
+                and candidate.end_date == baseline.end_date
+                and candidate.data_version == baseline.data_version
+                and self._drift_comparison_parameters(candidate.parameters)
+                == baseline_parameters
+            )
+            if not comparable:
+                raise ValueError(
+                    f"backtest run is not comparable with baseline {baseline_run_id}: "
+                    f"{candidate.id}"
+                )
+        items_by_run_id = {
+            item.run_id: item for item in self.compare_runs(db, run_ids=run_ids)
+        }
+        baseline_item = items_by_run_id[baseline_run_id]
+        return_spread = max(
+            abs(items_by_run_id[run_id].total_return - baseline_item.total_return)
+            for run_id in candidate_run_ids
+        )
+        drawdown_spread = max(
+            abs(
+                items_by_run_id[run_id].maximum_drawdown
+                - baseline_item.maximum_drawdown
+            )
+            for run_id in candidate_run_ids
+        )
+        return BacktestDriftRead(
+            baseline_run_id=baseline_run_id,
+            candidate_run_ids=candidate_run_ids,
+            return_tolerance=return_tolerance,
+            drawdown_tolerance=drawdown_tolerance,
+            return_spread=return_spread,
+            drawdown_spread=drawdown_spread,
+            drift_detected=(
+                return_spread > return_tolerance
+                or drawdown_spread > drawdown_tolerance
+            ),
+        )
+
+    @staticmethod
+    def _drift_comparison_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+        comparable_parameters = dict(parameters)
+        comparable_parameters.pop("code_version", None)
+        return comparable_parameters
 
     def list_runs(
         self,

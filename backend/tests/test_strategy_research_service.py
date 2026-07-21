@@ -2,6 +2,8 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.services import StrategyResearchService
 from app.strategies import FactorScoreSpec
 
@@ -46,6 +48,29 @@ class FakeSecurityRepository:
         return {symbol: "stock" for symbol in symbols}
 
 
+class FakeTradingCalendarRepository:
+    open_dates = [
+        date(2026, 1, 2),
+        date(2026, 1, 5),
+        date(2026, 1, 6),
+        date(2026, 1, 7),
+        date(2026, 1, 8),
+        date(2026, 1, 9),
+        date(2026, 1, 12),
+        date(2026, 1, 13),
+        date(2026, 1, 14),
+        date(2026, 1, 15),
+        date(2026, 1, 16),
+    ]
+
+    def list_open_dates(self, db: object, **kwargs: object) -> list[date]:
+        return [
+            trade_date
+            for trade_date in self.open_dates
+            if kwargs["start_date"] <= trade_date <= kwargs["end_date"]
+        ]
+
+
 class FakeBacktestService:
     def __init__(self) -> None:
         self.kwargs: dict | None = None
@@ -62,6 +87,84 @@ class FakeBacktestService:
                 equity_curve=[1, 2, 3],
                 positions=[1],
             ),
+        )
+
+
+def test_strategy_research_service_generates_rolling_windows() -> None:
+    service = StrategyResearchService(
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+    )
+    windows = service.generate_rolling_windows(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+    )
+
+    assert [window.model_dump() for window in windows] == [
+        {
+            "index": 0,
+            "training_start_date": date(2026, 1, 2),
+            "training_end_date": date(2026, 1, 6),
+            "test_start_date": date(2026, 1, 7),
+            "test_end_date": date(2026, 1, 8),
+        },
+        {
+            "index": 1,
+            "training_start_date": date(2026, 1, 6),
+            "training_end_date": date(2026, 1, 8),
+            "test_start_date": date(2026, 1, 9),
+            "test_end_date": date(2026, 1, 12),
+        },
+        {
+            "index": 2,
+            "training_start_date": date(2026, 1, 8),
+            "training_end_date": date(2026, 1, 12),
+            "test_start_date": date(2026, 1, 13),
+            "test_end_date": date(2026, 1, 14),
+        },
+        {
+            "index": 3,
+            "training_start_date": date(2026, 1, 12),
+            "training_end_date": date(2026, 1, 14),
+            "test_start_date": date(2026, 1, 15),
+            "test_end_date": date(2026, 1, 16),
+        },
+    ]
+
+
+def test_strategy_research_service_rejects_short_rolling_window_range() -> None:
+    service = StrategyResearchService(
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(ValueError, match="open trading dates are insufficient"):
+        service.generate_rolling_windows(
+            object(),
+            exchange="SH",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 7),
+            training_days=3,
+            test_days=2,
+            step_days=2,
+        )
+
+
+def test_strategy_research_service_rejects_reversed_rolling_window_range() -> None:
+    service = StrategyResearchService(
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(ValueError, match="start_date must be earlier"):
+        service.generate_rolling_windows(
+            object(),
+            exchange="SH",
+            start_date=date(2026, 1, 16),
+            end_date=date(2026, 1, 1),
+            training_days=3,
+            test_days=2,
+            step_days=2,
         )
 
 

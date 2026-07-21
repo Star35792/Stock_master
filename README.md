@@ -4,11 +4,11 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 
 当前项目已经从 **可信日线数据中心** 推进到因子、回测、组合、风控、模拟盘和运维观测的最小闭环。V4 单策略研究合同与可复现回测切片已落地，运行记录可还原完整输入和版本。不依赖某一个单一数据源，而是通过多源导入、原始留痕、质量校验和人工修复，形成可供策略、回测和组合执行使用的本地可信数据底座。
 
-V4 研究接口支持批量参数运行，以及带训练区间元数据的样本外和滚动窗口验证；每个测试窗口仍作为独立回测运行保存和查询。
+V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交易所开市日生成窗口、基准与跨运行比较。回归漂移诊断只比较研究合同、测试区间和数据版本一致的运行，阈值表示收益率与回撤率的绝对差值；训练和选参仍由调用方完成并负责留痕。
 
 ## 当前状态
 
-项目当前处于 **V6 可视化和运维** 的最小工作台阶段。下一步先完成 V4 单策略研究合同和可复现回测切片，再补 V6 运维详情与 V5 组合/风控/模拟盘公共操作闭环；V7 实盘只读与受控交易尚未开始。
+项目当前处于 **V6 可视化和运维** 的最小工作台阶段。已具备运维概览、告警候选摘要、按分类限量的失败定位摘要、单项失败详情和只读重跑计划；下一步深化细粒度重跑执行入口，再补 V5 组合/风控/模拟盘公共操作闭环。V4 保留训练选参编排与审计缺口，V7 实盘只读与受控交易尚未开始。
 
 已有：
 
@@ -29,8 +29,8 @@ V4 研究接口支持批量参数运行，以及带训练区间元数据的样�
 - 数据质量与修复：`GET /api/v1/data-quality/issues`、`PATCH /api/v1/data-quality/issues/{issue_id}/status`、`GET /api/v1/daily-bar-source-compares`、`GET /api/v1/manual-corrections`
 - 复权与公司行为：`GET /api/v1/corporate-actions`、`GET /api/v1/adjustment-factors`
 - 因子：`GET /api/v1/factors/definitions`、`GET /api/v1/factors/runs`、`GET /api/v1/factors/values`、`GET /api/v1/factors/profiles`
-- 研究与回测：`POST /api/v1/strategy-research/factor-selection/backtests`、`POST /api/v1/strategy-research/factor-selection/backtests/batch`、`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`GET /api/v1/backtests/runs/{run_id}/trades`、`GET /api/v1/backtests/runs/{run_id}/equity`、`GET /api/v1/backtests/runs/{run_id}/positions`、`GET /api/v1/backtests/runs/{run_id}/performance`、`POST /api/v1/backtests/runs/{run_id}/performance`、`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`
-- 运维工作台：`GET /api/v1/operations/overview`
+- 研究与回测：`POST /api/v1/strategy-research/rolling-windows`、`POST /api/v1/strategy-research/factor-selection/backtests`、`POST /api/v1/strategy-research/factor-selection/backtests/batch`、`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`GET /api/v1/backtests/runs/{run_id}/trades`、`GET /api/v1/backtests/runs/{run_id}/equity`、`GET /api/v1/backtests/runs/{run_id}/positions`、`GET /api/v1/backtests/runs/{run_id}/performance`、`POST /api/v1/backtests/runs/{run_id}/performance`、`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`
+- 运维工作台：`GET /api/v1/operations/overview`、`GET /api/v1/operations/alerts`、`GET /api/v1/operations/failures`、`GET /api/v1/operations/failures/{failure_type}/{failure_id}`、`GET /api/v1/operations/failures/{failure_type}/{failure_id}/rerun-plan`
 
 ## 技术栈
 

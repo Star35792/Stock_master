@@ -6,7 +6,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.repositories.factor import FactorValueRepository
-from app.repositories.market import SecurityRepository
+from app.repositories.market import SecurityRepository, TradingCalendarRepository
+from app.schemas.strategy import RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
 from app.strategies import FactorScoreSpec, MultiFactorStrategy
 
@@ -16,11 +17,58 @@ class StrategyResearchService:
         self,
         factor_value_repository: FactorValueRepository | None = None,
         security_repository: SecurityRepository | None = None,
+        trading_calendar_repository: TradingCalendarRepository | None = None,
         backtest_service: DailyBacktestService | None = None,
     ) -> None:
         self.factor_value_repository = factor_value_repository or FactorValueRepository()
         self.security_repository = security_repository or SecurityRepository()
+        self.trading_calendar_repository = (
+            trading_calendar_repository or TradingCalendarRepository()
+        )
         self.backtest_service = backtest_service or DailyBacktestService()
+
+    def generate_rolling_windows(
+        self,
+        db: Session,
+        *,
+        exchange: str,
+        start_date: date,
+        end_date: date,
+        training_days: int,
+        test_days: int,
+        step_days: int,
+    ) -> list[RollingWindowRead]:
+        if start_date > end_date:
+            raise ValueError("start_date must be earlier than or equal to end_date")
+        open_dates = self.trading_calendar_repository.list_open_dates(
+            db,
+            exchange=exchange,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        available_starts = len(open_dates) - training_days - test_days
+        window_count = available_starts // step_days + 1 if available_starts >= 0 else 0
+        if window_count > 20:
+            raise ValueError("rolling window count must not exceed 20")
+        windows = []
+        training_start_index = 0
+        while training_start_index + training_days + test_days <= len(open_dates):
+            training_end_index = training_start_index + training_days - 1
+            test_start_index = training_end_index + 1
+            test_end_index = test_start_index + test_days - 1
+            windows.append(
+                RollingWindowRead(
+                    index=len(windows),
+                    training_start_date=open_dates[training_start_index],
+                    training_end_date=open_dates[training_end_index],
+                    test_start_date=open_dates[test_start_index],
+                    test_end_date=open_dates[test_end_index],
+                )
+            )
+            training_start_index += step_days
+        if not windows:
+            raise ValueError("open trading dates are insufficient for one rolling window")
+        return windows
 
     def run_factor_selection(
         self,

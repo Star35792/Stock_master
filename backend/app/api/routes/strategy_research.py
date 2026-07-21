@@ -6,12 +6,33 @@ from app.schemas.strategy import (
     BatchFactorSelectionBacktestRequest,
     FactorSelectionBacktestRequest,
     FactorSelectionBacktestResult,
+    RollingWindowRead,
+    RollingWindowRequest,
 )
 from app.services import StrategyResearchService
 from app.strategies import FactorScoreSpec
 
 router = APIRouter(prefix="/strategy-research", tags=["strategy-research"])
 service = StrategyResearchService()
+
+
+@router.post("/rolling-windows", response_model=list[RollingWindowRead])
+def generate_rolling_windows(
+    payload: RollingWindowRequest,
+    db: DatabaseSession,
+) -> list[RollingWindowRead]:
+    try:
+        return service.generate_rolling_windows(
+            db,
+            exchange=payload.exchange,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            training_days=payload.training_days,
+            test_days=payload.test_days,
+            step_days=payload.step_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post(

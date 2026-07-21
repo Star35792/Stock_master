@@ -186,3 +186,51 @@ class BatchFactorSelectionBacktestItem(BaseModel):
     status: Literal["success", "failed"]
     result: FactorSelectionBacktestResult | None = None
     error_message: str | None = None
+
+
+class RollingWindowRequest(BaseModel):
+    exchange: Literal["SH", "SZ", "BJ", "HK"]
+    start_date: date
+    end_date: date
+    training_days: int = Field(
+        gt=0, le=1000, description="Training-window open trading dates"
+    )
+    test_days: int = Field(
+        gt=0, le=1000, description="Test-window open trading dates"
+    )
+    step_days: int = Field(
+        gt=0, le=1000, description="Open trading dates between window starts"
+    )
+
+
+class RollingWindowRead(BaseModel):
+    index: int
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+
+
+class BacktestDriftRequest(BaseModel):
+    baseline_run_id: int = Field(gt=0)
+    candidate_run_ids: list[int] = Field(min_length=1, max_length=19)
+    return_tolerance: Decimal = Field(
+        default=Decimal(0),
+        ge=0,
+        description="Allowed absolute total-return ratio difference",
+    )
+    drawdown_tolerance: Decimal = Field(
+        default=Decimal(0),
+        ge=0,
+        description="Allowed absolute maximum-drawdown ratio difference",
+    )
+
+
+class BacktestDriftRead(BaseModel):
+    baseline_run_id: int
+    candidate_run_ids: list[int]
+    return_tolerance: Decimal
+    drawdown_tolerance: Decimal
+    return_spread: Decimal
+    drawdown_spread: Decimal
+    drift_detected: bool

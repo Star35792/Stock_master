@@ -54,6 +54,27 @@ class TradingCalendarRepository:
             ).all()
         )
 
+    def list_open_dates(
+        self,
+        db: Session,
+        *,
+        exchange: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[date]:
+        return list(
+            db.scalars(
+                select(TradingCalendar.trade_date)
+                .where(
+                    TradingCalendar.exchange == exchange,
+                    TradingCalendar.trade_date >= start_date,
+                    TradingCalendar.trade_date <= end_date,
+                    TradingCalendar.is_open.is_(True),
+                )
+                .order_by(TradingCalendar.trade_date)
+            )
+        )
+
     def get_by_exchange_date(
         self,
         db: Session,
