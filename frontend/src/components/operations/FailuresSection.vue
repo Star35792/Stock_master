@@ -89,6 +89,13 @@ function getDetailRows(detail: OperationsFailureDetail | null) {
     value: formatUnknown(value),
   }));
 }
+
+function getRerunParameterRows(plan: OperationsRerunPlan) {
+  return Object.entries(plan.parameters).map(([key, value]) => ({
+    key,
+    value: formatUnknown(value),
+  }));
+}
 </script>
 
 <template>
@@ -147,6 +154,22 @@ function getDetailRows(detail: OperationsFailureDetail | null) {
           </div>
           <p>{{ rerunPlan.reason }}</p>
           <pre>{{ formatUnknown(rerunPlan.parameters) }}</pre>
+
+          <div v-if="rerunPlan.supported" class="rerun-preflight">
+            <strong>执行前准备</strong>
+            <ul>
+              <li>核对参数与失败详情是否匹配。</li>
+              <li>确认该动作只会用于后续人工触发，不会在本页面直接执行。</li>
+              <li>等待后端执行入口补齐审计、幂等和权限边界。</li>
+            </ul>
+            <div v-if="getRerunParameterRows(rerunPlan).length > 0" class="rerun-parameters">
+              <div v-for="row in getRerunParameterRows(rerunPlan)" :key="row.key">
+                <span>{{ row.key }}</span>
+                <code>{{ row.value }}</code>
+              </div>
+            </div>
+            <button type="button" class="disabled-action" disabled>执行入口未启用</button>
+          </div>
         </div>
 
         <div v-if="failureDetail" class="detail-table">

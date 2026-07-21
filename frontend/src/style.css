@@ -502,6 +502,71 @@ pre {
   font-size: 12px;
 }
 
+.rerun-preflight {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.rerun-preflight strong {
+  color: #1d4ed8;
+  font-size: 13px;
+}
+
+.rerun-preflight ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rerun-parameters {
+  display: grid;
+  gap: 6px;
+}
+
+.rerun-parameters div {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.35fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.rerun-parameters span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rerun-parameters code {
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #344054;
+  background: #eef2f7;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disabled-action {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  color: #667085;
+  background: #f8fafc;
+  cursor: not-allowed;
+}
+
 .detail-table {
   display: grid;
   border-top: 1px solid #eef1f5;
@@ -737,6 +802,10 @@ tbody tr:last-child td {
   }
 
   .detail-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rerun-parameters div {
     grid-template-columns: 1fr;
   }
 
