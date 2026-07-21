@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ServerCog, Loader2 } from "@lucide/vue";
+import { computed, ref } from "vue";
 
 import type {
   BacktestRunFailure,
@@ -13,7 +14,7 @@ import type {
 import { formatDate, formatUnknown, sideLabel } from "./formatters";
 import type { FailureItem, FailureSectionView, FailureType, SelectedFailure } from "./viewTypes";
 
-defineProps<{
+const props = defineProps<{
   sections: FailureSectionView[];
   selectedFailure: SelectedFailure | null;
   failureDetail: OperationsFailureDetail | null;
@@ -25,6 +26,27 @@ defineProps<{
 const emit = defineEmits<{
   select: [type: FailureType, item: FailureItem];
 }>();
+
+const activeFailureType = ref<FailureType | "all">("all");
+const filterOptions = computed(() => [
+  {
+    type: "all" as const,
+    title: "全部",
+    total: props.sections.reduce((sum, section) => sum + section.total, 0),
+  },
+  ...props.sections.map((section) => ({
+    type: section.type,
+    title: section.title,
+    total: section.total,
+  })),
+]);
+const filteredSections = computed(() => {
+  if (activeFailureType.value === "all") {
+    return props.sections;
+  }
+
+  return props.sections.filter((section) => section.type === activeFailureType.value);
+});
 
 function getFailureTitle(type: FailureType, item: FailureItem) {
   if (type === "data_quality_issue") {
@@ -106,9 +128,22 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
       <span class="section-note">点击失败项查看详情和只读重跑建议</span>
     </div>
 
+    <div class="failure-filters" aria-label="失败类型筛选">
+      <button
+        v-for="option in filterOptions"
+        :key="option.type"
+        :class="{ active: activeFailureType === option.type }"
+        type="button"
+        @click="activeFailureType = option.type"
+      >
+        <span>{{ option.title }}</span>
+        <strong>{{ option.total }}</strong>
+      </button>
+    </div>
+
     <div class="failure-layout">
       <div class="failure-list">
-        <article v-for="section in sections" :key="section.type" class="failure-section-card">
+        <article v-for="section in filteredSections" :key="section.type" class="failure-section-card">
           <header>
             <h3>{{ section.title }}</h3>
             <span>{{ section.total }} total<span v-if="section.hasMore"> · has more</span></span>
