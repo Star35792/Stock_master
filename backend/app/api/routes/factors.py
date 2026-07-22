@@ -21,6 +21,7 @@ service = FactorQueryService()
 def list_factor_definitions(
     db: DatabaseSession,
     name: str | None = None,
+    category: str | None = None,
     frequency: Literal["daily", "weekly", "monthly"] | None = None,
     is_active: bool | None = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
@@ -29,6 +30,7 @@ def list_factor_definitions(
     return service.list_definitions(
         db,
         name=name,
+        category=category,
         frequency=frequency,
         is_active=is_active,
         limit=limit,

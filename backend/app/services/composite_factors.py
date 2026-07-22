@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -101,6 +102,7 @@ class CompositeFactorService:
             name=factor_name,
             display_name=display_name,
             description=description,
+            category=FactorCategory.COMPOSITE,
             frequency="daily",
             inputs=component_inputs,
             applicable_security_types=security_types_allowed,

@@ -12,6 +12,7 @@ class FactorDefinitionRead(BaseModel):
     name: str
     display_name: str | None
     description: str | None
+    category: str
     frequency: str
     inputs: list[str]
     applicable_security_types: list[str]

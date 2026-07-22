@@ -229,6 +229,7 @@ export interface FactorDefinition {
   name: string;
   display_name: string | null;
   description: string | null;
+  category: string;
   frequency: "daily" | "weekly" | "monthly";
   inputs: string[];
   applicable_security_types: string[];

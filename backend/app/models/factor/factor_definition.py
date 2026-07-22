@@ -32,6 +32,7 @@ class FactorDefinition(TimestampMixin, Base):
         ),
         Index("ix_factor_definition_name_version", "name", "version"),
         Index("ix_factor_definition_active_frequency", "is_active", "frequency"),
+        Index("ix_factor_definition_category", "category"),
         {"schema": "factor"},
     )
 
@@ -39,6 +40,7 @@ class FactorDefinition(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
     frequency: Mapped[str] = mapped_column(String(20), nullable=False)
     inputs: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")

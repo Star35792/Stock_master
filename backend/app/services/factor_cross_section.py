@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorProfileRepository,
@@ -150,6 +151,14 @@ class FactorCrossSectionService:
         rows_by_transform: dict[str, int] = {}
         run_ids: dict[str, int] = {}
         output_version = f"{PROFILE_VERSION}-from-{factor_version}"
+        source_definition = self.definition_repository.get_by_name_version(
+            db, name=factor_name, version=factor_version
+        )
+        source_category = (
+            source_definition.category
+            if source_definition is not None
+            else FactorCategory.PRICE_VOLUME_RISK.value
+        )
         for transform_name, transform in transforms.items():
             output_name = f"{factor_name}__{transform_name}"
             definition = self.definition_repository.ensure(
@@ -157,6 +166,7 @@ class FactorCrossSectionService:
                 name=output_name,
                 display_name=output_name,
                 description=f"{transform_name} transform of {factor_name}",
+                category=source_category,
                 frequency="daily",
                 inputs=[f"factor.{factor_name}"],
                 applicable_security_types=["stock", "etf", "index"],

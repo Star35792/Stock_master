@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -137,6 +138,7 @@ class CrowdingFactorService:
                 "equal-weight blend of turnover percentile, abnormal volume "
                 "pressure and market sentiment regime"
             ),
+            category=FactorCategory.CAPITAL_FLOW,
             frequency="daily",
             inputs=component_inputs,
             applicable_security_types=list(SUPPORTED_SECURITY_TYPES),

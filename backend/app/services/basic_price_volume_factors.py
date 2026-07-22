@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -27,6 +28,7 @@ class BasicFactorSpec:
     window_days: int
     higher_is_better: bool = True
     default_enabled: bool = True
+    category: str = FactorCategory.PRICE_VOLUME_RISK
 
 
 @dataclass(frozen=True)
@@ -247,6 +249,7 @@ class BasicPriceVolumeFactorService:
                 name=spec.name,
                 display_name=spec.display_name,
                 description=spec.description,
+                category=spec.category,
                 frequency="daily",
                 inputs=list(spec.inputs),
                 applicable_security_types=list(SUPPORTED_SECURITY_TYPES),

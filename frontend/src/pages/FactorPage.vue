@@ -12,6 +12,31 @@ const activeFactor = ref<FactorDefinition | null>(null);
 const profiles = ref<FactorProfile[]>([]);
 const search = ref("");
 const frequency = ref("");
+const category = ref("");
+
+const factorCategoryLabels: Record<string, string> = {
+  price_volume_risk: "价量与风险",
+  financial_health: "财务健康",
+  fundamental_quality: "基本面质量与成长",
+  valuation: "估值与安全边际",
+  industry_prosperity: "行业景气",
+  sentiment: "市场情绪",
+  macro: "宏观与信用",
+  policy: "政策与监管",
+  earnings_revision: "盈利预期修正",
+  capital_flow: "资金结构与拥挤度",
+  composite: "复合决策",
+};
+
+const factorCategoryOptions = [
+  { value: "", label: "全部分类" },
+  ...Object.entries(factorCategoryLabels).map(([value, label]) => ({ value, label })),
+];
+
+function categoryLabel(factor: FactorDefinition) {
+  return factorCategoryLabels[factor.category] ?? factor.category ?? "未分类";
+}
+
 const isLoading = ref(false);
 const isLoadingProfiles = ref(false);
 const errorMessage = ref<string | null>(null);
@@ -73,7 +98,7 @@ const factorNameLabels: Record<string, string> = {
 const filteredDefinitions = computed(() => definitions.value.filter((factor) => {
   const query = search.value.trim().toLowerCase();
   const matchesText = !query || [factor.name, factor.display_name ?? "", localizedName(factor)].some((value) => value.toLowerCase().includes(query));
-  return matchesText && (!frequency.value || factor.frequency === frequency.value);
+  return matchesText && (!frequency.value || factor.frequency === frequency.value) && (!category.value || factor.category === category.value);
 }));
 
 function localizedName(factor: FactorDefinition) {
@@ -198,6 +223,7 @@ onMounted(loadDefinitions);
     <div class="factor-toolbar">
       <label class="search-field">搜索因子<input v-model="search" placeholder="代码、中文名称或描述" /></label>
       <label>频率<select v-model="frequency"><option value="">全部</option><option value="daily">日频</option><option value="weekly">周频</option><option value="monthly">月频</option></select></label>
+      <label>分类<select v-model="category"><option v-for="opt in factorCategoryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select></label>
       <button class="secondary-action" type="button" @click="loadDefinitions"><Filter :size="16" />{{ isLoading ? "读取中" : "刷新定义" }}</button>
     </div>
 
@@ -208,7 +234,7 @@ onMounted(loadDefinitions);
         <article v-for="factor in filteredDefinitions" :key="factor.id" class="factor-card" :class="{ active: activeFactor?.id === factor.id }" @click="loadProfiles(factor)">
           <div class="factor-card-top"><div><strong>{{ localizedName(factor) }}</strong><code>{{ factor.name }} · {{ factor.version }}</code></div><button class="icon-button" type="button" :title="isSelected(factor) ? '移出选择' : '加入选择'" @click.stop="toggleFactor(factor)"><Check v-if="isSelected(factor)" :size="16" /><span v-else>+</span></button></div>
           <p>{{ localizedDescription(factor) }}</p>
-          <footer><span>{{ factor.frequency === "daily" ? "日频" : factor.frequency === "weekly" ? "周频" : "月频" }}</span><span>{{ factor.applicable_security_types.map(securityTypeLabel).join("、") || "未限制证券类型" }}</span><span v-if="factor.window_days">窗口 {{ factor.window_days }} 日</span></footer>
+          <footer><span class="category-tag">{{ categoryLabel(factor) }}</span><span>{{ factor.frequency === "daily" ? "日频" : factor.frequency === "weekly" ? "周频" : "月频" }}</span><span>{{ factor.applicable_security_types.map(securityTypeLabel).join("、") || "未限制证券类型" }}</span><span v-if="factor.window_days">窗口 {{ factor.window_days }} 日</span></footer>
         </article>
       </div>
 
@@ -243,6 +269,7 @@ input, select { min-height: 40px; border: 1px solid #cbd5e1; border-radius: 6px;
 .factor-card code, .selection-list code { display: block; margin-top: 4px; color: #667085; font-size: 11px; }
 .factor-card p, .factor-detail p { color: #667085; font-size: 13px; line-height: 1.55; }
 .factor-card footer { justify-content: flex-start; flex-wrap: wrap; color: #667085; font-size: 11px; }
+.category-tag { color: #2563eb; font-weight: 700; }
 .factor-selection { padding: 18px; }
 .selection-list { display: grid; gap: 8px; padding: 0; list-style: none; }
 .selection-list li { padding: 10px 0; border-bottom: 1px solid #eef1f5; }

@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -102,6 +103,7 @@ class ValuationFactorSpec:
     description: str
     inputs: tuple[str, ...]
     higher_is_better: bool = True
+    category: str = FactorCategory.VALUATION
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,7 @@ class ValuationFactorService:
                 name=spec.name,
                 display_name=spec.display_name,
                 description=spec.description,
+                category=spec.category,
                 frequency="daily",
                 inputs=list(spec.inputs),
                 applicable_security_types=list(SUPPORTED_SECURITY_TYPES),

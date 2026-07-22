@@ -24,6 +24,26 @@
 | 盈利预期修正 | 已实现首版 | 一致预期修正、修正广度、预测分歧、业绩预告 surprise、业绩预警风险 | 真实一致预期来源、公告时间、低配代理的置信度 |
 | 资金结构与拥挤度 | 已实现首版 | 主力资金、北向、融资、行业 ETF 流、机构拥挤、换手分位、异常量能、综合拥挤分 | 北向/融资/ETF/机构数据覆盖和拥挤反转验证 |
 
+## 因子分类落地（category）
+
+`factor.factor_definition` 表已新增 `category` 字段（非空字符串），把每个因子归入一个决策域，用于前端分组展示、按域过滤和后续按域设置权重。分类口径与本文件第 2 节因子域一致；为避免单域过碎，合并宏观流动性 + 信用周期为 `macro`，资金结构 + 拥挤度为 `capital_flow`。
+
+| category | 中文 | 说明 |
+| --- | --- | --- |
+| `price_volume_risk` | 价量与风险 | 动量、反转、波动、Beta、流动性、换手等 |
+| `financial_health` | 财务健康 | 偿债、流动性、利息覆盖、应计质量、财务异常 |
+| `fundamental_quality` | 基本面质量与成长 | ROE/ROIC、利润率、成长、稳定性、盈利质量 |
+| `valuation` | 估值与安全边际 | 市值、盈利收益率、账面市值比、FCF yield、EV/EBITDA |
+| `industry_prosperity` | 行业景气 | 行业动量、宽度、成交占比变化 |
+| `sentiment` | 市场情绪 | 热度、涨停、龙虎榜、情绪温度、过热反转 |
+| `macro` | 宏观与信用 | 利率趋势、收益率曲线、社融、M1-M2、信用利差 |
+| `policy` | 政策与监管 | 行业政策事件得分 |
+| `earnings_revision` | 盈利预期修正 | 一致预期修正、修正广度、预测分歧、业绩预告 |
+| `capital_flow` | 资金结构与拥挤度 | 主力资金、北向、融资、ETF 流、机构拥挤、拥挤度 |
+| `composite` | 复合决策 | 加权百分位排名复合得分 |
+
+分类常量定义在 `backend/app/factors/categories.py`（`FactorCategory` 枚举、`FACTOR_CATEGORY_LABELS`、`FACTOR_CATEGORY_ORDER`）。因子服务注册时通过 `definition_repository.ensure(category=...)` 写入；`factor_cross_section` 生成的派生因子（`xxx__rank`、`xxx__zscore`、`xxx__winsor`、`xxx__industry_neutral`）继承基础因子的 `category`。历史因子定义由 Alembic 迁移 `20260722_0024` 按因子名回填，派生因子按基础因子回填。前端 `FactorPage` 提供分类下拉过滤和卡片分类标签。
+
 ## 3. 因子域设计
 
 ### 3.1 财务健康

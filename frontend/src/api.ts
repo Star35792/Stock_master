@@ -34,11 +34,13 @@ async function jsonApi<T>(response: Response, message: string): Promise<T> {
 
 export async function fetchFactorDefinitions(filters: {
   name?: string;
+  category?: string;
   frequency?: string;
   is_active?: boolean;
 } = {}): Promise<ApiPage<FactorDefinition>> {
   const params = new URLSearchParams({ limit: "200" });
   if (filters.name) params.set("name", filters.name);
+  if (filters.category) params.set("category", filters.category);
   if (filters.frequency) params.set("frequency", filters.frequency);
   if (filters.is_active !== undefined) params.set("is_active", String(filters.is_active));
   return jsonApi(

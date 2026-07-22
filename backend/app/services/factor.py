@@ -37,6 +37,7 @@ class FactorQueryService:
         db: Session,
         *,
         name: str | None,
+        category: str | None,
         frequency: str | None,
         is_active: bool | None,
         limit: int,
@@ -45,6 +46,7 @@ class FactorQueryService:
         rows, total = self.definition_repository.list(
             db,
             name=name,
+            category=category,
             frequency=frequency,
             is_active=is_active,
             limit=limit,

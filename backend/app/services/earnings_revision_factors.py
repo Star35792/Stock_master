@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -36,6 +37,7 @@ class EarningsRevisionFactorSpec:
     datasets: tuple[str, ...]
     market_wide: bool = False
     higher_is_better: bool = True
+    category: str = FactorCategory.EARNINGS_REVISION
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,7 @@ class EarningsRevisionFactorService:
                 name=spec.name,
                 display_name=spec.display_name,
                 description=spec.description,
+                category=spec.category,
                 frequency="daily",
                 inputs=list(spec.inputs),
                 applicable_security_types=list(SUPPORTED_SECURITY_TYPES),

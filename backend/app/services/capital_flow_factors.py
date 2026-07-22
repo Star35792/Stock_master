@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -37,6 +38,7 @@ class CapitalFlowFactorSpec:
     datasets: tuple[str, ...]
     window_days: int | None = None
     higher_is_better: bool = True
+    category: str = FactorCategory.CAPITAL_FLOW
 
 
 @dataclass(frozen=True)
@@ -208,6 +210,7 @@ class CapitalFlowFactorService:
                 name=spec.name,
                 display_name=spec.display_name,
                 description=spec.description,
+                category=spec.category,
                 frequency="daily",
                 inputs=list(spec.inputs),
                 applicable_security_types=list(SUPPORTED_SECURITY_TYPES),

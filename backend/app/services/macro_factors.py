@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -37,6 +38,7 @@ class MacroFactorSpec:
     description: str
     item_keys: tuple[str, ...]
     higher_is_better: bool = True
+    category: str = FactorCategory.MACRO
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,7 @@ class MacroFactorService:
                 name=spec.name,
                 display_name=spec.display_name,
                 description=spec.description,
+                category=spec.category,
                 frequency="daily",
                 inputs=[
                     f"market.alternative_data_snapshot.{DATASET}.{key}"

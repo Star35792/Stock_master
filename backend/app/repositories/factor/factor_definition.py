@@ -14,6 +14,7 @@ class FactorDefinitionRepository:
         name: str,
         display_name: str,
         description: str,
+        category: str,
         frequency: str,
         inputs: list[str],
         applicable_security_types: list[str],
@@ -26,6 +27,7 @@ class FactorDefinitionRepository:
         values = {
             "display_name": display_name,
             "description": description,
+            "category": category,
             "frequency": frequency,
             "inputs": inputs,
             "applicable_security_types": applicable_security_types,
@@ -63,6 +65,7 @@ class FactorDefinitionRepository:
         db: Session,
         *,
         name: str | None = None,
+        category: str | None = None,
         frequency: str | None = None,
         is_active: bool | None = None,
         limit: int = 100,
@@ -71,6 +74,8 @@ class FactorDefinitionRepository:
         filters = []
         if name:
             filters.append(FactorDefinition.name == name)
+        if category:
+            filters.append(FactorDefinition.category == category)
         if frequency:
             filters.append(FactorDefinition.frequency == frequency)
         if is_active is not None:

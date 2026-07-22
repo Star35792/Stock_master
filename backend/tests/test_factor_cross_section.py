@@ -43,6 +43,15 @@ class FakeDefinitionRepository:
         self.definitions.append(definition)
         return definition
 
+    def get_by_name_version(
+        self,
+        db: object,
+        *,
+        name: str,
+        version: str,
+    ) -> SimpleNamespace | None:
+        return None
+
 
 class FakeRunRepository:
     def __init__(self) -> None:

@@ -162,6 +162,7 @@ class FakeFactorDefinitionRepository:
             name="ret_1d",
             display_name="1日收益率",
             description="close / pre_close - 1",
+            category="price_volume_risk",
             frequency="daily",
             inputs=["market.daily_bar.close"],
             applicable_security_types=["stock", "etf", "index"],
@@ -576,6 +577,7 @@ def test_factor_service_lists_definitions() -> None:
     result = service.list_definitions(
         object(),
         name="ret_1d",
+        category=None,
         frequency="daily",
         is_active=True,
         limit=100,

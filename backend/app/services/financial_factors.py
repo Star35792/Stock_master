@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -121,6 +122,7 @@ class FinancialFactorSpec:
     display_name: str
     description: str
     inputs: tuple[str, ...]
+    category: str
     higher_is_better: bool = True
 
 
@@ -150,6 +152,7 @@ class FinancialSnapshot:
 FINANCIAL_FACTOR_SPECS = (
     FinancialFactorSpec(
         name="debt_to_assets",
+        category=FactorCategory.FINANCIAL_HEALTH,
         display_name="Debt to assets",
         description="latest reported total liabilities / total assets",
         inputs=("fundamental.financial_statement.balance.metrics",),
@@ -157,18 +160,21 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="current_ratio",
+        category=FactorCategory.FINANCIAL_HEALTH,
         display_name="Current ratio",
         description="latest reported current assets / current liabilities",
         inputs=("fundamental.financial_statement.balance.metrics",),
     ),
     FinancialFactorSpec(
         name="interest_coverage",
+        category=FactorCategory.FINANCIAL_HEALTH,
         display_name="Interest coverage",
         description="latest reported operating profit / interest expense",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="operating_cash_debt",
+        category=FactorCategory.FINANCIAL_HEALTH,
         display_name="Operating cash debt",
         description="latest reported operating cash flow / interest-bearing debt",
         inputs=(
@@ -178,6 +184,7 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="roe_ttm",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="ROE TTM",
         description="latest reported net profit / latest reported shareholders equity",
         inputs=(
@@ -187,6 +194,7 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="roic_ttm",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="ROIC TTM",
         description="latest reported operating profit / invested capital",
         inputs=(
@@ -196,6 +204,7 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="roa_ttm",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="ROA TTM",
         description="latest reported net profit / total assets",
         inputs=(
@@ -205,18 +214,21 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="gross_margin_ttm",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Gross margin TTM",
         description="latest reported gross profit / revenue",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="operating_margin_ttm",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Operating margin TTM",
         description="latest reported operating profit / revenue",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="ocf_to_net_income_ttm",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="OCF to net income TTM",
         description="latest reported operating cash flow / net profit",
         inputs=(
@@ -226,6 +238,7 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="accrual_ratio",
+        category=FactorCategory.FINANCIAL_HEALTH,
         display_name="Accrual ratio",
         description="(net profit - operating cash flow) / average total assets",
         inputs=(
@@ -237,12 +250,14 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="revenue_growth_yoy",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Revenue growth YoY",
         description="latest reported revenue / comparable prior-year revenue - 1",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="ocf_growth_yoy",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="OCF growth YoY",
         description=(
             "latest reported operating cash flow / comparable prior-year "
@@ -252,12 +267,14 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="net_profit_growth_yoy",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Net profit growth YoY",
         description="latest reported net profit / comparable prior-year net profit - 1",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="roe_stability_3y",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="ROE stability 3Y",
         description="standard deviation of same-period ROE over latest three fiscal years",
         inputs=(
@@ -268,18 +285,21 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="revenue_cagr_3y",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Revenue CAGR 3Y",
         description="three-year compound annual growth rate of reported revenue",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="net_profit_cagr_3y",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Net profit CAGR 3Y",
         description="three-year compound annual growth rate of reported net profit",
         inputs=("fundamental.financial_statement.income.metrics",),
     ),
     FinancialFactorSpec(
         name="receivable_growth_revenue_gap",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Receivable growth revenue gap",
         description="accounts receivable YoY growth minus revenue YoY growth",
         inputs=(
@@ -290,6 +310,7 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="inventory_growth_revenue_gap",
+        category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="Inventory growth revenue gap",
         description="inventory YoY growth minus revenue YoY growth",
         inputs=(
@@ -300,6 +321,7 @@ FINANCIAL_FACTOR_SPECS = (
     ),
     FinancialFactorSpec(
         name="financial_anomaly_score",
+        category=FactorCategory.FINANCIAL_HEALTH,
         display_name="Financial anomaly score",
         description="share of triggered balance-sheet and cash-flow anomaly checks",
         inputs=(
@@ -390,6 +412,7 @@ class FinancialFactorService:
                 name=spec.name,
                 display_name=spec.display_name,
                 description=spec.description,
+                category=spec.category,
                 frequency="daily",
                 inputs=list(spec.inputs),
                 applicable_security_types=list(SUPPORTED_SECURITY_TYPES),

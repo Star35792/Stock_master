@@ -470,7 +470,7 @@ V1 暂不引入以下设计：
 
 以下表域已经不再是“暂不创建”，而是当前代码的一部分：
 
-- `factor.*`：因子定义、运行批次、因子值、横截面 profile。
+- `factor.*`：因子定义、运行批次、因子值、横截面 profile。`factor.factor_definition` 新增非空 `category` 字段（11 个决策域分类，见 `aiDoc/research/decision-factor-framework.md`）与 `ix_factor_definition_category` 索引；派生因子（`xxx__transform`）继承基础因子分类，由 Alembic `20260722_0024` 回填。
 - `strategy.*`：回测运行、成交、净值、持仓和绩效。
 - `portfolio.*`：组合计划和目标持仓。`portfolio.portfolio_plan` 以 nullable 的 `idempotency_key`、`request_hash` 和 `input_snapshot` 兼容历史记录；新公共草案 API 要求幂等键，保存规范化手工输入快照，并通过唯一索引防止重试生成重复草案。
 - `trade.*`：模拟盘账户、订单、成交和持仓；`paper_account_equity_snapshot` 按账户/估值日 append-only 保存现金、市值、总权益、观测高水位、回撤、历史连续状态和三类哈希，`paper_account_equity_component` 复制逐持仓数量、成本、未复权价格及行情质量血缘。旧历史不回填，首条固定为 `bootstrap`。`paper_execution_approval` 一对一绑定通过的正式风险评估，保存代码版本、评估、账户、净值、readiness、ADV、政策和规范化订单批次哈希；状态限定为 `pending -> consumed | expired | revoked`，创建和撤销分别使用唯一幂等键。`paper_execution_batch` 以 approval 和执行幂等键双唯一约束保存代码版本、前后账户状态、执行政策、输入/结果快照和稳定失败码，并以 check constraint 约束 completed/rejected 的计数、现金、hash 和时间不变量；新 `paper_order` 通过 nullable 的 batch、risk order 和 execution index 兼容旧记录，`paper_fill` 限定每个同步 full-fill 订单一条成交。
