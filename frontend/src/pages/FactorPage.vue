@@ -24,6 +24,7 @@ const parameterLabels: Record<string, string> = {
   lag: "滞后期",
   quantile: "分位数",
   winsorize: "缩尾比例",
+  sentiment_history_days: "情绪历史窗口（天）",
 };
 
 const factorCopy: Record<string, { name: string; description: string }> = {
