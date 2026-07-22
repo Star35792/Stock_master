@@ -161,6 +161,74 @@ class EastmoneyDataSource:
                 raise EastmoneyDataError(f"invalid kline row for {symbol}: {line}") from exc
         return rows
 
+    def fetch_valuation_snapshots(
+        self,
+        *,
+        market: str = "all",
+        limit: int = 10000,
+    ) -> list[dict[str, object]]:
+        """Bulk-fetch current valuation snapshots (market cap/PE/PB), cookie-free.
+
+        Paginates the clist endpoint across the whole market. ``trade_date`` is
+        today; run daily to accumulate historical valuation snapshots.
+        """
+        market_filters = {
+            "all": "m:0+t:6,m:0+t:13,m:0+t:80,m:1+t:2,m:1+t:23,m:1+t:8",
+            "sh": "m:0+t:6,m:0+t:13,m:0+t:80",
+            "sz": "m:1+t:2,m:1+t:23,m:1+t:8",
+        }
+        if market not in market_filters:
+            raise ValueError(f"unsupported market: {market}")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        page_size = 500
+        rows: list[dict[str, object]] = []
+        pn = 1
+        while len(rows) < limit:
+            data = self._get_json(
+                QUOTE_HOST,
+                "/api/qt/clist/get",
+                {
+                    "pn": pn,
+                    "pz": page_size,
+                    "po": 1,
+                    "np": 1,
+                    "fltt": 2,
+                    "invt": 2,
+                    "fid": "f12",
+                    "fs": market_filters[market],
+                    "fields": "f12,f2,f9,f23,f20,f21",
+                },
+            )
+            diff = (data.get("data") or {}).get("diff") or []
+            if not diff:
+                break
+            for item in diff:
+                code = item.get("f12")
+                if not code:
+                    continue
+                rows.append(
+                    {
+                        "symbol": normalize_symbol(str(code)),
+                        "trade_date": date.today(),
+                        "close": _to_decimal(item.get("f2")),
+                        "total_market_cap": _to_decimal(item.get("f20")),
+                        "float_market_cap": _to_decimal(item.get("f21")),
+                        "pe_ttm": _to_decimal(item.get("f9")),
+                        "pb": _to_decimal(item.get("f23")),
+                        "ps_ttm": None,
+                        "currency": "CNY",
+                        "source_name": self.name,
+                        "raw_payload": item,
+                    }
+                )
+                if len(rows) >= limit:
+                    break
+            if len(diff) < page_size:
+                break
+            pn += 1
+        return rows
+
     def _get_json(self, host: str, path: str, params: dict[str, object]) -> dict:
         url = f"{host}{path}?{urlencode(params)}"
         last_error: Exception | None = None
@@ -185,6 +253,15 @@ class EastmoneyDataSource:
                 if attempt < self.retries:
                     sleep(min(2**attempt, 8))
         raise EastmoneyDataError(f"Eastmoney request failed: {path}") from last_error
+
+
+def _to_decimal(value: object) -> Decimal | None:
+    if value in (None, "", "-", "—"):
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
 
 
 def market_prefix(code: str) -> str:

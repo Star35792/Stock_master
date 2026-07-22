@@ -95,6 +95,90 @@ class XueqiuDataSource:
             raise XueqiuDataError(f"Xueqiu returned no K-line data for {symbol}")
         return records
 
+    def fetch_valuation_snapshots(
+        self,
+        *,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, object]]:
+        """Fetch daily valuation snapshots (pe/pb/ps/market_capital/close).
+
+        Reuses the K-line endpoint which embeds valuation indicators per bar,
+        so historical per-trade-date valuation is available, not just current.
+        """
+        code, exchange = _split_symbol(symbol)
+        span = max((end_date - start_date).days + 1, 1)
+        params = {
+            "symbol": f"{exchange}{code}",
+            "begin": str(_timestamp_ms(end_date)),
+            "period": "day",
+            "type": "before",
+            "count": str(-min(span * 2 + 20, 1023)),
+            "indicator": "kline,pe,pb,ps,pcf,market_capital,agt,ggt,balance",
+        }
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"https://xueqiu.com/S/{exchange}{code}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        if self.cookie:
+            headers["Cookie"] = self.cookie
+        try:
+            request = Request(f"{_URL}?{urlencode(params)}", headers=headers)
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, OSError, JSONDecodeError) as exc:
+            raise XueqiuDataError(
+                f"Xueqiu valuation request failed for {symbol}"
+            ) from exc
+        if payload.get("error_code") not in (None, 0, "0"):
+            raise XueqiuDataError(
+                f"Xueqiu valuation rejected {symbol}: "
+                f"{payload.get('error_description') or payload.get('error_code')}"
+            )
+        data = payload.get("data") or {}
+        columns = data.get("column") or []
+        rows: list[dict[str, object]] = []
+        for values in data.get("item") or []:
+            row = dict(zip(columns, values, strict=False))
+            try:
+                trade_date = datetime.fromtimestamp(
+                    float(row["timestamp"]) / 1000, tz=_CN_TZ
+                ).date()
+                if not start_date <= trade_date <= end_date:
+                    continue
+                rows.append(
+                    {
+                        "symbol": f"{code}.{exchange}",
+                        "trade_date": trade_date,
+                        "close": _opt_decimal(row.get("close")),
+                        "total_market_cap": _opt_decimal(row.get("market_capital")),
+                        "pe_ttm": _opt_decimal(row.get("pe")),
+                        "pb": _opt_decimal(row.get("pb")),
+                        "ps_ttm": _opt_decimal(row.get("ps")),
+                        "currency": "CNY",
+                        "source_name": self.name,
+                        "raw_payload": row,
+                    }
+                )
+            except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+                raise XueqiuDataError(
+                    f"invalid Xueqiu valuation row for {symbol}"
+                ) from exc
+        if not rows and not data:
+            raise XueqiuDataError(f"Xueqiu returned no valuation data for {symbol}")
+        return rows
+
+
+def _opt_decimal(value: object) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
+
 
 def _split_symbol(symbol: str) -> tuple[str, str]:
     value = symbol.strip().upper()

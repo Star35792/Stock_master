@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -6,10 +7,12 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.data_sources import HithinkFinanceDataSource
+from app.data_sources import EastmoneyDataSource, HithinkFinanceDataSource
 from app.repositories.market import ValuationSnapshotRepository
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+logger = logging.getLogger(__name__)
 
 _TOTAL_MARKET_CAP = ("total_market_cap", "market_cap", "total_mv", "total_value")
 _FLOAT_MARKET_CAP = ("float_market_cap", "circulating_market_cap", "float_mv")
@@ -133,3 +136,36 @@ def _decimal(value: object) -> Decimal | None:
         return Decimal(str(value))
     except InvalidOperation:
         return None
+
+
+class EastmoneyValuationCollectionService:
+    """Cookie-free bulk valuation snapshot collection via Eastmoney clist.
+
+    Fetches current total/float market cap, PE and PB for the whole market in
+    one paginated call. Run daily (after close) to accumulate historical
+    valuation snapshots; factor values upsert idempotently.
+    """
+
+    def __init__(
+        self,
+        *,
+        data_source: EastmoneyDataSource | None = None,
+        repository: ValuationSnapshotRepository | None = None,
+    ) -> None:
+        self.data_source = data_source or EastmoneyDataSource()
+        self.repository = repository or ValuationSnapshotRepository()
+
+    def collect_current(
+        self,
+        db: Session,
+        *,
+        market: str = "all",
+        limit: int = 10000,
+    ) -> ValuationCollectionResult:
+        items = self.data_source.fetch_valuation_snapshots(market=market, limit=limit)
+        normalized_rows = self.repository.upsert_many(db, rows=items)
+        return ValuationCollectionResult(
+            input_rows=len(items),
+            normalized_rows=normalized_rows,
+        )
+

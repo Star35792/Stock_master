@@ -80,6 +80,7 @@ from app.services.risk_evaluation import BoundRiskEvaluationService
 from app.services.sentiment_factors import SentimentFactorRunResult, SentimentFactorService
 from app.services.strategy_research import StrategyResearchService
 from app.services.valuation_collection import (
+    EastmoneyValuationCollectionService,
     HithinkValuationCollectionService,
     ValuationCollectionResult,
 )
@@ -156,6 +157,7 @@ __all__ = [
     "SentimentFactorRunResult",
     "SentimentFactorService",
     "StrategyResearchService",
+    "EastmoneyValuationCollectionService",
     "HithinkValuationCollectionService",
     "ValuationCollectionResult",
     "ValuationFactorRunResult",
