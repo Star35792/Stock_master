@@ -10,7 +10,7 @@
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |
 | `models` | ORM 表结构 |
 | `data_sources` | HiThink、Eastmoney、Xueqiu 等外部来源适配 |
-| `scheduler` | 工作日同步和近期补齐调度 |
+| `scheduler` | 工作日同步、近期补齐调度和因子批量计算日级调度（factor_pipeline） |
 | `lake` | Parquet/DuckDB 离线数据湖 |
 | `backtest` | 日频事件回测内核 |
 | `strategies` | 策略研究模板 |
