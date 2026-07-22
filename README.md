@@ -20,12 +20,12 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 - 横截面处理、IC/Rank IC、forward diagnostics、top quantile turnover 等因子统计报告。
 - 回测、绩效归因、因子选股研究入口、组合构建、下单前风控。
 - 模拟盘订单、成交、现金和持仓闭环。
-- Vue3 多页面工作台，左侧路由导航覆盖总览、行情、质量、因子、回测、组合、模拟盘和运维；行情页使用本地可信日线，因子页支持手动选择与参数配置，模拟盘支持数据库账户下拉选择。
+- Vue3 多页面工作台，左侧路由导航覆盖总览、行情、质量、因子、回测、组合、模拟盘和运维；行情页使用本地可信日线绘制红涨绿跌 K 线与成交量副图，明细表作为折叠审计视图；因子页支持手动选择与参数配置，模拟盘支持数据库账户下拉选择。
 
 核心 API 面：
 
 - 健康检查：`GET /health`
-- 行情与参考数据：`GET /api/v1/securities`、`GET /api/v1/securities/{symbol}/lifecycle`、`GET /api/v1/daily-bars/{symbol}`、`GET /api/v1/daily-bars/missing`、`GET /api/v1/trading-calendar`
+- 行情与参考数据：`GET /api/v1/securities`、`GET /api/v1/securities/{symbol}/lifecycle`、`GET /api/v1/daily-bars/{symbol}`、`GET /api/v1/daily-bars/{symbol}/chart`（最新可消费日线窗口，仅含 `trusted/manual_fixed` 且非可疑记录）、`GET /api/v1/daily-bars/missing`、`GET /api/v1/trading-calendar`
 - 数据质量与修复：`GET /api/v1/data-quality/issues`、`PATCH /api/v1/data-quality/issues/{issue_id}/status`、`GET /api/v1/daily-bar-source-compares`、`GET /api/v1/manual-corrections`
 - 复权与公司行为：`GET /api/v1/corporate-actions`、`GET /api/v1/adjustment-factors`
 - 因子：`GET /api/v1/factors/definitions`、`GET /api/v1/factors/runs`、`GET /api/v1/factors/values`、`GET /api/v1/factors/profiles`

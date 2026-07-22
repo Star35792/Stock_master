@@ -200,6 +200,30 @@ export interface PaperAccount {
   cash_balance: string;
 }
 
+export interface DailyBarItem {
+  symbol: string;
+  security_type: string;
+  trade_date: string;
+  adjust_type: "none" | "qfq" | "hfq";
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  pre_close: string | null;
+  change_amount: string | null;
+  pct_change: string | null;
+  volume: string | null;
+  amount: string | null;
+  turnover_rate: string | null;
+  amplitude: string | null;
+  source_name: string;
+  source_count: number;
+  quality_score: string;
+  quality_status: string;
+  is_suspect: boolean;
+  updated_at: string;
+}
+
 export interface FactorDefinition {
   id: number;
   name: string;

@@ -42,7 +42,7 @@ const emit = defineEmits<{
 .market-kicker { color: #2563eb; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
 .market-empty { padding: 18px; color: #667085; background: #f8fafc; font-size: 12px; line-height: 1.5; }
 .market-empty--compact { padding: 12px; }
-.watchlist-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.watchlist-list { display: grid; max-height: 240px; gap: 5px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
 .watchlist-list li { display: flex; align-items: center; gap: 4px; }
 .watchlist-symbol { flex: 1; min-height: 34px; border: 1px solid transparent; border-radius: 6px; color: #344054; text-align: left; background: transparent; cursor: pointer; font-weight: 700; }
 .watchlist-symbol:hover, .watchlist-symbol.active { border-color: #dbeafe; color: #1d4ed8; background: #eff6ff; }

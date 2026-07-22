@@ -6,6 +6,8 @@ from app.services import FactorQueryService, MarketQueryService
 
 
 class FakeDailyBarRepository:
+    chart_kwargs: dict | None = None
+
     def list_by_symbol(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
         assert kwargs["symbol"] == "600519.SH"
         row = SimpleNamespace(
@@ -32,6 +34,12 @@ class FakeDailyBarRepository:
             updated_at=datetime(2026, 7, 16, tzinfo=UTC),
         )
         return [row], 1
+
+    def list_latest_consumable(
+        self, db: object, **kwargs: object
+    ) -> tuple[list[SimpleNamespace], int]:
+        self.chart_kwargs = kwargs
+        return self.list_by_symbol(db, symbol=kwargs["symbol"])
 
     def list_missing_by_calendar(
         self, db: object, **kwargs: object
@@ -342,6 +350,30 @@ def test_market_service_normalizes_symbol() -> None:
 
     assert result.total == 1
     assert result.items[0].symbol == "600519.SH"
+
+
+def test_market_service_lists_latest_consumable_chart_window() -> None:
+    repository = FakeDailyBarRepository()
+    service = MarketQueryService(daily_bar_repository=repository)
+
+    result = service.list_chart_daily_bars(
+        object(),
+        symbol="600519.sh",
+        adjust_type="none",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 7, 17),
+        limit=320,
+    )
+
+    assert result.total == 1
+    assert result.items[0].symbol == "600519.SH"
+    assert repository.chart_kwargs == {
+        "symbol": "600519.SH",
+        "adjust_type": "none",
+        "start_date": date(2026, 1, 1),
+        "end_date": date(2026, 7, 17),
+        "limit": 320,
+    }
 
 
 def test_market_service_lists_missing_daily_bars() -> None:

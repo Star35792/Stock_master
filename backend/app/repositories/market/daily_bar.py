@@ -279,7 +279,14 @@ class DailyBarRepository:
             filters.append(DailyBar.trade_date >= start_date)
         if end_date:
             filters.append(DailyBar.trade_date <= end_date)
-        if quality_status:
+        if quality_status == "consumable":
+            filters.extend(
+                [
+                    DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+                    DailyBar.is_suspect.is_(False),
+                ]
+            )
+        elif quality_status:
             filters.append(DailyBar.quality_status == quality_status)
 
         total = db.scalar(select(func.count()).select_from(DailyBar).where(*filters)) or 0
@@ -293,6 +300,39 @@ class DailyBarRepository:
             )
         )
         return items, total
+
+    def list_latest_consumable(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        adjust_type: str,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int = 320,
+    ) -> tuple[list[DailyBar], int]:
+        filters = [
+            DailyBar.symbol == symbol,
+            DailyBar.adjust_type == adjust_type,
+            DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+            DailyBar.is_suspect.is_(False),
+        ]
+        if start_date:
+            filters.append(DailyBar.trade_date >= start_date)
+        if end_date:
+            filters.append(DailyBar.trade_date <= end_date)
+
+        total = db.scalar(select(func.count()).select_from(DailyBar).where(*filters)) or 0
+        latest = list(
+            db.scalars(
+                select(DailyBar)
+                .where(*filters)
+                .order_by(DailyBar.trade_date.desc())
+                .limit(limit)
+            )
+        )
+        latest.reverse()
+        return latest, total
 
     def list_missing_by_calendar(
         self,

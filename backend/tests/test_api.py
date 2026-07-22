@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import approvals as approvals_module
 from app.api.routes import backtests as backtests_module
+from app.api.routes import daily_bars as daily_bars_module
 from app.api.routes import health as health_module
 from app.api.routes import operations as operations_module
 from app.api.routes import paper_accounts as paper_accounts_module
@@ -72,6 +73,7 @@ def test_openapi_contains_v1_routes() -> None:
     paths = response.json()["paths"]
     assert "/api/v1/securities" in paths
     assert "/api/v1/daily-bars/{symbol}" in paths
+    assert "/api/v1/daily-bars/{symbol}/chart" in paths
     assert "/api/v1/daily-bars/missing" in paths
     assert "/api/v1/data-quality/issues" in paths
     assert "/api/v1/data-quality/issues/{issue_id}/status" in paths
@@ -115,6 +117,91 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/paper-execution-approvals/{approval_id}/executions" in paths
     assert "/api/v1/paper-execution-approvals/{approval_id}/execution" in paths
     assert "/api/v1/paper-executions/{execution_id}" in paths
+
+
+def test_list_chart_daily_bars_uses_latest_consumable_contract(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_list(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "items": [
+                {
+                    "symbol": "000001.SZ",
+                    "security_type": "stock",
+                    "trade_date": "2026-07-17",
+                    "adjust_type": "none",
+                    "open": "10.00",
+                    "high": "10.80",
+                    "low": "9.90",
+                    "close": "10.50",
+                    "pre_close": "10.00",
+                    "change_amount": "0.50",
+                    "pct_change": "5.00",
+                    "volume": "1000000",
+                    "amount": "10500000",
+                    "turnover_rate": "1.25",
+                    "amplitude": "9.00",
+                    "source_name": "test",
+                    "source_count": 1,
+                    "quality_score": "1.00",
+                    "quality_status": "manual_fixed",
+                    "is_suspect": False,
+                    "updated_at": datetime(2026, 7, 17, tzinfo=UTC).isoformat(),
+                }
+            ],
+            "total": 1,
+            "limit": 320,
+            "offset": 0,
+        }
+
+    monkeypatch.setattr(daily_bars_module.service, "list_chart_daily_bars", fake_list)
+    response = client.get(
+        "/api/v1/daily-bars/000001.sz/chart",
+        params={
+            "adjust_type": "none",
+            "start_date": "2026-01-01",
+            "end_date": "2026-07-17",
+            "limit": 320,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["quality_status"] == "manual_fixed"
+    assert captured == {
+        "symbol": "000001.sz",
+        "adjust_type": "none",
+        "start_date": date(2026, 1, 1),
+        "end_date": date(2026, 7, 17),
+        "limit": 320,
+    }
+
+
+def test_list_daily_bars_accepts_consumable_quality_scope(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_list(db, **kwargs):
+        captured.update(kwargs)
+        return {"items": [], "total": 0, "limit": 1000, "offset": 0}
+
+    monkeypatch.setattr(daily_bars_module.service, "list_daily_bars", fake_list)
+    response = client.get(
+        "/api/v1/daily-bars/000001.SZ",
+        params={"adjust_type": "none", "quality_status": "consumable"},
+    )
+
+    assert response.status_code == 200
+    assert captured["quality_status"] == "consumable"
+
+
+def test_chart_daily_bars_rejects_invalid_date_range() -> None:
+    response = client.get(
+        "/api/v1/daily-bars/000001.SZ/chart",
+        params={"start_date": "2026-07-18", "end_date": "2026-07-17"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
 
 
 def _portfolio_plan_response() -> dict:

@@ -218,6 +218,31 @@ class MarketQueryService:
             data_note="日线收盘数据，非实时行情；日期为数据源最后一个可信交易日。",
         )
 
+    def list_chart_daily_bars(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        adjust_type: str,
+        start_date: date | None,
+        end_date: date | None,
+        limit: int,
+    ) -> Page[DailyBarRead]:
+        rows, total = self.daily_bar_repository.list_latest_consumable(
+            db,
+            symbol=symbol.strip().upper(),
+            adjust_type=adjust_type,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+        return Page(
+            items=[DailyBarRead.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=max(0, total - len(rows)),
+        )
+
     def list_missing_daily_bars(
         self,
         db: Session,

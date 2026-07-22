@@ -28,7 +28,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section class="market-panel market-search-panel">
+  <section id="market-security-search" class="market-panel market-search-panel">
     <header class="market-panel__header">
       <div>
         <span class="market-kicker">证券检索</span>
@@ -96,7 +96,7 @@ const emit = defineEmits<{
 .market-primary-button:disabled { opacity: .55; cursor: wait; }
 .market-empty { padding: 18px; color: #667085; background: #f8fafc; font-size: 12px; line-height: 1.5; }
 .market-empty--compact { padding: 12px; }
-.market-security-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.market-security-list { display: grid; max-height: 360px; gap: 7px; overflow-y: auto; margin: 0; padding: 0 3px 0 0; list-style: none; }
 .market-security-item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 10px; border: 1px solid #eef1f5; border-radius: 7px; padding: 6px 8px 6px 10px; color: #344054; text-align: left; background: #fbfcfe; }
 .market-security-item:hover, .market-security-item--active { border-color: #9db7f5; background: #eff6ff; }
 .market-security-select { display: grid; flex: 1; min-width: 0; gap: 3px; border: 0; padding: 4px 0; color: inherit; text-align: left; background: transparent; cursor: pointer; }
@@ -106,4 +106,5 @@ const emit = defineEmits<{
 .market-security-item__meta { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; }
 .market-icon-button { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 6px; color: #64748b; background: transparent; cursor: pointer; }
 .market-icon-button:hover { color: #d97706; background: #fffbeb; }
+@media (max-width: 620px) { .market-security-list { max-height: 230px; } }
 </style>

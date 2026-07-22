@@ -3,7 +3,8 @@ import { AlertTriangle, BarChart3, CircleHelp, Star } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 
 import { formatPctChange, qualityStatusLabel, securityTypeLabel } from "../components/operations/formatters";
-import MarketBarsPanel, { type DailyBarItem } from "./components/MarketBarsPanel.vue";
+import type { DailyBarItem } from "../types";
+import MarketBarsPanel from "./components/MarketBarsPanel.vue";
 import MarketSearchPanel, { type SecurityItem } from "./components/MarketSearchPanel.vue";
 import WatchlistPanel from "./components/WatchlistPanel.vue";
 
@@ -20,7 +21,8 @@ const securities = ref<SecurityItem[]>([]);
 const selectedSymbol = ref("");
 const summary = ref<Summary | null>(null);
 const bars = ref<DailyBarItem[]>([]);
-const qualityStatus = ref("trusted");
+const chartBars = ref<DailyBarItem[]>([]);
+const qualityStatus = ref("consumable");
 const startDate = ref("");
 const endDate = ref("");
 const loadingSearch = ref(false);
@@ -62,8 +64,9 @@ async function searchSecurities() {
     const page = await requestJson<Page<SecurityItem>>(`/api/v1/securities?${params}`);
     securities.value = page.items;
     if (!page.items.some((item) => item.symbol === selectedSymbol.value)) {
-      if (page.items[0]) await selectSecurity(page.items[0]);
-      else { selectedSymbol.value = ""; summary.value = null; bars.value = []; }
+      const defaultItem = page.items.find((item) => item.security_type === "stock") ?? page.items[0];
+      if (defaultItem) await selectSecurity(defaultItem);
+      else { selectedSymbol.value = ""; summary.value = null; bars.value = []; chartBars.value = []; }
     }
   } catch (error) { errorMessage.value = error instanceof Error ? error.message : "证券搜索失败"; securities.value = []; }
   finally { loadingSearch.value = false; }
@@ -74,23 +77,31 @@ async function selectWatchlist(symbol: string) { selectedSymbol.value = symbol; 
 
 async function loadMarket() {
   if (!selectedSymbol.value) return;
+  if (startDate.value && endDate.value && startDate.value > endDate.value) {
+    errorMessage.value = "起始日期不能晚于结束日期。";
+    return;
+  }
   const requestId = ++marketRequestId;
   const requestedSymbol = selectedSymbol.value;
-  loadingMarket.value = true; errorMessage.value = "";
+  loadingMarket.value = true; errorMessage.value = ""; summary.value = null; chartBars.value = []; bars.value = [];
   try {
     const params = new URLSearchParams({ adjust_type: "none" });
     if (startDate.value) params.set("start_date", startDate.value);
     if (endDate.value) params.set("end_date", endDate.value);
     if (qualityStatus.value) params.set("quality_status", qualityStatus.value);
-    const [summaryResult, barsResult] = await Promise.all([
+    const chartParams = new URLSearchParams({ adjust_type: "none", limit: "320" });
+    if (startDate.value) chartParams.set("start_date", startDate.value);
+    if (endDate.value) chartParams.set("end_date", endDate.value);
+    const [summaryResult, chartResult, barsResult] = await Promise.all([
       requestJson<Summary>(`/api/v1/daily-bars/${encodeURIComponent(requestedSymbol)}/summary?adjust_type=none`),
+      requestJson<Page<DailyBarItem>>(`/api/v1/daily-bars/${encodeURIComponent(requestedSymbol)}/chart?${chartParams}`),
       requestJson<Page<DailyBarItem>>(`/api/v1/daily-bars/${encodeURIComponent(requestedSymbol)}?${params}`),
     ]);
     if (requestId !== marketRequestId || requestedSymbol !== selectedSymbol.value) return;
-    summary.value = summaryResult; bars.value = barsResult.items;
+    summary.value = summaryResult; chartBars.value = chartResult.items; bars.value = barsResult.items;
   } catch (error) {
     if (requestId !== marketRequestId) return;
-    errorMessage.value = error instanceof Error ? error.message : "行情加载失败"; summary.value = null; bars.value = [];
+    errorMessage.value = error instanceof Error ? error.message : "行情加载失败"; summary.value = null; chartBars.value = []; bars.value = [];
   } finally {
     if (requestId === marketRequestId) loadingMarket.value = false;
   }
@@ -107,7 +118,10 @@ onMounted(() => { void searchSecurities(); });
         <h1>负责人的看盘台</h1>
         <p>搜索证券、查看可信日线和质量状态；行情来源为本地日线数据，不声称实时行情。</p>
       </div>
-      <span class="market-readonly-pill"><Star :size="14" />自选仅保存在本浏览器</span>
+      <div class="market-hero-actions">
+        <span class="market-readonly-pill"><Star :size="14" />自选仅保存在本浏览器</span>
+        <a href="#market-security-search" class="market-search-jump">搜索 / 切换证券</a>
+      </div>
     </header>
     <div v-if="errorMessage" class="market-page__error" role="alert"><AlertTriangle :size="17" />{{ errorMessage }}</div>
     <section class="market-layout">
@@ -124,7 +138,7 @@ onMounted(() => { void searchSecurities(); });
             <div v-else class="market-empty">暂无可信日线摘要，当前证券不能提供可用的本地行情快照。</div>
           </template>
         </section>
-        <MarketBarsPanel :symbol="selectedSymbol" :bars="bars" :quality-status="qualityStatus" :start-date="startDate" :end-date="endDate" :loading="loadingMarket" @update:quality-status="qualityStatus = $event" @update:start-date="startDate = $event" @update:end-date="endDate = $event" @query="loadMarket" />
+        <MarketBarsPanel :symbol="selectedSymbol" :bars="bars" :chart-bars="chartBars" :quality-status="qualityStatus" :start-date="startDate" :end-date="endDate" :loading="loadingMarket" @update:quality-status="qualityStatus = $event" @update:start-date="startDate = $event" @update:end-date="endDate = $event" @query="loadMarket" />
       </section>
     </section>
   </main>
@@ -133,11 +147,13 @@ onMounted(() => { void searchSecurities(); });
 <style scoped>
 .market-page { max-width: 1240px; margin: 0 auto; padding: 30px 28px 72px; color: #172033; }
 .market-page__hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
-.market-page__hero > div { display: grid; gap: 8px; }
+.market-page__hero > div:first-child { display: grid; gap: 8px; }
+.market-hero-actions { display: flex; align-items: flex-end; gap: 8px; }
 .market-page__eyebrow { display: inline-flex; align-items: center; gap: 7px; color: #2563eb; font-size: 12px; font-weight: 800; letter-spacing: .08em; }
 .market-page h1 { color: #101828; font-size: clamp(28px, 4vw, 40px); letter-spacing: 0; }
 .market-page__hero p { color: #667085; font-size: 14px; }
 .market-readonly-pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #f5d58b; border-radius: 999px; padding: 8px 11px; color: #946200; background: #fffaf0; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.market-search-jump { display: inline-flex; min-height: 34px; align-items: center; border: 1px solid #bfdbfe; border-radius: 999px; padding: 0 11px; color: #1d4ed8; background: #eff6ff; font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 .market-page__error { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid #fecaca; border-radius: 7px; color: #b42318; background: #fff1f2; font-size: 13px; }
 .market-layout { display: grid; grid-template-columns: minmax(290px, .72fr) minmax(0, 1.6fr); gap: 16px; align-items: start; }
 .market-sidebar, .market-content { display: grid; gap: 16px; min-width: 0; }
@@ -155,6 +171,6 @@ onMounted(() => { void searchSecurities(); });
 .market-summary__metrics span { color: #667085; font-size: 11px; }
 .market-summary__metrics strong { margin-top: 5px; color: #101828; font-size: 15px; }
 .market-empty { display: flex; align-items: center; gap: 10px; min-height: 100px; color: #667085; font-size: 13px; }
-@media (max-width: 900px) { .market-page { padding: 24px 16px 48px; } .market-layout { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .market-page__hero, .market-summary__header { flex-direction: column; } .market-data-note { max-width: none; text-align: left; } .market-summary__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .market-page { padding: 24px 16px 48px; } .market-layout { grid-template-columns: 1fr; } .market-content { grid-row: 1; }.market-sidebar { grid-row: 2; } }
+@media (max-width: 620px) { .market-page__hero, .market-summary__header, .market-hero-actions { align-items: flex-start; flex-direction: column; } .market-data-note { max-width: none; text-align: left; } .market-summary__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

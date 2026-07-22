@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Component } from "vue";
+import { defineAsyncComponent, type Component } from "vue";
 
 import AlertsSection from "../components/operations/AlertsSection.vue";
 import FailuresSection from "../components/operations/FailuresSection.vue";
@@ -15,8 +15,9 @@ import type {
   OperationsRerunPlan,
 } from "../types";
 import FactorPage from "./FactorPage.vue";
-import MarketPage from "./MarketPage.vue";
 import PaperTradingPage from "./PaperTradingPage.vue";
+
+const MarketPage = defineAsyncComponent(() => import("./MarketPage.vue"));
 
 defineProps<{
   page: string;
