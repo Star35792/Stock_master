@@ -8,7 +8,7 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 
 ## 当前状态
 
-项目当前处于 **V6 可视化和运维** 的最小工作台阶段。已具备运维概览、告警候选摘要、按分类限量的失败定位摘要、单项失败详情和只读重跑计划；下一步深化细粒度重跑执行入口，再补 V5 组合/风控/模拟盘公共操作闭环。V4 保留训练选参编排与审计缺口，V7 实盘只读与受控交易尚未开始。
+项目当前已完成 **V6.1 只读运维工作台** 的阶段性收口，并形成 V5 最小公共 paper 操作闭环。V5.1 已开放幂等的手工模拟组合草案；V5.2 已交付风险前数据核对、不可变 paper 账户净值快照、服务端 20 日 ADV（至少 15 个观测）和绑定草案/账户/净值/readiness/ADV/政策哈希的正式风险评估；V5.3 已开放五分钟有效、可撤销的人工确认，以及一次性原子消费、卖先买后、全批预演和幂等模拟执行审计。执行固定使用本地 full-fill paper 模型，不会向券商或交易所发送订单。V6 写侧重跑执行仍需另行完成权限、审计、幂等和人工确认设计；V7 实盘只读与受控交易尚未开始。
 
 已有：
 
@@ -30,6 +30,11 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 - 复权与公司行为：`GET /api/v1/corporate-actions`、`GET /api/v1/adjustment-factors`
 - 因子：`GET /api/v1/factors/definitions`、`GET /api/v1/factors/runs`、`GET /api/v1/factors/values`、`GET /api/v1/factors/profiles`
 - 研究与回测：`POST /api/v1/strategy-research/rolling-windows`、`POST /api/v1/strategy-research/factor-selection/backtests`、`POST /api/v1/strategy-research/factor-selection/backtests/batch`、`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`GET /api/v1/backtests/runs/{run_id}/trades`、`GET /api/v1/backtests/runs/{run_id}/equity`、`GET /api/v1/backtests/runs/{run_id}/positions`、`GET /api/v1/backtests/runs/{run_id}/performance`、`POST /api/v1/backtests/runs/{run_id}/performance`、`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`
+- 组合草案：`POST /api/v1/portfolio/plans`（必须提供 `Idempotency-Key`）、`GET /api/v1/portfolio/plans/{plan_id}`、`GET /api/v1/portfolio/plans/{plan_id}/risk-readiness?paper_account_id=...`；输入为操作者手工模拟快照，风险前核对也固定标记 `execution_allowed=false`、`risk_evaluated=false`、`orders_created=false`
+- Paper 账户净值：`POST /api/v1/paper-accounts/{account_id}/equity-snapshots`（必须提供 `Idempotency-Key`）、`GET /api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}`；仅使用服务端现金、全量持仓和 exact-date 可信未复权收盘价，回撤口径为“自监控开始以来”
+- 正式风控：`POST /api/v1/portfolio/plans/{plan_id}/risk-evaluations`（必须提供 `Idempotency-Key`）；请求只引用候选 paper 账户和净值快照，服务端绑定 readiness、ADV 和固定风险政策，响应固定 `execution_allowed=false`、`orders_created=false`
+- 模拟执行确认：`POST /api/v1/risk-evaluations/{risk_check_id}/confirmations`、`GET /api/v1/paper-execution-approvals/{approval_id}`、`POST /api/v1/paper-execution-approvals/{approval_id}/revoke`（写操作必须提供 `Idempotency-Key`）；确认绑定完整评估和规范化订单批次哈希，五分钟后失效，且响应固定 `execution_allowed=false`、`orders_created=false`
+- 模拟执行：`POST /api/v1/paper-execution-approvals/{approval_id}/executions`（必须提供 `Idempotency-Key`）、`GET /api/v1/paper-executions/{execution_id}`、`GET /api/v1/paper-execution-approvals/{approval_id}/execution`；请求只确认 approval hash，服务端重新验证全部事实和代码版本，保守执行同日买入不可卖，并在单事务中消费确认、按卖先买后顺序写入本地模拟订单、成交、现金和持仓；按 approval 回读可恢复超时或页面刷新后的结果
 - 运维工作台：`GET /api/v1/operations/overview`、`GET /api/v1/operations/alerts`、`GET /api/v1/operations/failures`、`GET /api/v1/operations/failures/{failure_type}/{failure_id}`、`GET /api/v1/operations/failures/{failure_type}/{failure_id}/rerun-plan`
 
 ## 技术栈

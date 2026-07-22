@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { DatabaseZap } from "@lucide/vue";
 import type { Component } from "vue";
+import { RouterLink } from "vue-router";
 
 defineProps<{
   navItems: Array<{
@@ -22,10 +23,16 @@ defineProps<{
     </div>
 
     <nav class="nav-list" aria-label="Dashboard sections">
-      <a v-for="item in navItems" :key="item.id" :href="`#${item.id}`" class="nav-link">
+      <RouterLink
+        v-for="item in navItems"
+        :key="item.id"
+        :to="{ name: item.id }"
+        class="nav-link"
+        active-class="is-active"
+      >
         <component :is="item.icon" :size="18" aria-hidden="true" />
         <span>{{ item.label }}</span>
-      </a>
+      </RouterLink>
     </nav>
   </aside>
 </template>

@@ -89,6 +89,26 @@ class TradingCalendarRepository:
             )
         )
 
+    def get_many_on_date(
+        self,
+        db: Session,
+        *,
+        exchanges: set[str],
+        trade_date: date,
+    ) -> list[TradingCalendar]:
+        if not exchanges:
+            return []
+        return list(
+            db.scalars(
+                select(TradingCalendar)
+                .where(
+                    TradingCalendar.exchange.in_(exchanges),
+                    TradingCalendar.trade_date == trade_date,
+                )
+                .order_by(TradingCalendar.exchange)
+            )
+        )
+
     def list(
         self,
         db: Session,

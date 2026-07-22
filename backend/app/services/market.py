@@ -18,6 +18,7 @@ from app.schemas import (
     DailyBarSourceCompareRead,
     ManualCorrectionRead,
     MissingDailyBarRead,
+    MarketSummaryRead,
     Page,
     SecurityLifecycleRead,
     SecurityRead,
@@ -186,6 +187,35 @@ class MarketQueryService:
             total=total,
             limit=limit,
             offset=offset,
+        )
+
+    def get_market_summary(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        adjust_type: str,
+    ) -> MarketSummaryRead | None:
+        normalized_symbol = symbol.strip().upper()
+        security = self.security_repository.get_by_symbol(db, symbol=normalized_symbol)
+        if security is None:
+            return None
+        latest = self.daily_bar_repository.get_latest_consumable(
+            db,
+            symbol=normalized_symbol,
+            adjust_type=adjust_type,
+        )
+        return MarketSummaryRead(
+            symbol=security.symbol,
+            name=security.name,
+            security_type=security.security_type,
+            exchange=security.exchange,
+            currency=security.currency,
+            industry=security.industry,
+            latest_trade_date=None if latest is None else latest.trade_date,
+            latest=None if latest is None else DailyBarRead.model_validate(latest),
+            data_status="available" if latest is not None else "unavailable",
+            data_note="日线收盘数据，非实时行情；日期为数据源最后一个可信交易日。",
         )
 
     def list_missing_daily_bars(

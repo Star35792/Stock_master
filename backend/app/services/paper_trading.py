@@ -156,7 +156,7 @@ class PaperTradingService:
         if fill.side == "buy":
             new_quantity = current_quantity + fill.quantity
             new_average_cost = (
-                Decimal(current_quantity) * current_average_cost + amount
+                Decimal(current_quantity) * current_average_cost + amount + fill.commission
             ) / Decimal(new_quantity)
             return account.cash_balance - amount - fill.commission, new_quantity, new_average_cost
 

@@ -70,6 +70,15 @@ class SecurityRepository:
     def get_by_symbol(self, db: Session, *, symbol: str) -> Security | None:
         return db.scalar(select(Security).where(Security.symbol == symbol))
 
+    def get_many(self, db: Session, *, symbols: set[str]) -> list[Security]:
+        if not symbols:
+            return []
+        return list(
+            db.scalars(
+                select(Security).where(Security.symbol.in_(symbols)).order_by(Security.symbol)
+            )
+        )
+
     def list(
         self,
         db: Session,

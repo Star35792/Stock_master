@@ -20,7 +20,7 @@
 - `market` 是可信消费层。
 - `factor` 保存可复现的因子定义、运行和值。
 - `strategy` 保存回测运行、成交、净值、持仓和绩效。
-- `portfolio`、`risk`、`trade` 承接组合、下单前风控和模拟盘。
+- `portfolio` 保存不可执行草案，`risk` 保存绑定服务端事实的评估，`trade` 保存短时确认和 approval 唯一绑定的 paper 执行批次。公共执行必须按 `plan -> equity/readiness -> risk evaluation -> approval -> execution batch` 单向消费，不能绕过确认直接调用旧纸盘内核。
 - `system` 保存任务、质量问题和审计。
 
 ## 工具边界

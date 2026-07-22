@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, func, literal, or_, select
+from sqlalchemy import and_, desc, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,25 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def get_latest_consumable(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        adjust_type: str,
+    ) -> DailyBar | None:
+        return db.scalar(
+            select(DailyBar)
+            .where(
+                DailyBar.symbol == symbol,
+                DailyBar.adjust_type == adjust_type,
+                DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+                DailyBar.is_suspect.is_(False),
+            )
+            .order_by(desc(DailyBar.trade_date))
+            .limit(1)
+        )
+
     def count_trusted_by_date(
         self,
         db: Session,
@@ -29,9 +48,7 @@ class DailyBarRepository:
         if symbols:
             filters.append(DailyBar.symbol.in_(symbols))
         rows = db.execute(
-            select(DailyBar.trade_date, func.count())
-            .where(*filters)
-            .group_by(DailyBar.trade_date)
+            select(DailyBar.trade_date, func.count()).where(*filters).group_by(DailyBar.trade_date)
         ).all()
         return dict(rows)
 
@@ -57,9 +74,7 @@ class DailyBarRepository:
 
         return list(
             db.scalars(
-                select(DailyBar)
-                .where(*filters)
-                .order_by(DailyBar.symbol, DailyBar.trade_date)
+                select(DailyBar).where(*filters).order_by(DailyBar.symbol, DailyBar.trade_date)
             )
         )
 
@@ -77,6 +92,113 @@ class DailyBarRepository:
                 DailyBar.trade_date == trade_date,
                 DailyBar.adjust_type == adjust_type,
             )
+        )
+
+    def list_by_symbols_on_date(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        trade_date: date,
+        adjust_type: str,
+    ) -> list[DailyBar]:
+        if not symbols:
+            return []
+        return list(
+            db.scalars(
+                select(DailyBar)
+                .where(
+                    DailyBar.symbol.in_(symbols),
+                    DailyBar.trade_date == trade_date,
+                    DailyBar.adjust_type == adjust_type,
+                )
+                .order_by(DailyBar.symbol)
+            )
+        )
+
+    def list_by_symbols_on_date_for_update(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        trade_date: date,
+        adjust_type: str,
+    ) -> list[DailyBar]:
+        if not symbols:
+            return []
+        return list(
+            db.scalars(
+                select(DailyBar)
+                .where(
+                    DailyBar.symbol.in_(symbols),
+                    DailyBar.trade_date == trade_date,
+                    DailyBar.adjust_type == adjust_type,
+                )
+                .order_by(DailyBar.symbol)
+                .with_for_update()
+            )
+        )
+
+    def get_latest_trusted_none_dates(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+    ) -> dict[str, date]:
+        if not symbols:
+            return {}
+        rows = db.execute(
+            select(DailyBar.symbol, func.max(DailyBar.trade_date))
+            .where(
+                DailyBar.symbol.in_(symbols),
+                DailyBar.adjust_type == "none",
+                DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+                DailyBar.is_suspect.is_(False),
+            )
+            .group_by(DailyBar.symbol)
+        ).all()
+        return dict(rows)
+
+    def list_recent_trusted_none_amounts(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        end_date: date,
+        window: int,
+    ) -> list[object]:
+        if not symbols:
+            return []
+        row_number = func.row_number().over(
+            partition_by=DailyBar.symbol,
+            order_by=DailyBar.trade_date.desc(),
+        )
+        ranked = (
+            select(
+                DailyBar.id.label("daily_bar_id"),
+                DailyBar.symbol,
+                DailyBar.trade_date,
+                DailyBar.amount,
+                DailyBar.source_name,
+                DailyBar.quality_status,
+                DailyBar.updated_at,
+                row_number.label("row_number"),
+            )
+            .where(
+                DailyBar.symbol.in_(symbols),
+                DailyBar.trade_date <= end_date,
+                DailyBar.adjust_type == "none",
+                DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+                DailyBar.is_suspect.is_(False),
+            )
+            .subquery()
+        )
+        return list(
+            db.execute(
+                select(ranked)
+                .where(ranked.c.row_number <= window)
+                .order_by(ranked.c.symbol, ranked.c.trade_date)
+            ).all()
         )
 
     def apply_manual_correction(

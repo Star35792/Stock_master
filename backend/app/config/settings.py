@@ -1,8 +1,19 @@
 from functools import cached_property
+from hashlib import sha256
+from pathlib import Path
 from urllib.parse import quote
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def source_code_version() -> str:
+    app_root = Path(__file__).resolve().parents[1]
+    digest = sha256()
+    for path in sorted(app_root.rglob("*.py")):
+        digest.update(path.relative_to(app_root).as_posix().encode("utf-8"))
+        digest.update(path.read_bytes())
+    return f"source-{digest.hexdigest()[:20]}"
 
 
 class Settings(BaseSettings):
@@ -11,6 +22,7 @@ class Settings(BaseSettings):
     app_name: str = "stock-master"
     app_env: str = "dev"
     app_debug: bool = True
+    app_code_version: str = Field(default_factory=source_code_version)
 
     postgres_host: str = "localhost"
     postgres_port: int = 5432

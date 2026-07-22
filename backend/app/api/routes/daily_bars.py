@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
-from app.schemas import DailyBarRead, MissingDailyBarRead, Page
+from app.schemas import DailyBarRead, MarketSummaryRead, MissingDailyBarRead, Page
 from app.services import MarketQueryService
 
 router = APIRouter(prefix="/daily-bars", tags=["daily-bars"])
@@ -40,6 +40,21 @@ def list_missing_daily_bars(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/{symbol}/summary", response_model=MarketSummaryRead)
+def get_market_summary(
+    symbol: str,
+    db: DatabaseSession,
+    adjust_type: Literal["none", "qfq", "hfq"] = "none",
+) -> MarketSummaryRead:
+    result = service.get_market_summary(db, symbol=symbol, adjust_type=adjust_type)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="security not found",
+        )
+    return result
 
 
 @router.get("/{symbol}", response_model=Page[DailyBarRead])

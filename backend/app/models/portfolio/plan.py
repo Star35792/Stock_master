@@ -23,6 +23,11 @@ class PortfolioPlanRecord(CreatedAtMixin, Base):
     __tablename__ = "portfolio_plan"
     __table_args__ = (
         Index("ix_portfolio_plan_as_of_date", "as_of_date"),
+        Index(
+            "uq_portfolio_plan_idempotency_key",
+            "idempotency_key",
+            unique=True,
+        ),
         {"schema": "portfolio"},
     )
 
@@ -35,6 +40,9 @@ class PortfolioPlanRecord(CreatedAtMixin, Base):
     target_cash: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     cash_after: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    input_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class PortfolioTargetRecord(CreatedAtMixin, Base):
@@ -46,9 +54,7 @@ class PortfolioTargetRecord(CreatedAtMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    plan_id: Mapped[int] = mapped_column(
-        ForeignKey("portfolio.portfolio_plan.id"), nullable=False
-    )
+    plan_id: Mapped[int] = mapped_column(ForeignKey("portfolio.portfolio_plan.id"), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     security_type: Mapped[str] = mapped_column(String(20), nullable=False)
     industry: Mapped[str] = mapped_column(String(100), nullable=False)

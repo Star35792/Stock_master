@@ -9,6 +9,18 @@ from app.portfolio import PortfolioPlan
 
 
 class PortfolioPlanRepository:
+    def get_by_idempotency_key(
+        self,
+        db: Session,
+        *,
+        idempotency_key: str,
+    ) -> PortfolioPlanRecord | None:
+        return db.scalar(
+            select(PortfolioPlanRecord).where(
+                PortfolioPlanRecord.idempotency_key == idempotency_key
+            )
+        )
+
     def get_with_targets(
         self,
         db: Session,
@@ -34,6 +46,9 @@ class PortfolioPlanRepository:
         parameters: dict[str, Any],
         plan: PortfolioPlan,
         code_version: str,
+        idempotency_key: str,
+        request_hash: str,
+        input_snapshot: dict[str, Any],
     ) -> PortfolioPlanRecord:
         record = PortfolioPlanRecord(
             name=name,
@@ -44,6 +59,9 @@ class PortfolioPlanRepository:
             target_cash=plan.target_cash,
             cash_after=plan.cash_after,
             code_version=code_version,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            input_snapshot=input_snapshot,
         )
         db.add(record)
         db.flush()

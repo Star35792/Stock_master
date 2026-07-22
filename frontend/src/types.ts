@@ -186,3 +186,316 @@ export interface OperationsRerunPlan {
   reason: string;
   parameters: Record<string, unknown>;
 }
+
+export interface ApiPage<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FactorDefinition {
+  id: number;
+  name: string;
+  display_name: string | null;
+  description: string | null;
+  frequency: "daily" | "weekly" | "monthly";
+  inputs: string[];
+  applicable_security_types: string[];
+  window_days: number | null;
+  version: string;
+  dependencies: string[];
+  parameters_schema: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FactorProfile {
+  id: number;
+  factor_name: string;
+  factor_version: string;
+  trade_date: string;
+  universe_size: number;
+  observation_count: number;
+  missing_count: number;
+  coverage_rate: string;
+  missing_rate: string;
+  mean: string | null;
+  standard_deviation: string | null;
+  ic_1d: string | null;
+  rank_ic_1d: string | null;
+  top_quantile_turnover: string | null;
+  code_version: string;
+}
+
+export interface PortfolioAssetInput {
+  symbol: string;
+  security_type: "stock" | "etf" | "index";
+  industry: string;
+  price: string;
+  current_quantity: number;
+  requested_weight: string;
+  lot_size: number;
+}
+
+export interface PortfolioConstraintsInput {
+  cash_reserve_rate: string;
+  max_symbol_weight: string;
+  max_industry_weight: string;
+  security_type_budgets: Record<string, string>;
+}
+
+export interface PortfolioPlanCreateRequest {
+  name: string;
+  as_of_date: string;
+  cash: string;
+  assets: PortfolioAssetInput[];
+  constraints: PortfolioConstraintsInput;
+}
+
+export interface PortfolioTarget {
+  symbol: string;
+  security_type: string;
+  industry: string;
+  requested_weight: string;
+  constrained_weight: string;
+  final_weight: string;
+  current_quantity: number;
+  target_quantity: number;
+  order_quantity: number;
+  price: string;
+  lot_size: number;
+  reasons: string[];
+}
+
+export interface PortfolioPlan {
+  plan_id: number;
+  name: string;
+  as_of_date: string;
+  status: "draft";
+  execution_allowed: false;
+  input_source: "operator_provided";
+  total_equity: string;
+  cash_before: string;
+  target_cash: string;
+  cash_after: string;
+  constraints: PortfolioConstraintsInput;
+  code_version: string;
+  created_at: string;
+  targets: PortfolioTarget[];
+}
+
+export interface PortfolioReadinessCheck {
+  code: string;
+  scope: "plan" | "account" | "position" | "security" | "market";
+  passed: boolean;
+  symbol: string | null;
+  message: string;
+}
+
+export interface PortfolioRiskReadiness {
+  plan_id: number;
+  paper_account_id: number;
+  readiness_stage: "pre_risk";
+  ready_for_risk_check: boolean;
+  execution_allowed: false;
+  risk_evaluated: false;
+  orders_created: false;
+  read_only: true;
+  access_scope: "local_single_user";
+  consistency_level: "read_committed_diagnostic";
+  checked_at: string;
+  account_snapshot_hash: string;
+  market_snapshot_hash: string;
+  checks: PortfolioReadinessCheck[];
+  blockers: PortfolioReadinessCheck[];
+}
+
+export interface PaperEquityComponent {
+  symbol: string;
+  quantity: number;
+  average_cost: string;
+  price: string;
+  market_value: string;
+  daily_bar_id: number;
+  source_name: string;
+  quality_status: string;
+  bar_trade_date: string;
+  adjust_type: "none";
+  is_suspect: false;
+  bar_updated_at: string;
+}
+
+export interface PaperEquitySnapshot {
+  snapshot_id: number;
+  account_id: number;
+  valuation_date: string;
+  cash_balance: string;
+  positions_market_value: string;
+  total_equity: string;
+  observed_high_watermark: string;
+  drawdown_since_monitoring_start: string;
+  previous_snapshot_id: number | null;
+  monitoring_start_date: string;
+  observation_count: number;
+  history_status: "bootstrap" | "continuous" | "gap";
+  account_snapshot_hash: string;
+  market_snapshot_hash: string;
+  valuation_hash: string;
+  valuation_policy: Record<string, string>;
+  code_version: string;
+  created_at: string;
+  execution_allowed: false;
+  risk_evaluated: false;
+  orders_created: false;
+  access_scope: "local_single_user";
+  components: PaperEquityComponent[];
+}
+
+export interface RiskRuleEvaluation {
+  rule_name: string;
+  passed: boolean;
+  reason_code: string;
+  message: string;
+}
+
+export interface RiskOrderEvaluation {
+  symbol: string;
+  side: "buy" | "sell";
+  order_quantity: number;
+  passed: boolean;
+  rejection_reasons: string[];
+  rule_results: RiskRuleEvaluation[];
+  reference_price: string;
+  current_symbol_weight: string;
+  projected_symbol_weight: string;
+  current_industry_weight: string;
+  projected_industry_weight: string;
+  average_daily_amount: string | null;
+  adv_window: number;
+  adv_observation_count: number;
+  adv_input_hash: string;
+}
+
+export interface RiskEvaluation {
+  check_id: number;
+  plan_id: number;
+  paper_account_id: number;
+  equity_snapshot_id: number;
+  evaluation_status: "passed" | "blocked" | "failed";
+  risk_passed: boolean;
+  current_drawdown: string;
+  limits: Record<string, string>;
+  preconditions: Array<Record<string, unknown>>;
+  plan_request_hash: string;
+  readiness_account_hash: string;
+  readiness_market_hash: string;
+  readiness_hash: string;
+  adv_snapshot_hash: string;
+  risk_policy_hash: string;
+  evaluation_hash: string;
+  code_version: string;
+  created_at: string;
+  risk_evaluated: true;
+  execution_allowed: false;
+  orders_created: false;
+  access_scope: "local_single_user";
+  orders: RiskOrderEvaluation[];
+}
+
+export interface PaperExecutionApprovalOrder {
+  execution_index: number;
+  risk_check_order_id: number;
+  symbol: string;
+  security_type: string;
+  industry: string;
+  side: "buy" | "sell";
+  signed_quantity: number;
+  reference_price: string;
+  estimated_fill_price: string;
+  estimated_amount: string;
+  estimated_commission: string;
+  current_quantity: number;
+  target_quantity: number;
+  risk_classification: "risk_reducing" | "risk_increasing";
+}
+
+export interface PaperExecutionApproval {
+  approval_id: number;
+  risk_check_id: number;
+  plan_id: number;
+  account_id: number;
+  equity_snapshot_id: number;
+  stored_status: "pending" | "consumed" | "expired" | "revoked";
+  effective_status: "pending" | "consumed" | "expired" | "revoked";
+  approval_scope: "paper_execution";
+  actor_type: "local_single_user";
+  approved_by: string;
+  code_version: string;
+  evaluation_hash: string;
+  order_batch_hash: string;
+  approval_hash: string;
+  order_summary: PaperExecutionApprovalOrder[];
+  confirmation_policy: Record<string, unknown>;
+  approved_at: string;
+  expires_at: string;
+  consumed_at: string | null;
+  revoked_at: string | null;
+  revocation_reason: string | null;
+  created_at: string;
+  execution_allowed: false;
+  orders_created: false;
+  consumable_later: boolean;
+  access_scope: "local_single_user";
+}
+
+export interface PaperExecutionOrder {
+  execution_index: number;
+  order_id: number;
+  fill_id: number;
+  risk_check_order_id: number;
+  symbol: string;
+  side: "buy" | "sell";
+  quantity: number;
+  reference_price: string;
+  fill_price: string;
+  commission: string;
+  cash_after: string;
+}
+
+export interface PaperExecution {
+  execution_id: number;
+  approval_id: number;
+  risk_check_id: number;
+  plan_id: number;
+  account_id: number;
+  equity_snapshot_id: number;
+  status: "completed" | "rejected";
+  execution_mode: "paper";
+  actor_type: "local_single_user";
+  executed_by: string;
+  code_version: string;
+  approval_hash: string;
+  evaluation_hash: string;
+  order_batch_hash: string;
+  execution_policy_hash: string;
+  account_state_hash_before: string;
+  account_state_hash_after: string | null;
+  execution_hash: string;
+  cash_before: string | null;
+  cash_after: string | null;
+  order_count: number;
+  fill_count: number;
+  total_commission: string;
+  failure_code: string | null;
+  failure_message: string | null;
+  started_at: string;
+  completed_at: string;
+  created_at: string;
+  approval_status: "consumed";
+  real_broker_submitted: false;
+  next_step: "capture_new_equity_snapshot";
+  access_scope: "local_single_user";
+  orders: PaperExecutionOrder[];
+}

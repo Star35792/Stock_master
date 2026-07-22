@@ -8,6 +8,22 @@ from app.risk import OrderRiskDecision, RiskLimits
 
 
 class RiskCheckRepository:
+    def get_by_idempotency_key(
+        self,
+        db: Session,
+        *,
+        idempotency_key: str,
+    ) -> RiskCheck | None:
+        return db.scalar(select(RiskCheck).where(RiskCheck.idempotency_key == idempotency_key))
+
+    def get_by_evaluation_hash(
+        self,
+        db: Session,
+        *,
+        evaluation_hash: str,
+    ) -> RiskCheck | None:
+        return db.scalar(select(RiskCheck).where(RiskCheck.evaluation_hash == evaluation_hash))
+
     def get_with_orders(
         self,
         db: Session,
@@ -70,4 +86,17 @@ class RiskCheckRepository:
                 for decision in decisions
             ]
         )
+        return check
+
+    def save_evaluation(
+        self,
+        db: Session,
+        *,
+        check_values: dict,
+        order_values: list[dict],
+    ) -> RiskCheck:
+        check = RiskCheck(**check_values)
+        db.add(check)
+        db.flush()
+        db.add_all([RiskCheckOrder(check_id=check.id, **values) for values in order_values])
         return check

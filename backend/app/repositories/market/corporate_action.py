@@ -7,6 +7,28 @@ from app.models.market import CorporateAction
 
 
 class CorporateActionRepository:
+    def list_for_symbols_date_range(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        start_date: date,
+        end_date: date,
+    ) -> list[CorporateAction]:
+        if not symbols:
+            return []
+        return list(
+            db.scalars(
+                select(CorporateAction)
+                .where(
+                    CorporateAction.symbol.in_(symbols),
+                    CorporateAction.ex_date >= start_date,
+                    CorporateAction.ex_date <= end_date,
+                )
+                .order_by(CorporateAction.ex_date, CorporateAction.symbol)
+            )
+        )
+
     def list(
         self,
         db: Session,

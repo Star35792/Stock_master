@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
 
@@ -50,11 +50,12 @@ class PaperBrokerAdapter:
             raise ValueError("reference_price must be positive")
         slippage_rate = self.slippage_bps / Decimal(10000)
         price = order.reference_price * (
-            Decimal(1) + slippage_rate
-            if order.side == "buy"
-            else Decimal(1) - slippage_rate
+            Decimal(1) + slippage_rate if order.side == "buy" else Decimal(1) - slippage_rate
         )
-        commission = Decimal(order.quantity) * price * self.commission_rate
+        price = price.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        commission = (Decimal(order.quantity) * price * self.commission_rate).quantize(
+            Decimal("0.000001"), rounding=ROUND_HALF_UP
+        )
         return BrokerFill(
             symbol=order.symbol,
             side=order.side,

@@ -785,6 +785,356 @@ tbody tr:last-child td {
   margin-bottom: 14px;
 }
 
+.portfolio-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.portfolio-form,
+.portfolio-result {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #e3e7ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.portfolio-form,
+.asset-editor,
+.plan-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.portfolio-form label,
+.asset-row label {
+  display: grid;
+  gap: 5px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.portfolio-form input,
+.portfolio-form select,
+.lookup-row input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d7dce4;
+  border-radius: 7px;
+  color: #101828;
+  background: #ffffff;
+  font: inherit;
+}
+
+.asset-editor-header,
+.lookup-row,
+.plan-summary header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.asset-row {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr 1fr 0.8fr 0.8fr 0.8fr 0.7fr 36px;
+  gap: 8px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid #eef1f5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.primary-action,
+.secondary-action,
+.remove-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.primary-action {
+  justify-self: start;
+  border: 1px solid #2563eb;
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.secondary-action,
+.remove-action {
+  border: 1px solid #d7dce4;
+  color: #344054;
+  background: #ffffff;
+}
+
+.remove-action {
+  width: 36px;
+  padding: 0;
+  color: #b42318;
+}
+
+.primary-action:disabled,
+.secondary-action:disabled,
+.remove-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-warning {
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.portfolio-result,
+.plan-summary header > div {
+  display: grid;
+  gap: 12px;
+}
+
+.lookup-row input {
+  max-width: 180px;
+}
+
+.plan-summary header > div {
+  gap: 4px;
+}
+
+.plan-summary header span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.plan-summary header strong {
+  color: #101828;
+  font-size: 18px;
+}
+
+.plan-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plan-metrics div {
+  padding: 12px;
+  border: 1px solid #eef1f5;
+  border-radius: 7px;
+  background: #fbfcfe;
+}
+
+.plan-metrics span,
+.plan-metrics strong {
+  display: block;
+}
+
+.readiness-panel,
+.readiness-result {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.readiness-panel .lookup-row > div,
+.readiness-result {
+  min-width: 0;
+}
+
+.readiness-panel .lookup-row > div {
+  display: grid;
+  gap: 3px;
+}
+
+.readiness-panel .lookup-row span,
+.readiness-result > span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.readiness-result ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.readiness-result li {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.4fr) minmax(0, 1fr);
+  gap: 10px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.readiness-result code {
+  color: #344054;
+  font-size: 11px;
+}
+
+.readiness-ok {
+  color: #047857;
+}
+
+.readiness-blocked {
+  color: #b42318;
+}
+
+.risk-actions,
+.risk-fact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.risk-fact-row {
+  padding: 10px;
+  border-radius: 7px;
+  color: #475467;
+  background: #eef2f7;
+  font-size: 12px;
+}
+
+.risk-evaluation-result {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #dbeafe;
+}
+
+.risk-evaluation-result ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.risk-evaluation-result li {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+  gap: 10px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.approval-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #f5c77a;
+  border-radius: 7px;
+  background: #fffaf0;
+}
+
+.approval-panel input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d7dce4;
+  border-radius: 7px;
+  color: #101828;
+  background: #ffffff;
+  font: inherit;
+}
+
+.approval-heading,
+.approval-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-heading svg {
+  color: #9a6700;
+}
+
+.approval-heading .status {
+  margin-left: auto;
+}
+
+.approval-facts {
+  color: #667085;
+  font-size: 12px;
+}
+
+.approval-orders {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approval-orders li {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.approval-cash {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-expired,
+.status-revoked {
+  color: #b42318;
+  background: #fef3f2;
+}
+
+.execution-result {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #a7d7c5;
+  border-radius: 7px;
+  background: #f3fbf7;
+}
+
+.execution-result > span {
+  color: #475467;
+  font-size: 12px;
+}
+
+.plan-metrics span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.plan-metrics strong {
+  margin-top: 5px;
+  color: #101828;
+}
+
 .mini-stat {
   min-height: 88px;
   padding: 16px;
@@ -834,8 +1184,13 @@ tbody tr:last-child td {
   }
 
   .alert-grid,
-  .failure-layout {
+  .failure-layout,
+  .portfolio-layout {
     grid-template-columns: 1fr;
+  }
+
+  .asset-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .detail-panel {
@@ -863,7 +1218,10 @@ tbody tr:last-child td {
 
   .metric-grid,
   .section-layout,
-  .paper-grid {
+  .paper-grid,
+  .form-grid,
+  .plan-metrics,
+  .asset-row {
     grid-template-columns: 1fr;
   }
 

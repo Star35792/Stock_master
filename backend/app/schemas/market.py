@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -75,6 +76,21 @@ class DailyBarRead(BaseModel):
     quality_status: str
     is_suspect: bool
     updated_at: datetime
+
+
+class MarketSummaryRead(BaseModel):
+    """Latest trusted daily snapshot; this is not a real-time quote."""
+
+    symbol: str
+    name: str
+    security_type: str
+    exchange: str
+    currency: str
+    industry: str | None
+    latest_trade_date: date | None
+    latest: DailyBarRead | None
+    data_status: Literal["available", "unavailable"]
+    data_note: str
 
 
 class CorporateActionRead(BaseModel):

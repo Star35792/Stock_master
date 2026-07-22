@@ -23,7 +23,16 @@ from app.models.strategy import (
     BacktestTradeRecord,
 )
 from app.models.system import DataQualityIssue, DataSource, JobLog
-from app.models.trade import PaperAccount, PaperFill, PaperOrder, PaperPosition
+from app.models.trade import (
+    PaperAccount,
+    PaperAccountEquityComponent,
+    PaperAccountEquitySnapshot,
+    PaperExecutionApproval,
+    PaperExecutionBatch,
+    PaperFill,
+    PaperOrder,
+    PaperPosition,
+)
 
 __all__ = [
     "AdjustmentFactor",
@@ -49,6 +58,10 @@ __all__ = [
     "JobLog",
     "ManualCorrection",
     "PaperAccount",
+    "PaperAccountEquityComponent",
+    "PaperAccountEquitySnapshot",
+    "PaperExecutionApproval",
+    "PaperExecutionBatch",
     "PaperFill",
     "PaperOrder",
     "PaperPosition",

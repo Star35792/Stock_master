@@ -1,14 +1,25 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from app.api.routes import approvals as approvals_module
 from app.api.routes import backtests as backtests_module
 from app.api.routes import health as health_module
 from app.api.routes import operations as operations_module
+from app.api.routes import paper_accounts as paper_accounts_module
+from app.api.routes import portfolio as portfolio_module
 from app.api.routes import strategy_research as strategy_research_module
 from app.main import app
+from app.services.paper_approval import (
+    PaperApprovalConflict,
+    PaperApprovalNotFound,
+    PaperApprovalValidationError,
+)
+from app.services.paper_equity import PaperEquitySnapshotNotFound
+from app.services.portfolio import PortfolioIdempotencyConflict
+from app.services.portfolio_readiness import PortfolioPlanNotFound
 
 client = TestClient(app)
 
@@ -91,6 +102,569 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/operations/failures" in paths
     assert "/api/v1/operations/failures/{failure_type}/{failure_id}" in paths
     assert "/api/v1/operations/failures/{failure_type}/{failure_id}/rerun-plan" in paths
+    assert "/api/v1/portfolio/plans" in paths
+    assert "/api/v1/portfolio/plans/{plan_id}" in paths
+    assert "/api/v1/portfolio/plans/{plan_id}/risk-readiness" in paths
+    assert "/api/v1/portfolio/plans/{plan_id}/risk-evaluations" in paths
+    assert "/api/v1/paper-accounts/{account_id}/equity-snapshots" in paths
+    assert "/api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}" in paths
+    assert "/api/v1/risk-evaluations/{risk_check_id}/confirmations" in paths
+    assert "/api/v1/paper-execution-approvals/{approval_id}" in paths
+    assert "/api/v1/paper-execution-approvals/{approval_id}/revoke" in paths
+    assert "/api/v1/paper-execution-approvals/{approval_id}/executions" in paths
+    assert "/api/v1/paper-execution-approvals/{approval_id}/execution" in paths
+    assert "/api/v1/paper-executions/{execution_id}" in paths
+
+
+def _portfolio_plan_response() -> dict:
+    return {
+        "plan_id": 11,
+        "name": "draft",
+        "as_of_date": "2026-07-21",
+        "status": "draft",
+        "execution_allowed": False,
+        "input_source": "operator_provided",
+        "total_equity": "100000",
+        "cash_before": "100000",
+        "target_cash": "5000",
+        "cash_after": "80000",
+        "constraints": {
+            "cash_reserve_rate": "0.05",
+            "max_symbol_weight": "0.20",
+            "max_industry_weight": "0.40",
+            "security_type_budgets": {},
+        },
+        "code_version": "test",
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC).isoformat(),
+        "targets": [
+            {
+                "symbol": "600519.SH",
+                "security_type": "stock",
+                "industry": "食品饮料",
+                "requested_weight": "0.30",
+                "constrained_weight": "0.20",
+                "final_weight": "0.20",
+                "current_quantity": 0,
+                "target_quantity": 100,
+                "order_quantity": 100,
+                "price": "200",
+                "lot_size": 100,
+                "reasons": ["max_symbol_weight"],
+            }
+        ],
+    }
+
+
+def test_create_portfolio_plan_forwards_operator_draft(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_build(db, **kwargs):
+        captured.update(kwargs)
+        return _portfolio_plan_response()
+
+    monkeypatch.setattr(portfolio_module.service, "build", fake_build)
+    response = client.post(
+        "/api/v1/portfolio/plans",
+        headers={"Idempotency-Key": "draft-11"},
+        json={
+            "name": "draft",
+            "as_of_date": "2026-07-21",
+            "cash": "100000",
+            "assets": [
+                {
+                    "symbol": "600519.sh",
+                    "security_type": "stock",
+                    "industry": "食品饮料",
+                    "price": "200",
+                    "current_quantity": 0,
+                    "requested_weight": "0.30",
+                    "lot_size": 100,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["execution_allowed"] is False
+    assert captured["idempotency_key"] == "draft-11"
+    assert captured["assets"][0].symbol == "600519.SH"
+    assert captured["input_snapshot"]["input_source"] == "operator_provided"
+
+
+def test_create_portfolio_plan_requires_idempotency_key() -> None:
+    response = client.post(
+        "/api/v1/portfolio/plans",
+        json={
+            "name": "draft",
+            "as_of_date": "2026-07-21",
+            "cash": "100000",
+            "assets": [],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_get_portfolio_plan_maps_missing_to_404(monkeypatch) -> None:
+    monkeypatch.setattr(portfolio_module.service, "get_plan", lambda db, **kwargs: None)
+
+    response = client.get("/api/v1/portfolio/plans/999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "portfolio plan not found"
+
+
+def test_get_portfolio_plan_returns_saved_draft(monkeypatch) -> None:
+    monkeypatch.setattr(
+        portfolio_module.service,
+        "get_plan",
+        lambda db, **kwargs: _portfolio_plan_response(),
+    )
+
+    response = client.get("/api/v1/portfolio/plans/11")
+
+    assert response.status_code == 200
+    assert response.json()["plan_id"] == 11
+    assert response.json()["status"] == "draft"
+
+
+def test_create_portfolio_plan_maps_idempotency_conflict_to_409(monkeypatch) -> None:
+    def fake_build(db, **kwargs):
+        raise PortfolioIdempotencyConflict(
+            "idempotency key was already used with a different request"
+        )
+
+    monkeypatch.setattr(portfolio_module.service, "build", fake_build)
+    response = client.post(
+        "/api/v1/portfolio/plans",
+        headers={"Idempotency-Key": "draft-11"},
+        json={
+            "name": "changed draft",
+            "as_of_date": "2026-07-21",
+            "cash": "100000",
+            "assets": [
+                {
+                    "symbol": "600519.SH",
+                    "security_type": "stock",
+                    "industry": "食品饮料",
+                    "price": "200",
+                    "current_quantity": 0,
+                    "requested_weight": "0.10",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 409
+    assert "different request" in response.json()["detail"]
+
+
+def _portfolio_readiness_response() -> dict:
+    return {
+        "plan_id": 11,
+        "paper_account_id": 1,
+        "readiness_stage": "pre_risk",
+        "ready_for_risk_check": True,
+        "execution_allowed": False,
+        "risk_evaluated": False,
+        "orders_created": False,
+        "read_only": True,
+        "access_scope": "local_single_user",
+        "consistency_level": "read_committed_diagnostic",
+        "checked_at": datetime(2026, 7, 21, tzinfo=UTC).isoformat(),
+        "account_snapshot_hash": "a" * 64,
+        "market_snapshot_hash": "b" * 64,
+        "checks": [],
+        "blockers": [],
+    }
+
+
+def test_get_portfolio_risk_readiness_remains_non_executable(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_check(db, **kwargs):
+        captured.update(kwargs)
+        return _portfolio_readiness_response()
+
+    monkeypatch.setattr(portfolio_module.readiness_service, "check", fake_check)
+    response = client.get(
+        "/api/v1/portfolio/plans/11/risk-readiness",
+        params={"paper_account_id": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ready_for_risk_check"] is True
+    assert response.json()["execution_allowed"] is False
+    assert response.json()["risk_evaluated"] is False
+    assert response.json()["orders_created"] is False
+    assert captured == {"plan_id": 11, "paper_account_id": 1}
+
+
+def test_get_portfolio_risk_readiness_maps_missing_plan_to_404(monkeypatch) -> None:
+    def fake_check(db, **kwargs):
+        raise PortfolioPlanNotFound("portfolio plan not found")
+
+    monkeypatch.setattr(portfolio_module.readiness_service, "check", fake_check)
+    response = client.get(
+        "/api/v1/portfolio/plans/999/risk-readiness",
+        params={"paper_account_id": 1},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "portfolio plan not found"
+
+
+def test_get_portfolio_risk_readiness_rejects_invalid_account_id() -> None:
+    response = client.get(
+        "/api/v1/portfolio/plans/11/risk-readiness",
+        params={"paper_account_id": 0},
+    )
+
+    assert response.status_code == 422
+
+
+def _paper_equity_snapshot_response() -> dict:
+    return {
+        "snapshot_id": 21,
+        "account_id": 1,
+        "valuation_date": "2026-07-21",
+        "cash_balance": "10000",
+        "positions_market_value": "0",
+        "total_equity": "10000",
+        "observed_high_watermark": "10000",
+        "drawdown_since_monitoring_start": "0",
+        "previous_snapshot_id": None,
+        "monitoring_start_date": "2026-07-21",
+        "observation_count": 1,
+        "history_status": "bootstrap",
+        "account_snapshot_hash": "a" * 64,
+        "market_snapshot_hash": "b" * 64,
+        "valuation_hash": "c" * 64,
+        "valuation_policy": {
+            "name": "paper_account_daily_close",
+            "version": "v1",
+            "adjust_type": "none",
+            "accepted_quality": "trusted,manual_fixed",
+            "price_field": "close",
+            "history_scope": "since_monitoring_start",
+        },
+        "code_version": "test",
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC).isoformat(),
+        "execution_allowed": False,
+        "risk_evaluated": False,
+        "orders_created": False,
+        "access_scope": "local_single_user",
+        "components": [],
+    }
+
+
+def test_capture_paper_equity_snapshot_forwards_only_date_and_account(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_capture(db, **kwargs):
+        captured.update(kwargs)
+        return _paper_equity_snapshot_response()
+
+    monkeypatch.setattr(paper_accounts_module.service, "capture", fake_capture)
+    response = client.post(
+        "/api/v1/paper-accounts/1/equity-snapshots",
+        headers={"Idempotency-Key": "equity-21"},
+        json={"valuation_date": "2026-07-21"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["risk_evaluated"] is False
+    assert captured == {
+        "account_id": 1,
+        "valuation_date": date(2026, 7, 21),
+        "idempotency_key": "equity-21",
+    }
+
+
+def test_get_paper_equity_snapshot_maps_missing_to_404(monkeypatch) -> None:
+    def fake_get(db, **kwargs):
+        raise PaperEquitySnapshotNotFound("paper equity snapshot not found")
+
+    monkeypatch.setattr(paper_accounts_module.service, "get_snapshot", fake_get)
+    response = client.get("/api/v1/paper-accounts/1/equity-snapshots/999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "paper equity snapshot not found"
+
+
+def _risk_evaluation_response() -> dict:
+    return {
+        "check_id": 31,
+        "plan_id": 11,
+        "paper_account_id": 1,
+        "equity_snapshot_id": 21,
+        "evaluation_status": "passed",
+        "risk_passed": True,
+        "current_drawdown": "-0.02",
+        "limits": {
+            "max_symbol_weight": "0.20",
+            "max_industry_weight": "0.40",
+            "max_drawdown": "0.10",
+            "max_amount_participation": "0.10",
+        },
+        "preconditions": [],
+        "plan_request_hash": "p" * 64,
+        "readiness_account_hash": "a" * 64,
+        "readiness_market_hash": "m" * 64,
+        "readiness_hash": "r" * 64,
+        "adv_snapshot_hash": "d" * 64,
+        "risk_policy_hash": "q" * 64,
+        "evaluation_hash": "e" * 64,
+        "code_version": "test",
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC).isoformat(),
+        "risk_evaluated": True,
+        "execution_allowed": False,
+        "orders_created": False,
+        "access_scope": "local_single_user",
+        "orders": [],
+    }
+
+
+def test_create_bound_risk_evaluation_forwards_only_snapshot_refs(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_evaluate(db, **kwargs):
+        captured.update(kwargs)
+        return _risk_evaluation_response()
+
+    monkeypatch.setattr(
+        portfolio_module.risk_evaluation_service,
+        "evaluate",
+        fake_evaluate,
+    )
+    response = client.post(
+        "/api/v1/portfolio/plans/11/risk-evaluations",
+        headers={"Idempotency-Key": "risk-31"},
+        json={"paper_account_id": 1, "equity_snapshot_id": 21},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["risk_evaluated"] is True
+    assert response.json()["execution_allowed"] is False
+    assert response.json()["orders_created"] is False
+    assert captured == {
+        "plan_id": 11,
+        "paper_account_id": 1,
+        "equity_snapshot_id": 21,
+        "idempotency_key": "risk-31",
+    }
+
+
+def _paper_execution_approval_response(*, status: str = "pending") -> dict:
+    now = datetime(2026, 7, 21, tzinfo=UTC)
+    return {
+        "approval_id": 41,
+        "risk_check_id": 31,
+        "plan_id": 11,
+        "account_id": 1,
+        "equity_snapshot_id": 21,
+        "stored_status": status,
+        "effective_status": status,
+        "approval_scope": "paper_execution",
+        "actor_type": "local_single_user",
+        "approved_by": "local_operator",
+        "code_version": "test",
+        "evaluation_hash": "e" * 64,
+        "plan_request_hash": "p" * 64,
+        "equity_valuation_hash": "v" * 64,
+        "readiness_account_hash": "a" * 64,
+        "readiness_market_hash": "m" * 64,
+        "readiness_hash": "r" * 64,
+        "adv_snapshot_hash": "d" * 64,
+        "risk_policy_hash": "q" * 64,
+        "order_batch_hash": "o" * 64,
+        "approval_hash": "h" * 64,
+        "order_summary": [],
+        "confirmation_policy": {"execution_mode": "paper", "ttl_seconds": 300},
+        "approved_at": now.isoformat(),
+        "expires_at": now.replace(minute=5).isoformat(),
+        "consumed_at": None,
+        "revoked_at": now.isoformat() if status == "revoked" else None,
+        "revocation_reason": "operator cancelled" if status == "revoked" else None,
+        "created_at": now.isoformat(),
+        "execution_allowed": False,
+        "orders_created": False,
+        "consumable_later": status == "pending",
+        "access_scope": "local_single_user",
+    }
+
+
+def test_create_paper_execution_approval_is_confirmation_only(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_create(db, **kwargs):
+        captured.update(kwargs)
+        return _paper_execution_approval_response()
+
+    monkeypatch.setattr(approvals_module.service, "create", fake_create)
+    response = client.post(
+        "/api/v1/risk-evaluations/31/confirmations",
+        headers={"Idempotency-Key": "approval-41"},
+        json={
+            "expected_evaluation_hash": "e" * 64,
+            "confirmation_phrase": "CONFIRM PAPER EXECUTION 31",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["execution_allowed"] is False
+    assert response.json()["orders_created"] is False
+    assert response.json()["consumable_later"] is True
+    assert captured == {
+        "risk_check_id": 31,
+        "expected_evaluation_hash": "e" * 64,
+        "confirmation_phrase": "CONFIRM PAPER EXECUTION 31",
+        "idempotency_key": "approval-41",
+    }
+
+
+def test_paper_execution_approval_error_mappings(monkeypatch) -> None:
+    cases = [
+        (PaperApprovalNotFound("missing"), 404),
+        (PaperApprovalConflict("stale"), 409),
+        (PaperApprovalValidationError("bad phrase"), 422),
+    ]
+    for error, expected_status in cases:
+        monkeypatch.setattr(
+            approvals_module.service,
+            "create",
+            lambda db, error=error, **kwargs: (_ for _ in ()).throw(error),
+        )
+        response = client.post(
+            "/api/v1/risk-evaluations/31/confirmations",
+            headers={"Idempotency-Key": "approval-error"},
+            json={
+                "expected_evaluation_hash": "e" * 64,
+                "confirmation_phrase": "CONFIRM PAPER EXECUTION 31",
+            },
+        )
+
+        assert response.status_code == expected_status
+
+
+def test_get_and_revoke_paper_execution_approval(monkeypatch) -> None:
+    captured: dict = {}
+    monkeypatch.setattr(
+        approvals_module.service,
+        "get",
+        lambda db, **kwargs: _paper_execution_approval_response(),
+    )
+
+    def fake_revoke(db, **kwargs):
+        captured.update(kwargs)
+        return _paper_execution_approval_response(status="revoked")
+
+    monkeypatch.setattr(approvals_module.service, "revoke", fake_revoke)
+
+    get_response = client.get("/api/v1/paper-execution-approvals/41")
+    revoke_response = client.post(
+        "/api/v1/paper-execution-approvals/41/revoke",
+        headers={"Idempotency-Key": "revoke-41"},
+        json={"reason": "operator cancelled"},
+    )
+
+    assert get_response.status_code == 200
+    assert revoke_response.status_code == 200
+    assert revoke_response.json()["effective_status"] == "revoked"
+    assert revoke_response.json()["consumable_later"] is False
+    assert captured == {
+        "approval_id": 41,
+        "reason": "operator cancelled",
+        "idempotency_key": "revoke-41",
+    }
+
+
+def _paper_execution_response() -> dict:
+    now = datetime(2026, 7, 21, tzinfo=UTC).isoformat()
+    return {
+        "execution_id": 51,
+        "approval_id": 41,
+        "risk_check_id": 31,
+        "plan_id": 11,
+        "account_id": 1,
+        "equity_snapshot_id": 21,
+        "status": "completed",
+        "execution_mode": "paper",
+        "actor_type": "local_single_user",
+        "executed_by": "local_operator",
+        "code_version": "test",
+        "approval_hash": "h" * 64,
+        "evaluation_hash": "e" * 64,
+        "order_batch_hash": "o" * 64,
+        "execution_policy_hash": "x" * 64,
+        "account_state_hash_before": "a" * 64,
+        "account_state_hash_after": "b" * 64,
+        "execution_hash": "z" * 64,
+        "cash_before": "1000",
+        "cash_after": "900",
+        "order_count": 1,
+        "fill_count": 1,
+        "total_commission": "0.3",
+        "failure_code": None,
+        "failure_message": None,
+        "started_at": now,
+        "completed_at": now,
+        "created_at": now,
+        "approval_status": "consumed",
+        "real_broker_submitted": False,
+        "next_step": "capture_new_equity_snapshot",
+        "access_scope": "local_single_user",
+        "orders": [],
+    }
+
+
+def test_execute_paper_approval_forwards_only_approval_hash(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_execute(db, **kwargs):
+        captured.update(kwargs)
+        return _paper_execution_response()
+
+    monkeypatch.setattr(approvals_module.execution_service, "execute", fake_execute)
+    response = client.post(
+        "/api/v1/paper-execution-approvals/41/executions",
+        headers={"Idempotency-Key": "execute-51"},
+        json={"expected_approval_hash": "h" * 64},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["execution_mode"] == "paper"
+    assert response.json()["real_broker_submitted"] is False
+    assert captured == {
+        "approval_id": 41,
+        "expected_approval_hash": "h" * 64,
+        "idempotency_key": "execute-51",
+    }
+
+
+def test_get_paper_execution_maps_missing_to_404(monkeypatch) -> None:
+    def fake_get(db, **kwargs):
+        raise approvals_module.PaperExecutionNotFound("paper execution batch not found")
+
+    monkeypatch.setattr(approvals_module.execution_service, "get", fake_get)
+    response = client.get("/api/v1/paper-executions/999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "paper execution batch not found"
+
+
+def test_get_paper_execution_by_approval(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_get(db, **kwargs):
+        captured.update(kwargs)
+        return _paper_execution_response()
+
+    monkeypatch.setattr(approvals_module.execution_service, "get_by_approval", fake_get)
+    response = client.get("/api/v1/paper-execution-approvals/41/execution")
+
+    assert response.status_code == 200
+    assert captured == {"approval_id": 41}
 
 
 def test_operations_failures_forwards_limit(monkeypatch) -> None:
@@ -142,17 +716,17 @@ def test_operations_alerts_returns_candidates(monkeypatch) -> None:
         return {
             "generated_at": "2026-07-20T00:00:00Z",
             "items": [
-                    {
-                        "key": "failed_backtests",
-                        "severity": "critical",
-                        "count": 1,
-                        "title": "Failed backtests",
-                        "detail": "Backtest runs ended in failed status",
-                        "rule": "backtest runs with status=failed",
-                        "next_action": "inspect run detail and error message",
-                    }
-                ],
-            }
+                {
+                    "key": "failed_backtests",
+                    "severity": "critical",
+                    "count": 1,
+                    "title": "Failed backtests",
+                    "detail": "Backtest runs ended in failed status",
+                    "rule": "backtest runs with status=failed",
+                    "next_action": "inspect run detail and error message",
+                }
+            ],
+        }
 
     monkeypatch.setattr(operations_module.service, "get_alerts", fake_get_alerts)
     response = client.get("/api/v1/operations/alerts")
