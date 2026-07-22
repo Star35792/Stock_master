@@ -44,6 +44,18 @@
 
 分类常量定义在 `backend/app/factors/categories.py`（`FactorCategory` 枚举、`FACTOR_CATEGORY_LABELS`、`FACTOR_CATEGORY_ORDER`）。因子服务注册时通过 `definition_repository.ensure(category=...)` 写入；`factor_cross_section` 生成的派生因子（`xxx__rank`、`xxx__zscore`、`xxx__winsor`、`xxx__industry_neutral`）继承基础因子的 `category`。历史因子定义由 Alembic 迁移 `20260722_0024` 按因子名回填，派生因子按基础因子回填。前端 `FactorPage` 提供分类下拉过滤和卡片分类标签。
 
+### 因子目录预注册
+
+`backend/app/factors/registry.py` 的 `register_all_factor_definitions(db)` 把九个因子服务的 spec（价量、财务、估值、行业、情绪、宏观、政策、盈利预期、资金结构）以及 crowding 复合因子一次性预注册为 `factor.factor_definition` 目录条目，使因子工作台成为完整目录，而不依赖“跑过才有定义”。`ensure` 按 name+version 幂等 upsert，可重复调用。HTTP 侧暴露 `POST /factors/definitions/register-all` 触发注册并返回各类计数。
+
+版本约定：
+
+- 目录注册统一用 `v1` 作为规范定义版本。
+- 价量与拥挤度因子在运行时按复权类型生成 `v1-{adjust_type}`（如 `v1-none`、`v1-qfq`、`v1-hfq`），因为同一因子名在不同复权口径下是不同序列；`factor_cross_section` 派生变换用 `v1-from-v1-{adjust_type}`。这些运行时实例与目录 `v1` 规范定义共存，各自带分类。
+- `composite`（`decision_score`）依赖调用方传入的因子清单，属运行时动态组合，不在此预注册。
+
+当前目录共 82 条规范定义，覆盖全部 11 个分类；运行时实例按实际计算产生。
+
 ## 3. 因子域设计
 
 ### 3.1 财务健康

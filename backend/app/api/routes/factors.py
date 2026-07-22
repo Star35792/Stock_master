@@ -11,6 +11,7 @@ from app.schemas import (
     FactorValueRead,
     Page,
 )
+from app.factors.registry import register_all_factor_definitions
 from app.services import FactorQueryService
 
 router = APIRouter(prefix="/factors", tags=["factors"])
@@ -36,6 +37,14 @@ def list_factor_definitions(
         limit=limit,
         offset=offset,
     )
+
+
+@router.post("/definitions/register-all")
+def register_all_definitions(db: DatabaseSession) -> dict[str, object]:
+    """Register all factor specs as definition catalog entries (idempotent)."""
+    counts = register_all_factor_definitions(db)
+    db.commit()
+    return {"registered": counts}
 
 
 @router.get("/runs", response_model=Page[FactorRunRead])

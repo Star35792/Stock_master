@@ -6,6 +6,7 @@
 | --- | --- |
 | `api` | HTTP 语义、参数校验、响应模型 |
 | `services` | 导入、构建、因子、回测、组合、风控、模拟盘等业务流程 |
+| `factors` | 因子分类常量与因子定义目录预注册（registry） |
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |
 | `models` | ORM 表结构 |
 | `data_sources` | HiThink、Eastmoney、Xueqiu 等外部来源适配 |
