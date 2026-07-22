@@ -12,7 +12,7 @@ import {
 } from "lightweight-charts";
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 
-import { formatPctChange, qualityStatusLabel } from "../../components/operations/formatters";
+import { qualityStatusLabel } from "../../components/operations/formatters";
 import type { DailyBarItem } from "../../types";
 
 const props = defineProps<{ bars: DailyBarItem[]; loading: boolean; symbol: string }>();
@@ -55,16 +55,41 @@ const normalized = computed(() => {
 });
 
 const displayedBar = computed(() => selectedBar.value ?? normalized.value.bars[normalized.value.bars.length - 1] ?? null);
-const directionClass = computed(() => {
+
+// 涨跌额与涨跌幅优先使用后端字段，缺失时用 close - pre_close 自动补算，
+// 保证 pre_close 可得时即使后端未给 pct_change/change_amount 也能显示涨跌。
+const changeMetrics = computed(() => {
   const bar = displayedBar.value;
-  if (!bar) return "flat";
-  const change = bar.pct_change === null ? Number(bar.close) - Number(bar.pre_close ?? bar.open) : Number(bar.pct_change);
-  return change > 0 ? "up" : change < 0 ? "down" : "flat";
+  if (!bar) return { amount: Number.NaN, pct: Number.NaN };
+  const close = Number(bar.close);
+  const preClose = bar.pre_close !== null ? Number(bar.pre_close) : Number.NaN;
+  const statedAmount = bar.change_amount !== null ? Number(bar.change_amount) : Number.NaN;
+  const statedPct = bar.pct_change !== null ? Number(bar.pct_change) : Number.NaN;
+  const computedAmount = Number.isFinite(preClose) ? close - preClose : Number.NaN;
+  const computedPct = Number.isFinite(preClose) && preClose !== 0
+    ? (computedAmount / preClose) * 100
+    : Number.NaN;
+  return {
+    amount: Number.isFinite(statedAmount) ? statedAmount : computedAmount,
+    pct: Number.isFinite(statedPct) ? statedPct : computedPct,
+  };
+});
+
+const directionClass = computed(() => {
+  const { amount, pct } = changeMetrics.value;
+  const delta = Number.isFinite(amount) ? amount : pct;
+  return delta > 0 ? "up" : delta < 0 ? "down" : "flat";
 });
 
 function formatNumber(value: string | null, maximumFractionDigits = 2) {
   if (value === null || !Number.isFinite(Number(value))) return "-";
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits }).format(Number(value));
+}
+
+function formatSignedFixed(value: number, suffix = "") {
+  if (!Number.isFinite(value)) return "-";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}${suffix}`;
 }
 
 function adjustLabel(value: string) {
@@ -208,7 +233,7 @@ onUnmounted(() => {
       <span>高 <strong>{{ displayedBar.high }}</strong></span>
       <span>低 <strong>{{ displayedBar.low }}</strong></span>
       <span>收 <strong>{{ displayedBar.close }}</strong></span>
-      <span :class="directionClass">涨跌 {{ formatPctChange(displayedBar.pct_change) }}</span>
+      <span :class="directionClass">涨跌 {{ formatSignedFixed(changeMetrics.amount) }}（{{ formatSignedFixed(changeMetrics.pct, "%") }}）</span>
       <span>成交量 {{ formatNumber(displayedBar.volume, 0) }} 股/份</span>
       <span>成交额 {{ formatNumber(displayedBar.amount) }} 元</span>
       <span>{{ qualityStatusLabel(displayedBar.quality_status) }}</span>
