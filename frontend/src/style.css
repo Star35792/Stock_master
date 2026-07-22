@@ -88,6 +88,12 @@ button {
   outline: none;
 }
 
+.nav-link.is-active {
+  color: #ffffff;
+  background: #2563eb;
+  box-shadow: 0 8px 20px rgb(37 99 235 / 22%);
+}
+
 .workspace {
   min-width: 0;
   padding: 28px;

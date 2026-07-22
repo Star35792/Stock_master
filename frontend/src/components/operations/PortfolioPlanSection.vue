@@ -25,7 +25,7 @@ import type {
   RiskEvaluation,
 } from "../../types";
 
-const props = defineProps<{ writeEnabled: boolean }>();
+const props = defineProps<{ writeEnabled: boolean; accountId?: number }>();
 
 const newAsset = (): PortfolioAssetInput => ({
   symbol: "",
@@ -58,7 +58,7 @@ const isLoading = ref(false);
 const isLoadingApproval = ref(false);
 const isCheckingReadiness = ref(false);
 const errorMessage = ref<string | null>(null);
-const paperAccountId = ref("1");
+const paperAccountId = ref(props.accountId ? String(props.accountId) : "");
 const readiness = ref<PortfolioRiskReadiness | null>(null);
 const equitySnapshot = ref<PaperEquitySnapshot | null>(null);
 const riskEvaluation = ref<RiskEvaluation | null>(null);
@@ -112,6 +112,18 @@ watch(
     pendingIdempotencyKey = null;
   },
   { deep: true },
+);
+
+watch(
+  () => props.accountId,
+  (value) => {
+    paperAccountId.value = value ? String(value) : "";
+    readiness.value = null;
+    equitySnapshot.value = null;
+    riskEvaluation.value = null;
+    approval.value = null;
+    execution.value = null;
+  },
 );
 
 function makeIdempotencyKey() {
@@ -282,6 +294,10 @@ async function loadApproval() {
     const loaded = await fetchPaperExecutionApproval(approvalId);
     if (plan.value && loaded.plan_id !== plan.value.plan_id) {
       throw new Error("确认记录不属于当前组合草案");
+    }
+    const selectedAccountId = Number(paperAccountId.value);
+    if (!Number.isInteger(selectedAccountId) || loaded.account_id !== selectedAccountId) {
+      throw new Error("确认记录不属于当前选择的模拟账户");
     }
     approval.value = loaded;
     execution.value = null;
@@ -455,7 +471,8 @@ const reasonLabels: Record<string, string> = {
                 <strong>风险前数据核对</strong>
                 <span>候选模拟账户，仅作本次只读诊断</span>
               </div>
-              <input v-model="paperAccountId" inputmode="numeric" placeholder="模拟账户 ID" />
+              <input v-if="accountId === undefined" v-model="paperAccountId" inputmode="numeric" placeholder="模拟账户 ID" />
+              <span v-else class="readonly-pill">账户 #{{ accountId }}</span>
               <button
                 class="secondary-action"
                 type="button"

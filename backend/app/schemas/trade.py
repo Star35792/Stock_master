@@ -5,6 +5,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
+class PaperAccountRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    cash_balance: Decimal
+
+
 class PaperEquitySnapshotCreateRequest(BaseModel):
     valuation_date: date
 

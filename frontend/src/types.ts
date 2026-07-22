@@ -194,6 +194,12 @@ export interface ApiPage<T> {
   offset: number;
 }
 
+export interface PaperAccount {
+  id: number;
+  name: string;
+  cash_balance: string;
+}
+
 export interface FactorDefinition {
   id: number;
   name: string;

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header, HTTPException, Path, status
 
 from app.api.dependencies import DatabaseSession
 from app.schemas.trade import (
+    PaperAccountRead,
     PaperEquitySnapshotCreateRequest,
     PaperEquitySnapshotRead,
 )
@@ -17,6 +18,11 @@ from app.services.paper_equity import (
 
 router = APIRouter(prefix="/paper-accounts", tags=["paper-accounts"])
 service = PaperEquitySnapshotService()
+
+
+@router.get("", response_model=list[PaperAccountRead])
+def list_paper_accounts(db: DatabaseSession) -> list[PaperAccountRead]:
+    return service.list_accounts(db)
 
 
 @router.post(

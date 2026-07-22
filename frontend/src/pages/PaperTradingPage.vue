@@ -8,9 +8,11 @@ import {
   LockKeyhole,
   ShieldCheck,
 } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
+import { fetchPaperAccounts } from "../api";
 import PortfolioPlanSection from "../components/operations/PortfolioPlanSection.vue";
+import type { PaperAccount } from "../types";
 
 type WorkflowStep = {
   id: number;
@@ -28,9 +30,12 @@ const steps: WorkflowStep[] = [
 const activeStep = ref(1);
 const environment = ref<"paper" | "live">("paper");
 const accountId = ref("");
+const accounts = ref<PaperAccount[]>([]);
+const accountsLoading = ref(false);
+const backendAvailable = ref(false);
 const pageError = ref<string | null>(null);
 
-const canWrite = computed(() => environment.value === "paper" && accountId.value === "1");
+const canWrite = computed(() => backendAvailable.value && environment.value === "paper" && Boolean(accountId.value));
 const activeStepInfo = computed(() => steps[activeStep.value - 1]);
 
 function chooseStep(step: number) {
@@ -50,6 +55,22 @@ function validateEnvironment() {
   }
   pageError.value = null;
 }
+
+async function loadAccounts() {
+  accountsLoading.value = true;
+  try {
+    accounts.value = await fetchPaperAccounts();
+    backendAvailable.value = true;
+    accountId.value = accounts.value[0] ? String(accounts.value[0].id) : "";
+  } catch (error) {
+    backendAvailable.value = false;
+    pageError.value = error instanceof Error ? error.message : "模拟账户读取失败";
+  } finally {
+    accountsLoading.value = false;
+  }
+}
+
+onMounted(() => void loadAccounts());
 </script>
 
 <template>
@@ -82,13 +103,15 @@ function validateEnvironment() {
         <label>
           <span>模拟账户</span>
           <select v-model="accountId" @change="validateEnvironment">
-            <option value="">请选择账户</option>
-            <option value="1">Paper Account #1 · 默认账户</option>
+            <option value="">{{ accountsLoading ? "账户加载中…" : "请选择账户" }}</option>
+            <option v-for="account in accounts" :key="account.id" :value="String(account.id)">
+              {{ account.name }} · 可用现金 {{ account.cash_balance }}
+            </option>
           </select>
         </label>
         <div class="context-note">
           <CircleHelp :size="17" />
-          <span>账户选择控件已接入 paper 账户占位。真实账户、券商连接和自动交易均不在此页面。</span>
+          <span>账户来自当前 quant_db。真实账户、券商连接和自动交易均不在此页面。</span>
         </div>
       </div>
       <div v-if="pageError" class="page-alert page-alert--error" role="alert">
@@ -124,7 +147,7 @@ function validateEnvironment() {
       </div>
       <div class="stage-status">
         <span class="state-dot" />
-        <span>{{ canWrite ? "已选择模拟账户，可进行本地写入" : "等待选择模拟账户" }}</span>
+        <span>{{ canWrite ? "已选择模拟账户，可进行本地写入" : backendAvailable ? "等待选择模拟账户" : "模拟交易后端不可用" }}</span>
       </div>
     </section>
 
@@ -132,12 +155,12 @@ function validateEnvironment() {
       <CircleHelp :size="22" />
       <div>
         <strong>还没有模拟账户上下文</strong>
-        <p>选择 Paper Account #1 后，组合草案、风控、确认和执行控件才会启用。</p>
+        <p>选择模拟账户后，组合草案、风控、确认和执行控件才会启用。</p>
       </div>
     </section>
 
     <section id="paper-operation" class="operation-surface">
-      <PortfolioPlanSection :write-enabled="canWrite" />
+      <PortfolioPlanSection :account-id="accountId ? Number(accountId) : undefined" :write-enabled="canWrite" />
     </section>
   </main>
 </template>

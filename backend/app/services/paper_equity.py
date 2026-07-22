@@ -16,6 +16,7 @@ from app.repositories.trade import (
     PaperTradingRepository,
 )
 from app.schemas.trade import (
+    PaperAccountRead,
     PaperEquityComponentRead,
     PaperEquitySnapshotRead,
 )
@@ -72,6 +73,12 @@ class PaperEquitySnapshotService:
         self.corporate_action_repository = (
             corporate_action_repository or CorporateActionRepository()
         )
+
+    def list_accounts(self, db: Session) -> list[PaperAccountRead]:
+        return [
+            PaperAccountRead.model_validate(account)
+            for account in self.paper_repository.list_accounts(db)
+        ]
 
     def capture(
         self,

@@ -1,17 +1,12 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
+import WorkspaceRoutePage from "./pages/WorkspaceRoutePage.vue";
+
 const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/overview" },
-  { path: "/overview", name: "overview" },
-  { path: "/market", name: "market" },
-  { path: "/factors", name: "factors" },
-  { path: "/backtests", name: "backtests" },
-  { path: "/portfolio", name: "portfolio" },
-  { path: "/paper", name: "paper" },
-  { path: "/quality", name: "quality" },
-  { path: "/operations", name: "operations" },
-  { path: "/alerts", name: "alerts" },
-  { path: "/failures", name: "failures" },
+  ...["overview", "market", "factors", "backtests", "portfolio", "paper", "quality", "operations", "alerts", "failures"].map(
+    (name): RouteRecordRaw => ({ path: `/${name}`, name, component: WorkspaceRoutePage, props: { page: name } }),
+  ),
   { path: "/:pathMatch(.*)*", redirect: "/overview" },
 ];
 

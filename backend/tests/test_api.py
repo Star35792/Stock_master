@@ -106,6 +106,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/portfolio/plans/{plan_id}" in paths
     assert "/api/v1/portfolio/plans/{plan_id}/risk-readiness" in paths
     assert "/api/v1/portfolio/plans/{plan_id}/risk-evaluations" in paths
+    assert "/api/v1/paper-accounts" in paths
     assert "/api/v1/paper-accounts/{account_id}/equity-snapshots" in paths
     assert "/api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}" in paths
     assert "/api/v1/risk-evaluations/{risk_check_id}/confirmations" in paths
@@ -356,6 +357,21 @@ def _paper_equity_snapshot_response() -> dict:
         "access_scope": "local_single_user",
         "components": [],
     }
+
+
+def test_list_paper_accounts_returns_selectable_accounts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        paper_accounts_module.service,
+        "list_accounts",
+        lambda db: [{"id": 1, "name": "本地模拟账户", "cash_balance": "100000.0000"}],
+    )
+
+    response = client.get("/api/v1/paper-accounts")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": 1, "name": "本地模拟账户", "cash_balance": "100000.0000"}
+    ]
 
 
 def test_capture_paper_equity_snapshot_forwards_only_date_and_account(monkeypatch) -> None:

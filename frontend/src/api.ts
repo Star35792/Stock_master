@@ -7,6 +7,7 @@ import type {
   ApiPage,
   FactorDefinition,
   FactorProfile,
+  PaperAccount,
   PortfolioPlan,
   PortfolioPlanCreateRequest,
   PortfolioRiskReadiness,
@@ -15,6 +16,13 @@ import type {
   PaperExecution,
   RiskEvaluation,
 } from "./types";
+
+export async function fetchPaperAccounts(): Promise<PaperAccount[]> {
+  return jsonApi(
+    await fetch("/api/v1/paper-accounts", { headers: { Accept: "application/json" } }),
+    "模拟账户读取失败",
+  );
+}
 
 async function jsonApi<T>(response: Response, message: string): Promise<T> {
   if (!response.ok) {

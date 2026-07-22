@@ -8,6 +8,9 @@ from app.trade import BrokerFill, BrokerOrderRequest
 
 
 class PaperTradingRepository:
+    def list_accounts(self, db: Session) -> list[PaperAccount]:
+        return list(db.scalars(select(PaperAccount).order_by(PaperAccount.name)))
+
     def get_account(self, db: Session, *, account_id: int) -> PaperAccount | None:
         return db.get(PaperAccount, account_id)
 

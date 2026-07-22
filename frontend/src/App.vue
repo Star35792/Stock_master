@@ -10,7 +10,6 @@ import {
   ShieldCheck,
 } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
 
 import {
   fetchOperationsAlerts,
@@ -19,16 +18,9 @@ import {
   fetchOperationsFailures,
   fetchOperationsOverview,
 } from "./api";
-import AlertsSection from "./components/operations/AlertsSection.vue";
 import AppSidebar from "./components/operations/AppSidebar.vue";
 import DashboardHeader from "./components/operations/DashboardHeader.vue";
-import FailuresSection from "./components/operations/FailuresSection.vue";
 import { formatDateTime, sideLabel, sumCounts } from "./components/operations/formatters";
-import MetricGrid from "./components/operations/MetricGrid.vue";
-import PaperTradingSection from "./components/operations/PaperTradingSection.vue";
-import PortfolioPlanSection from "./components/operations/PortfolioPlanSection.vue";
-import QualitySection from "./components/operations/QualitySection.vue";
-import RunTablesSection from "./components/operations/RunTablesSection.vue";
 import type { FailureItem, FailureSectionView, FailureType, SelectedFailure } from "./components/operations/viewTypes";
 import { demoAlerts, demoFailureDetails, demoFailureReport, demoOverview, demoRerunPlans } from "./demoData";
 import type {
@@ -56,8 +48,6 @@ const source = ref<"api" | "demo">("demo");
 const errorMessage = ref<string | null>(null);
 const detailErrorMessage = ref<string | null>(null);
 const limit = ref(5);
-const route = useRoute();
-const activePage = computed(() => String(route.name ?? "overview"));
 
 let activeController: AbortController | null = null;
 let detailController: AbortController | null = null;
@@ -295,48 +285,23 @@ function getDemoRerunPlan() {
         @refresh="loadDashboard"
       />
 
-      <template v-if="activePage === 'overview'">
-        <MetricGrid :cards="snapshotCards" />
-        <AlertsSection :alerts="displayAlerts" />
-        <FailuresSection
+      <RouterView v-slot="{ Component, route: currentRoute }">
+        <component
+          :is="Component"
+          :alerts="displayAlerts"
           :detail-error-message="detailErrorMessage"
           :failure-detail="displayFailureDetail"
+          :failure-sections="failureSections"
           :is-detail-loading="isDetailLoading"
+          :overview="displayOverview"
+          :page="String(currentRoute.name ?? 'overview')"
           :rerun-plan="displayRerunPlan"
-          :sections="failureSections"
           :selected-failure="selectedFailure"
-          @select="selectFailure"
+          :snapshot-cards="snapshotCards"
+          :source="source"
+          @select-failure="selectFailure"
         />
-      </template>
-
-      <section v-else-if="activePage === 'market'" class="page-placeholder">
-        <p class="eyebrow">Market</p>
-        <h1>行情数据</h1>
-        <p>可信行情查询与交易状态将在此处集中展示。</p>
-      </section>
-
-      <QualitySection v-else-if="activePage === 'quality'" :data-quality="displayOverview.data_quality" />
-      <RunTablesSection
-        v-else-if="activePage === 'factors' || activePage === 'backtests'"
-        :backtests="displayOverview.backtests"
-        :factors="displayOverview.factors"
-      />
-      <PortfolioPlanSection v-else-if="activePage === 'portfolio'" :write-enabled="source === 'api'" />
-      <PaperTradingSection v-else-if="activePage === 'paper'" :paper-trading="displayOverview.paper_trading" />
-
-      <template v-else>
-        <AlertsSection v-if="activePage === 'alerts'" :alerts="displayAlerts" />
-        <FailuresSection
-          v-else-if="activePage === 'failures' || activePage === 'operations'"
-          :detail-error-message="detailErrorMessage"
-          :failure-detail="displayFailureDetail"
-          :is-detail-loading="isDetailLoading"
-          :rerun-plan="displayRerunPlan"
-          :sections="failureSections"
-          :selected-failure="selectedFailure"
-          @select="selectFailure"
-        />
-      </template>
+      </RouterView>
     </main>
   </div>
 </template>
