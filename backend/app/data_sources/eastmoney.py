@@ -181,7 +181,7 @@ class EastmoneyDataSource:
             raise ValueError(f"unsupported market: {market}")
         if limit < 1:
             raise ValueError("limit must be positive")
-        page_size = 500
+        page_size = 100
         rows: list[dict[str, object]] = []
         pn = 1
         while len(rows) < limit:

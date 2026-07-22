@@ -385,9 +385,12 @@ class ValuationFactorService:
             current_valuation = None
             current_statement = None
             for bar in bars:
+                # valuation snapshots are end-of-day artifacts (market cap from the
+                # same close), so a same-day snapshot is usable for the bar's
+                # trade_date without lookahead; strategies execute next open.
                 while (
                     valuation_index < len(valuations)
-                    and valuations[valuation_index].trade_date < bar.trade_date
+                    and valuations[valuation_index].trade_date <= bar.trade_date
                 ):
                     current_valuation = valuations[valuation_index]
                     valuation_index += 1
@@ -440,7 +443,7 @@ class ValuationFactorService:
             for bar in bars:
                 while (
                     valuation_index < len(valuations)
-                    and valuations[valuation_index].trade_date < bar.trade_date
+                    and valuations[valuation_index].trade_date <= bar.trade_date
                 ):
                     current_valuation = valuations[valuation_index]
                     valuation_index += 1

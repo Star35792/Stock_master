@@ -186,7 +186,7 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
     )
 
     assert result.rows_by_factor == {
-        "market_cap": 1,
+        "market_cap": 2,
         "earnings_yield": 1,
         "book_to_price": 1,
         "sales_to_price": 1,
@@ -207,13 +207,13 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         (item["factor_name"], item["trade_date"]): item["value"]
         for item in value_repository.values
     }
-    assert ("market_cap", date(2026, 4, 30)) not in values
-    assert values[("market_cap", date(2026, 5, 6))] == Decimal("5000.0000000000")
-    assert values[("earnings_yield", date(2026, 5, 6))] == Decimal("0.0600000000")
-    assert values[("book_to_price", date(2026, 5, 6))] == Decimal("0.1200000000")
-    assert values[("sales_to_price", date(2026, 5, 6))] == Decimal("0.2400000000")
-    assert values[("fcf_yield", date(2026, 5, 6))] == Decimal("0.0400000000")
-    assert values[("ev_to_ebitda", date(2026, 5, 6))] == Decimal("8.6666666667")
+    assert values[("market_cap", date(2026, 4, 30))] == Decimal("5000.0000000000")
+    assert values[("market_cap", date(2026, 5, 6))] == Decimal("4000.0000000000")
+    assert values[("earnings_yield", date(2026, 5, 6))] == Decimal("0.0750000000")
+    assert values[("book_to_price", date(2026, 5, 6))] == Decimal("0.1500000000")
+    assert values[("sales_to_price", date(2026, 5, 6))] == Decimal("0.3000000000")
+    assert values[("fcf_yield", date(2026, 5, 6))] == Decimal("0.0500000000")
+    assert values[("ev_to_ebitda", date(2026, 5, 6))] == Decimal("7.0000000000")
     assert values[("industry_valuation_gap", date(2026, 5, 6))] == Decimal("0E-10")
 
 
