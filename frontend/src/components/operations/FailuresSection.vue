@@ -11,7 +11,7 @@ import type {
   OperationsRerunPlan,
   PaperOrderFailure,
 } from "../../types";
-import { formatDate, formatUnknown, sideLabel } from "./formatters";
+import { formatDate, formatUnknown, sideLabel, statusLabel, strategyLabel } from "./formatters";
 import type { FailureItem, FailureSectionView, FailureType, SelectedFailure } from "./viewTypes";
 
 const props = defineProps<{
@@ -70,7 +70,7 @@ function getFailureTitle(type: FailureType, item: FailureItem) {
 function getFailureSubtitle(type: FailureType, item: FailureItem) {
   if (type === "data_quality_issue") {
     const issue = item as DataQualityFailure;
-    return `${issue.dataset} / ${issue.status} / ${formatDate(issue.trade_date)}`;
+    return `${issue.dataset} / ${statusLabel(issue.status)} / ${formatDate(issue.trade_date)}`;
   }
   if (type === "job") {
     const job = item as JobFailure;
@@ -82,11 +82,11 @@ function getFailureSubtitle(type: FailureType, item: FailureItem) {
   }
   if (type === "backtest_run") {
     const run = item as BacktestRunFailure;
-    return `${run.strategy_name} / ${formatDate(run.start_date)}-${formatDate(run.end_date)}`;
+    return `${strategyLabel(run.strategy_name)} / ${formatDate(run.start_date)}-${formatDate(run.end_date)}`;
   }
 
   const order = item as PaperOrderFailure;
-  return `${order.status} / ${order.rejection_reason ?? "未给出拒单原因"}`;
+  return `${statusLabel(order.status)} / ${order.rejection_reason ?? "未给出拒单原因"}`;
 }
 
 function getDetailRows(detail: OperationsFailureDetail | null) {
@@ -146,7 +146,7 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
         <article v-for="section in filteredSections" :key="section.type" class="failure-section-card">
           <header>
             <h3>{{ section.title }}</h3>
-            <span>{{ section.total }} total<span v-if="section.hasMore"> · has more</span></span>
+            <span>共 {{ section.total }} 条<span v-if="section.hasMore"> · 还有更多</span></span>
           </header>
 
           <button
@@ -171,7 +171,7 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
       <aside class="detail-panel">
         <header>
           <div>
-            <p class="eyebrow">Failure Detail</p>
+            <p class="eyebrow">失败详情</p>
             <h3>{{ selectedFailure?.label ?? "选择一个失败项" }}</h3>
           </div>
           <Loader2 v-if="isDetailLoading" class="spin" :size="18" aria-hidden="true" />

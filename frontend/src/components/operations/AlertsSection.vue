@@ -2,7 +2,7 @@
 import { AlertTriangle } from "@lucide/vue";
 
 import type { OperationsAlertSummary } from "../../types";
-import { formatNumber, severityClass } from "./formatters";
+import { formatNumber, severityClass, severityLabel } from "./formatters";
 
 defineProps<{
   alerts: OperationsAlertSummary;
@@ -24,7 +24,7 @@ function alertClass(severity: string) {
     <div class="alert-grid">
       <article v-for="alert in alerts.items" :key="alert.key" :class="alertClass(alert.severity)">
         <div>
-          <span :class="severityClass(alert.severity)">{{ alert.severity }}</span>
+          <span :class="severityClass(alert.severity)">{{ severityLabel(alert.severity) }}</span>
           <strong>{{ alert.title }}</strong>
         </div>
         <p>{{ alert.detail }}</p>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Search, Star } from "@lucide/vue";
+import { securityTypeLabel } from "../../components/operations/formatters";
 
 export interface SecurityItem {
   symbol: string;
@@ -64,7 +65,7 @@ const emit = defineEmits<{
             </span>
           </button>
           <span class="market-security-item__meta">
-            <small>{{ item.security_type.toUpperCase() }}</small>
+            <small>{{ securityTypeLabel(item.security_type) }}</small>
             <button
               type="button"
               class="market-icon-button"

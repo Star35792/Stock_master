@@ -2,7 +2,7 @@
 import { BarChart3, LineChart } from "@lucide/vue";
 
 import type { OperationsOverview } from "../../types";
-import { formatDate, formatDateTime, formatNumber, formatPercent, statusClass } from "./formatters";
+import { formatDate, formatDateTime, formatNumber, formatPercent, statusClass, statusLabel, strategyLabel } from "./formatters";
 
 defineProps<{
   factors: OperationsOverview["factors"];
@@ -33,7 +33,7 @@ defineProps<{
           <tr v-for="run in factors.latest_runs" :key="run.id">
             <td>{{ run.factor_name }}</td>
             <td>{{ run.factor_version }}</td>
-            <td><span :class="statusClass(run.status)">{{ run.status }}</span></td>
+            <td><span :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span></td>
             <td>{{ formatDate(run.input_start_date) }} - {{ formatDate(run.input_end_date) }}</td>
             <td>{{ formatNumber(run.rows_written) }}</td>
             <td>{{ formatDateTime(run.finished_at) }}</td>
@@ -64,8 +64,8 @@ defineProps<{
         <tbody>
           <tr v-for="run in backtests.latest_runs" :key="run.id">
             <td>{{ run.name }}</td>
-            <td>{{ run.strategy_name }}</td>
-            <td><span :class="statusClass(run.status)">{{ run.status }}</span></td>
+            <td>{{ strategyLabel(run.strategy_name) }}</td>
+            <td><span :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span></td>
             <td>{{ formatDate(run.start_date) }} - {{ formatDate(run.end_date) }}</td>
             <td>{{ formatNumber(run.final_equity) }}</td>
             <td>{{ formatPercent(run.total_return) }}</td>

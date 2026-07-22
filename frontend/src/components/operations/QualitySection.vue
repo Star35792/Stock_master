@@ -2,7 +2,7 @@
 import { ShieldCheck } from "@lucide/vue";
 
 import type { OperationsOverview } from "../../types";
-import { barWidth, countEntries, formatDate, severityClass } from "./formatters";
+import { barWidth, countEntries, formatDate, severityClass, severityLabel, statusLabel } from "./formatters";
 
 defineProps<{
   dataQuality: OperationsOverview["data_quality"];
@@ -24,7 +24,7 @@ defineProps<{
           :key="status"
           class="count-row"
         >
-          <span>{{ status }}</span>
+          <span>{{ statusLabel(status) }}</span>
           <div class="bar-track">
             <i :style="{ width: barWidth(count, dataQuality.issue_status_counts) }" />
           </div>
@@ -49,7 +49,7 @@ defineProps<{
               <td>{{ issue.symbol ?? "-" }}</td>
               <td>{{ issue.dataset }}</td>
               <td>{{ issue.issue_type }}</td>
-              <td><span :class="severityClass(issue.severity)">{{ issue.severity }}</span></td>
+              <td><span :class="severityClass(issue.severity)">{{ severityLabel(issue.severity) }}</span></td>
               <td>{{ formatDate(issue.trade_date) }}</td>
             </tr>
           </tbody>

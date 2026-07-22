@@ -10,6 +10,7 @@ import {
   ShieldCheck,
 } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import {
   fetchOperationsAlerts,
@@ -48,6 +49,9 @@ const source = ref<"api" | "demo">("demo");
 const errorMessage = ref<string | null>(null);
 const detailErrorMessage = ref<string | null>(null);
 const limit = ref(5);
+const route = useRoute();
+const activePage = computed(() => String(route.name ?? "overview"));
+const usesOwnPageHeader = computed(() => ["market", "factors", "paper"].includes(activePage.value));
 
 let activeController: AbortController | null = null;
 let detailController: AbortController | null = null;
@@ -277,10 +281,12 @@ function getDemoRerunPlan() {
 
     <main class="workspace">
       <DashboardHeader
+        v-if="!usesOwnPageHeader"
         v-model:limit="limit"
         :error-message="errorMessage"
         :generated-at="generatedAt"
         :is-loading="isLoading"
+        :page="activePage"
         :source="source"
         @refresh="loadDashboard"
       />

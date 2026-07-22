@@ -1,7 +1,22 @@
 <script setup lang="ts">
 import { DatabaseZap } from "@lucide/vue";
-import type { Component } from "vue";
-import { RouterLink } from "vue-router";
+import { nextTick, ref, watch, type Component } from "vue";
+import { RouterLink, useRoute } from "vue-router";
+
+const route = useRoute();
+const navList = ref<HTMLElement | null>(null);
+
+watch(
+  () => route.name,
+  async () => {
+    await nextTick();
+    navList.value?.querySelector<HTMLElement>(".nav-link.is-active")?.scrollIntoView({
+      block: "nearest",
+      inline: "center",
+    });
+  },
+  { immediate: true },
+);
 
 defineProps<{
   navItems: Array<{
@@ -22,7 +37,7 @@ defineProps<{
       </div>
     </div>
 
-    <nav class="nav-list" aria-label="Dashboard sections">
+    <nav ref="navList" class="nav-list" aria-label="量化工作台页面">
       <RouterLink
         v-for="item in navItems"
         :key="item.id"

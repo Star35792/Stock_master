@@ -33,6 +33,7 @@ const accountId = ref("");
 const accounts = ref<PaperAccount[]>([]);
 const accountsLoading = ref(false);
 const backendAvailable = ref(false);
+const tradingBusy = ref(false);
 const pageError = ref<string | null>(null);
 
 const canWrite = computed(() => backendAvailable.value && environment.value === "paper" && Boolean(accountId.value));
@@ -95,14 +96,14 @@ onMounted(() => void loadAccounts());
       <div class="context-grid">
         <label>
           <span>环境</span>
-          <select v-model="environment" @change="validateEnvironment">
+          <select v-model="environment">
             <option value="paper">Paper · 本地模拟</option>
-            <option value="live">Live · 未开放</option>
+            <option value="live" disabled>Live · 未开放</option>
           </select>
         </label>
         <label>
           <span>模拟账户</span>
-          <select v-model="accountId" @change="validateEnvironment">
+          <select v-model="accountId" :disabled="accountsLoading || tradingBusy" @change="validateEnvironment">
             <option value="">{{ accountsLoading ? "账户加载中…" : "请选择账户" }}</option>
             <option v-for="account in accounts" :key="account.id" :value="String(account.id)">
               {{ account.name }} · 可用现金 {{ account.cash_balance }}
@@ -160,7 +161,11 @@ onMounted(() => void loadAccounts());
     </section>
 
     <section id="paper-operation" class="operation-surface">
-      <PortfolioPlanSection :account-id="accountId ? Number(accountId) : undefined" :write-enabled="canWrite" />
+      <PortfolioPlanSection
+        :account-id="accountId ? Number(accountId) : undefined"
+        :write-enabled="canWrite"
+        @busy-change="tradingBusy = $event"
+      />
     </section>
   </main>
 </template>

@@ -24,8 +24,10 @@ import type {
   PaperExecution,
   RiskEvaluation,
 } from "../../types";
+import { historyStatusLabel, statusLabel } from "./formatters";
 
 const props = defineProps<{ writeEnabled: boolean; accountId?: number }>();
+const emit = defineEmits<{ busyChange: [value: boolean] }>();
 
 const newAsset = (): PortfolioAssetInput => ({
   symbol: "",
@@ -78,6 +80,17 @@ let revocationIdempotencyKey: string | null = null;
 let executionIdempotencyKey: string | null = null;
 let pendingIdempotencyKey: string | null = null;
 let clockTimer: number | undefined;
+let accountGeneration = 0;
+
+const accountBusy = computed(() =>
+  isCheckingReadiness.value ||
+  isCapturingEquity.value ||
+  isEvaluatingRisk.value ||
+  isApproving.value ||
+  isRevokingApproval.value ||
+  isExecuting.value ||
+  isLoadingApproval.value,
+);
 
 const expectedConfirmationPhrase = computed(() =>
   riskEvaluation.value ? `CONFIRM PAPER EXECUTION ${riskEvaluation.value.check_id}` : "",
@@ -117,6 +130,7 @@ watch(
 watch(
   () => props.accountId,
   (value) => {
+    accountGeneration += 1;
     paperAccountId.value = value ? String(value) : "";
     readiness.value = null;
     equitySnapshot.value = null;
@@ -125,6 +139,8 @@ watch(
     execution.value = null;
   },
 );
+
+watch(accountBusy, (value) => emit("busyChange", value), { immediate: true });
 
 function makeIdempotencyKey() {
   return crypto.randomUUID();
@@ -178,21 +194,25 @@ async function loadPlan() {
 async function captureEquity() {
   if (!plan.value || !readiness.value?.ready_for_risk_check || isCapturingEquity.value) return;
   const accountId = Number(paperAccountId.value);
+  const generation = accountGeneration;
   isCapturingEquity.value = true;
   errorMessage.value = null;
   equityIdempotencyKey ??= makeIdempotencyKey();
   try {
-    equitySnapshot.value = await capturePaperEquitySnapshot(
+    const result = await capturePaperEquitySnapshot(
       accountId,
       plan.value.as_of_date,
       equityIdempotencyKey,
     );
+    if (generation !== accountGeneration) return;
+    equitySnapshot.value = result;
     riskEvaluation.value = null;
     approval.value = null;
     execution.value = null;
     confirmationPhrase.value = "";
     equityIdempotencyKey = null;
   } catch (error) {
+    if (generation !== accountGeneration) return;
     errorMessage.value = error instanceof Error ? error.message : "账户净值快照创建失败";
   } finally {
     isCapturingEquity.value = false;
@@ -202,21 +222,25 @@ async function captureEquity() {
 async function evaluateRisk() {
   if (!plan.value || !equitySnapshot.value || isEvaluatingRisk.value) return;
   const accountId = Number(paperAccountId.value);
+  const generation = accountGeneration;
   isEvaluatingRisk.value = true;
   errorMessage.value = null;
   riskIdempotencyKey ??= makeIdempotencyKey();
   try {
-    riskEvaluation.value = await createRiskEvaluation(
+    const result = await createRiskEvaluation(
       plan.value.plan_id,
       accountId,
       equitySnapshot.value.snapshot_id,
       riskIdempotencyKey,
     );
+    if (generation !== accountGeneration) return;
+    riskEvaluation.value = result;
     approval.value = null;
     execution.value = null;
     confirmationPhrase.value = "";
     riskIdempotencyKey = null;
   } catch (error) {
+    if (generation !== accountGeneration) return;
     errorMessage.value = error instanceof Error ? error.message : "正式风险评估失败";
   } finally {
     isEvaluatingRisk.value = false;
@@ -231,18 +255,22 @@ async function confirmPaperExecution() {
     isApproving.value
   ) return;
   isApproving.value = true;
+  const generation = accountGeneration;
   errorMessage.value = null;
   approvalIdempotencyKey ??= makeIdempotencyKey();
   try {
-    approval.value = await createPaperExecutionApproval(
+    const result = await createPaperExecutionApproval(
       riskEvaluation.value.check_id,
       riskEvaluation.value.evaluation_hash,
       confirmationPhrase.value,
       approvalIdempotencyKey,
     );
+    if (generation !== accountGeneration) return;
+    approval.value = result;
     execution.value = null;
     approvalIdempotencyKey = null;
   } catch (error) {
+    if (generation !== accountGeneration) return;
     errorMessage.value = error instanceof Error ? error.message : "模拟执行确认失败";
   } finally {
     isApproving.value = false;
@@ -260,19 +288,26 @@ async function executeApprovedPaperBatch() {
     `执行 ${approval.value.order_summary.length} 笔本地模拟交易？卖单先于买单，且不会向券商、交易所或真实账户发送订单。`,
   );
   if (!confirmed) return;
+  const activeApproval = approval.value;
   isExecuting.value = true;
+  const generation = accountGeneration;
   errorMessage.value = null;
   executionIdempotencyKey ??= makeIdempotencyKey();
   try {
-    execution.value = await executePaperApproval(
-      approval.value.approval_id,
-      approval.value.approval_hash,
+    const result = await executePaperApproval(
+      activeApproval.approval_id,
+      activeApproval.approval_hash,
       executionIdempotencyKey,
     );
+    if (generation !== accountGeneration) return;
+    execution.value = result;
     executionIdempotencyKey = null;
   } catch (error) {
+    if (generation !== accountGeneration) return;
     try {
-      execution.value = await fetchPaperExecutionByApproval(approval.value.approval_id);
+      const result = await fetchPaperExecutionByApproval(activeApproval.approval_id);
+      if (generation !== accountGeneration) return;
+      execution.value = result;
       executionIdempotencyKey = null;
     } catch {
       errorMessage.value = error instanceof Error ? error.message : "模拟交易执行失败";
@@ -289,9 +324,11 @@ async function loadApproval() {
     return;
   }
   isLoadingApproval.value = true;
+  const generation = accountGeneration;
   errorMessage.value = null;
   try {
     const loaded = await fetchPaperExecutionApproval(approvalId);
+    if (generation !== accountGeneration) return;
     if (plan.value && loaded.plan_id !== plan.value.plan_id) {
       throw new Error("确认记录不属于当前组合草案");
     }
@@ -305,6 +342,7 @@ async function loadApproval() {
       execution.value = await fetchPaperExecutionByApproval(loaded.approval_id);
     }
   } catch (error) {
+    if (generation !== accountGeneration) return;
     errorMessage.value = error instanceof Error ? error.message : "确认记录读取失败";
   } finally {
     isLoadingApproval.value = false;
@@ -314,16 +352,20 @@ async function loadApproval() {
 async function revokeApproval() {
   if (!approval.value || displayedApprovalStatus.value !== "pending" || isRevokingApproval.value) return;
   isRevokingApproval.value = true;
+  const generation = accountGeneration;
   errorMessage.value = null;
   revocationIdempotencyKey ??= makeIdempotencyKey();
   try {
-    approval.value = await revokePaperExecutionApproval(
+    const result = await revokePaperExecutionApproval(
       approval.value.approval_id,
       "operator cancelled",
       revocationIdempotencyKey,
     );
+    if (generation !== accountGeneration) return;
+    approval.value = result;
     revocationIdempotencyKey = null;
   } catch (error) {
+    if (generation !== accountGeneration) return;
     errorMessage.value = error instanceof Error ? error.message : "模拟执行确认撤销失败";
   } finally {
     isRevokingApproval.value = false;
@@ -349,10 +391,14 @@ async function checkReadiness() {
     return;
   }
   isCheckingReadiness.value = true;
+  const generation = accountGeneration;
   errorMessage.value = null;
   try {
-    readiness.value = await fetchPortfolioRiskReadiness(plan.value.plan_id, accountId);
+    const result = await fetchPortfolioRiskReadiness(plan.value.plan_id, accountId);
+    if (generation !== accountGeneration) return;
+    readiness.value = result;
   } catch (error) {
+    if (generation !== accountGeneration) return;
     errorMessage.value = error instanceof Error ? error.message : "风险前数据核对失败";
   } finally {
     isCheckingReadiness.value = false;
@@ -512,7 +558,7 @@ const reasonLabels: Record<string, string> = {
               </div>
               <div v-if="equitySnapshot" class="risk-fact-row">
                 <span>净值快照 #{{ equitySnapshot.snapshot_id }}</span>
-                <span>观测期 {{ equitySnapshot.observation_count }} 日 · {{ equitySnapshot.history_status }}</span>
+                <span>观测期 {{ equitySnapshot.observation_count }} 日 · {{ historyStatusLabel(equitySnapshot.history_status) }}</span>
                 <span>回撤 {{ formatPercent(equitySnapshot.drawdown_since_monitoring_start) }}</span>
               </div>
               <div v-if="riskEvaluation" class="risk-evaluation-result">
@@ -551,7 +597,7 @@ const reasonLabels: Record<string, string> = {
                     <div class="approval-heading">
                       <ShieldCheck :size="18" aria-hidden="true" />
                       <strong>确认 #{{ approval.approval_id }}</strong>
-                      <span :class="['status', `status-${displayedApprovalStatus}`]">{{ displayedApprovalStatus }}</span>
+                      <span :class="['status', `status-${displayedApprovalStatus}`]">{{ statusLabel(displayedApprovalStatus ?? "pending") }}</span>
                     </div>
                     <div class="approval-facts">
                       <span>评估 {{ hashFingerprint(approval.evaluation_hash) }}</span>

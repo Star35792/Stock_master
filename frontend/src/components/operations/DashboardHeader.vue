@@ -1,13 +1,27 @@
 <script setup lang="ts">
 import { Loader2, RefreshCw } from "@lucide/vue";
+import { computed } from "vue";
 
-defineProps<{
+const props = defineProps<{
+  page: string;
   generatedAt: string;
   source: "api" | "demo";
   errorMessage: string | null;
   isLoading: boolean;
   limit: number;
 }>();
+
+const pageCopy = computed(() => ({
+  overview: { eyebrow: "STOCK MASTER / OVERVIEW", title: "量化工作台总览", scope: "只读概览" },
+  quality: { eyebrow: "DATA QUALITY", title: "数据质量", scope: "只读诊断" },
+  backtests: { eyebrow: "RESEARCH RUNS", title: "回测与运行记录", scope: "只读研究" },
+  portfolio: { eyebrow: "PORTFOLIO DRAFT", title: "组合草案", scope: "模拟草案" },
+  operations: { eyebrow: "OPERATIONS", title: "运维中心", scope: "只读诊断" },
+  alerts: { eyebrow: "ALERTS", title: "告警中心", scope: "只读诊断" },
+  failures: { eyebrow: "FAILURES", title: "失败中心", scope: "只读诊断" },
+} as Record<string, { eyebrow: string; title: string; scope: string }>)[props.page] ?? { eyebrow: "STOCK MASTER", title: "量化工作台", scope: "只读" });
+
+const showLimit = computed(() => ["overview", "quality", "backtests", "operations", "failures"].includes(props.page));
 
 const emit = defineEmits<{
   refresh: [];
@@ -18,12 +32,12 @@ const emit = defineEmits<{
 <template>
   <header id="overview" class="topbar">
     <div>
-      <p class="eyebrow">V6 Operations Console</p>
-      <h1>运维工作台</h1>
+      <p class="eyebrow">{{ pageCopy.eyebrow }}</p>
+      <h1>{{ pageCopy.title }}</h1>
     </div>
 
     <div class="toolbar">
-      <div class="segmented" aria-label="记录数量">
+      <div v-if="showLimit" class="segmented" aria-label="记录数量">
         <button :class="{ active: limit === 5 }" type="button" @click="emit('update:limit', 5)">5</button>
         <button :class="{ active: limit === 10 }" type="button" @click="emit('update:limit', 10)">10</button>
         <button :class="{ active: limit === 20 }" type="button" @click="emit('update:limit', 20)">20</button>
@@ -36,9 +50,9 @@ const emit = defineEmits<{
   </header>
 
   <section class="status-strip" aria-label="Connection status">
-    <span :class="['source-pill', source]">{{ source === "api" ? "Live API" : "Demo Data" }}</span>
+    <span :class="['source-pill', source]">{{ source === "api" ? "API 已连接" : "演示数据" }}</span>
     <span>生成时间 {{ generatedAt }}</span>
-    <span class="readonly-pill">只读诊断</span>
+    <span class="readonly-pill">{{ pageCopy.scope }}</span>
     <span v-if="errorMessage" class="inline-error">{{ errorMessage }}</span>
   </section>
 </template>

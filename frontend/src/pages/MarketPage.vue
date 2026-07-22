@@ -2,6 +2,7 @@
 import { AlertTriangle, BarChart3, CircleHelp, Star } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 
+import { formatPctChange, qualityStatusLabel, securityTypeLabel } from "../components/operations/formatters";
 import MarketBarsPanel, { type DailyBarItem } from "./components/MarketBarsPanel.vue";
 import MarketSearchPanel, { type SecurityItem } from "./components/MarketSearchPanel.vue";
 import WatchlistPanel from "./components/WatchlistPanel.vue";
@@ -118,8 +119,8 @@ onMounted(() => { void searchSecurities(); });
         <section class="market-summary market-panel">
           <div v-if="!summary" class="market-empty"><CircleHelp :size="22" /><span>{{ selectedSymbol ? "正在加载行情摘要" : "从左侧选择证券后查看摘要" }}</span></div>
           <template v-else>
-            <header class="market-summary__header"><div><span class="market-kicker">行情摘要</span><h2>{{ selectedLabel }}</h2><p>{{ summary.security_type.toUpperCase() }} · {{ summary.exchange }} · {{ summary.industry || "行业未标注" }}</p></div><span class="market-data-note">{{ summary.data_note }}</span></header>
-            <div v-if="summary.latest" class="market-summary__metrics"><div><span>最新收盘</span><strong>{{ summary.latest.close }}</strong></div><div><span>涨跌幅</span><strong>{{ summary.latest.pct_change ?? "-" }}</strong></div><div><span>交易日</span><strong>{{ summary.latest_trade_date }}</strong></div><div><span>质量状态</span><strong>{{ summary.latest.quality_status }}</strong></div></div>
+            <header class="market-summary__header"><div><span class="market-kicker">行情摘要</span><h2>{{ selectedLabel }}</h2><p>{{ securityTypeLabel(summary.security_type) }} · {{ summary.exchange }} · {{ summary.industry || "行业未标注" }}</p></div><span class="market-data-note">{{ summary.data_note }}</span></header>
+            <div v-if="summary.latest" class="market-summary__metrics"><div><span>最新收盘</span><strong>{{ summary.latest.close }}</strong></div><div><span>涨跌幅</span><strong>{{ formatPctChange(summary.latest.pct_change) }}</strong></div><div><span>交易日</span><strong>{{ summary.latest_trade_date }}</strong></div><div><span>质量状态</span><strong>{{ qualityStatusLabel(summary.latest.quality_status) }}</strong></div></div>
             <div v-else class="market-empty">暂无可信日线摘要，当前证券不能提供可用的本地行情快照。</div>
           </template>
         </section>

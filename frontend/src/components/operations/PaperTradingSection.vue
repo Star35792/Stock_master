@@ -2,7 +2,7 @@
 import { PlayCircle } from "@lucide/vue";
 
 import type { OperationsOverview } from "../../types";
-import { formatDate, formatNumber, sideLabel, statusClass } from "./formatters";
+import { formatDate, formatNumber, sideLabel, statusClass, statusLabel } from "./formatters";
 
 defineProps<{
   paperTrading: OperationsOverview["paper_trading"];
@@ -48,7 +48,7 @@ defineProps<{
             <td>{{ order.symbol }}</td>
             <td>{{ sideLabel(order.side) }}</td>
             <td>{{ formatNumber(order.order_quantity) }}</td>
-            <td><span :class="statusClass(order.status)">{{ order.status }}</span></td>
+            <td><span :class="statusClass(order.status)">{{ statusLabel(order.status) }}</span></td>
             <td>{{ formatDate(order.trade_date) }}</td>
             <td>{{ order.rejection_reason ?? "-" }}</td>
           </tr>
