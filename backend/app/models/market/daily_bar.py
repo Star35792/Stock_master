@@ -5,11 +5,10 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     Date,
-    ForeignKey,
-    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     UniqueConstraint,
     text,
@@ -24,7 +23,6 @@ class DailyBar(TimestampMixin, Base):
     __tablename__ = "daily_bar"
     __table_args__ = (
         UniqueConstraint("symbol", "trade_date", "adjust_type"),
-        ForeignKeyConstraint(["symbol"], ["market.security.symbol"]),
         CheckConstraint(
             "adjust_type in ('none', 'qfq', 'hfq')",
             name="ck_daily_bar_adjust_type",
@@ -68,7 +66,9 @@ class DailyBar(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_daily_bar_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     security_type: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -93,4 +93,4 @@ class DailyBar(TimestampMixin, Base):
         String(20), nullable=False, server_default=text("'suspect'")
     )
     is_suspect: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
-    selected_raw_id: Mapped[int | None] = mapped_column(ForeignKey("raw.daily_bar.id"))
+    selected_raw_id: Mapped[int | None] = mapped_column(BigInteger)

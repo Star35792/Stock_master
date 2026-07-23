@@ -1,8 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, Index, Integer, Numeric, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, Date, Index, Integer, Numeric, Sequence, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -23,14 +22,16 @@ class AlternativeDataSnapshot(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_alternative_data_snapshot_id_seq"), primary_key=True
+    )
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     item_key: Mapped[str] = mapped_column(String(150), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(20))
     rank: Mapped[int | None] = mapped_column(Integer)
     value: Mapped[Decimal | None] = mapped_column(Numeric(30, 10))
-    attributes: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    attributes: Mapped[dict] = mapped_column(JSON, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
 
@@ -48,7 +49,9 @@ class IndexConstituentSnapshot(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_index_constituent_snapshot_id_seq"), primary_key=True
+    )
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     index_symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     member_symbol: Mapped[str] = mapped_column(String(20), nullable=False)

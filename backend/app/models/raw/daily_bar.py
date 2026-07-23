@@ -2,18 +2,18 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -45,8 +45,8 @@ class RawDailyBar(Base):
         {"schema": "raw"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    batch_id: Mapped[int] = mapped_column(ForeignKey("raw.import_batch.id"), nullable=False)
+    id: Mapped[int] = mapped_column(BigInteger, Sequence("raw_daily_bar_id_seq"), primary_key=True)
+    batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     source_priority: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -66,7 +66,7 @@ class RawDailyBar(Base):
     amount: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     amplitude: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
-    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON)
     row_hash: Mapped[str | None] = mapped_column(String(64))
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

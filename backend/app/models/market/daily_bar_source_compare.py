@@ -6,9 +6,9 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Numeric,
+    Sequence,
     String,
     Text,
     func,
@@ -27,14 +27,16 @@ class DailyBarSourceCompare(Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_daily_bar_source_compare_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     adjust_type: Mapped[str] = mapped_column(String(10), nullable=False)
     source_a: Mapped[str] = mapped_column(String(50), nullable=False)
     source_b: Mapped[str] = mapped_column(String(50), nullable=False)
-    raw_id_a: Mapped[int] = mapped_column(ForeignKey("raw.daily_bar.id"), nullable=False)
-    raw_id_b: Mapped[int] = mapped_column(ForeignKey("raw.daily_bar.id"), nullable=False)
+    raw_id_a: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    raw_id_b: Mapped[int] = mapped_column(BigInteger, nullable=False)
     close_diff: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     close_diff_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     volume_diff_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))

@@ -1,8 +1,17 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, Index, Integer, Numeric, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    Date,
+    Index,
+    Integer,
+    Numeric,
+    Sequence,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -29,7 +38,9 @@ class FinancialStatement(TimestampMixin, Base):
         {"schema": "fundamental"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("fundamental_financial_statement_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     statement_type: Mapped[str] = mapped_column(String(20), nullable=False)
     period: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -38,7 +49,7 @@ class FinancialStatement(TimestampMixin, Base):
     report_date: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     currency: Mapped[str] = mapped_column(String(10), nullable=False)
-    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
 
@@ -57,7 +68,9 @@ class FinancialIndicator(TimestampMixin, Base):
         {"schema": "fundamental"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("fundamental_financial_indicator_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     report: Mapped[str] = mapped_column(String(10), nullable=False)
     ability: Mapped[str] = mapped_column(String(30), nullable=False)

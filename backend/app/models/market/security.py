@@ -1,6 +1,15 @@
 from datetime import date
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, Index, String, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    Index,
+    Sequence,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -25,7 +34,9 @@ class Security(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_security_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     raw_symbol: Mapped[str | None] = mapped_column(String(30))
     name: Mapped[str] = mapped_column(String(100), nullable=False)

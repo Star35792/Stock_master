@@ -3,21 +3,21 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -37,12 +37,12 @@ class BacktestRun(CreatedAtMixin, Base):
         {"schema": "strategy"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("strategy_backtest_run_id_seq"), primary_key=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    parameters: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
     data_version: Mapped[str] = mapped_column(String(100), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -69,10 +69,10 @@ class BacktestTradeRecord(CreatedAtMixin, Base):
         {"schema": "strategy"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    run_id: Mapped[int] = mapped_column(
-        ForeignKey("strategy.backtest_run.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("strategy_backtest_trade_id_seq"), primary_key=True
     )
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     signal_date: Mapped[date] = mapped_column(Date, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -92,10 +92,10 @@ class BacktestEquity(CreatedAtMixin, Base):
         {"schema": "strategy"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    run_id: Mapped[int] = mapped_column(
-        ForeignKey("strategy.backtest_run.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("strategy_backtest_equity_id_seq"), primary_key=True
     )
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     cash: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     market_value: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
@@ -110,10 +110,10 @@ class BacktestPosition(CreatedAtMixin, Base):
         {"schema": "strategy"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    run_id: Mapped[int] = mapped_column(
-        ForeignKey("strategy.backtest_run.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("strategy_backtest_position_id_seq"), primary_key=True
     )
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -128,10 +128,10 @@ class BacktestPerformance(CreatedAtMixin, Base):
         {"schema": "strategy"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    run_id: Mapped[int] = mapped_column(
-        ForeignKey("strategy.backtest_run.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("strategy_backtest_performance_id_seq"), primary_key=True
     )
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     total_return: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
     annualized_return: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
     maximum_drawdown: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
@@ -142,7 +142,7 @@ class BacktestPerformance(CreatedAtMixin, Base):
     profit_loss_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
     turnover_rate: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
     total_commission: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
-    symbol_contributions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    industry_exposure: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    style_exposure: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    symbol_contributions: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    industry_exposure: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    style_exposure: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)

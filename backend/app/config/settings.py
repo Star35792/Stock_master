@@ -24,11 +24,7 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_code_version: str = Field(default_factory=source_code_version)
 
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-    postgres_db: str = "quant_db"
-    postgres_user: str = "quant"
-    postgres_password: str = Field(default="quant_password", repr=False)
+    metadata_db_path: str = "data/stock_master.duckdb"
 
     redis_url_override: str | None = Field(default=None, alias="REDIS_URL", repr=False)
     redis_host: str = "localhost"
@@ -43,7 +39,19 @@ class Settings(BaseSettings):
     hithink_finance_base_url: str = "https://fuyao.aicubes.cn"
     hithink_finance_timeout_seconds: int = 30
     hithink_dump_cache_dir: str = "data/hithink_dumps"
-    data_lake_root: str = "data/lake"
+    data_lake_root: str = "data/warm"
+    # When true, price-based factor services read forward-adjusted bars from the
+    # materialized curated/prices_qfq Parquet instead of the ORM daily_bar table.
+    # Only qfq is served by the curated reader; other adjust types still use the
+    # ORM path regardless of this flag.
+    factor_reads_curated: bool = False
+
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = Field(default="stock_master", repr=False)
+    minio_secret_key: str = Field(default="stock_master_dev_secret", repr=False)
+    minio_bucket: str = "stock-master"
+    minio_secure: bool = False
+
     eastmoney_timeout_seconds: int = 15
     eastmoney_retries: int = 2
     xueqiu_cookie: str | None = Field(default=None, repr=False)
@@ -51,11 +59,7 @@ class Settings(BaseSettings):
 
     @cached_property
     def database_url(self) -> str:
-        return (
-            "postgresql+psycopg://"
-            f"{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+        return f"duckdb:///{self.metadata_db_path}"
 
     @cached_property
     def redis_url(self) -> str:

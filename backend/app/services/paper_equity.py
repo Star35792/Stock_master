@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
+from app.database.transaction import idempotent_write
 from app.repositories.market import (
     CorporateActionRepository,
     DailyBarRepository,
@@ -284,7 +285,7 @@ class PaperEquitySnapshotService:
             "request_hash": request_hash,
         }
         try:
-            with db.begin_nested():
+            with idempotent_write(db):
                 snapshot = self.equity_repository.save(
                     db,
                     snapshot_values=snapshot_values,

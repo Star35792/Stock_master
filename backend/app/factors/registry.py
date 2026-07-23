@@ -38,8 +38,8 @@ from app.services.earnings_revision_factors import (
     SUPPORTED_SECURITY_TYPES as EARNINGS_TYPES,
 )
 from app.services.financial_factors import (
-    FINANCIAL_FACTOR_SPECS,
     FACTOR_VERSION as FINANCIAL_VERSION,
+    FINANCIAL_FACTOR_SPECS,
     SUPPORTED_SECURITY_TYPES as FINANCIAL_TYPES,
 )
 from app.services.industry_factors import (

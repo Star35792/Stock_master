@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
+from app.database.transaction import idempotent_write, retry_on_conflict
 from app.repositories.trade import (
     PaperExecutionApprovalRepository,
     PaperExecutionBatchRepository,
@@ -86,6 +87,27 @@ class PaperExecutionService:
         )
 
     def execute(
+        self,
+        db: Session,
+        *,
+        approval_id: int,
+        expected_approval_hash: str,
+        idempotency_key: str,
+    ) -> PaperExecutionRead:
+        # DuckDB has no row locks: concurrent executors racing on the same
+        # account abort the loser with a write conflict. Retry so the loser
+        # re-reads the winner's committed batch and replays it idempotently.
+        return retry_on_conflict(
+            db,
+            lambda: self._execute_once(
+                db,
+                approval_id=approval_id,
+                expected_approval_hash=expected_approval_hash,
+                idempotency_key=idempotency_key,
+            ),
+        )
+
+    def _execute_once(
         self,
         db: Session,
         *,
@@ -270,7 +292,7 @@ class PaperExecutionService:
             "completed_at": completed_at,
         }
         try:
-            with db.begin_nested():
+            with idempotent_write(db):
                 batch = self.execution_repository.save(db, values=values)
                 results = []
                 for item in planned:
@@ -470,7 +492,7 @@ class PaperExecutionService:
             }
         )
         try:
-            with db.begin_nested():
+            with idempotent_write(db):
                 batch = self.execution_repository.save(
                     db,
                     values={

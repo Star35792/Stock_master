@@ -32,7 +32,6 @@ class AdjustmentBuildService:
             "qfq_start_date": qfq_start_date,
         }
         try:
-            db.execute(text("SET LOCAL work_mem = '512MB'"))
             db.execute(text(_DELETE_FACTORS_SQL), params)
             factor_result = db.execute(text(_BUILD_FACTORS_SQL), params)
             qfq_result = db.execute(text(_BUILD_QFQ_BARS_SQL), params)

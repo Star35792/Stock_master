@@ -28,6 +28,14 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Codegraph index
+.codegraph/
+
+# Debug/data exports
+llms_full.txt
+backend/*.SZ
+backend/*.SH
+
 # IDE
 .vscode/
 .idea/

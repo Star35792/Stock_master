@@ -3,18 +3,18 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -63,13 +63,13 @@ class PaperExecutionApproval(TimestampMixin, Base):
         {"schema": "trade"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    risk_check_id: Mapped[int] = mapped_column(ForeignKey("risk.risk_check.id"), nullable=False)
-    plan_id: Mapped[int] = mapped_column(ForeignKey("portfolio.portfolio_plan.id"), nullable=False)
-    account_id: Mapped[int] = mapped_column(ForeignKey("trade.paper_account.id"), nullable=False)
-    equity_snapshot_id: Mapped[int] = mapped_column(
-        ForeignKey("trade.paper_account_equity_snapshot.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("trade_paper_execution_approval_id_seq"), primary_key=True
     )
+    risk_check_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    equity_snapshot_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     approval_scope: Mapped[str] = mapped_column(String(30), nullable=False)
     actor_type: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -85,8 +85,8 @@ class PaperExecutionApproval(TimestampMixin, Base):
     risk_policy_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     order_batch_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     approval_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    order_summary: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    confirmation_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    order_summary: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    confirmation_policy: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -139,16 +139,14 @@ class PaperExecutionBatch(TimestampMixin, Base):
         {"schema": "trade"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    approval_id: Mapped[int] = mapped_column(
-        ForeignKey("trade.paper_execution_approval.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("trade_paper_execution_batch_id_seq"), primary_key=True
     )
-    risk_check_id: Mapped[int] = mapped_column(ForeignKey("risk.risk_check.id"), nullable=False)
-    plan_id: Mapped[int] = mapped_column(ForeignKey("portfolio.portfolio_plan.id"), nullable=False)
-    account_id: Mapped[int] = mapped_column(ForeignKey("trade.paper_account.id"), nullable=False)
-    equity_snapshot_id: Mapped[int] = mapped_column(
-        ForeignKey("trade.paper_account_equity_snapshot.id"), nullable=False
-    )
+    approval_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    risk_check_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    equity_snapshot_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     execution_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     actor_type: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -166,9 +164,9 @@ class PaperExecutionBatch(TimestampMixin, Base):
     order_count: Mapped[int] = mapped_column(Integer, nullable=False)
     fill_count: Mapped[int] = mapped_column(Integer, nullable=False)
     total_commission: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
-    input_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    result_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    execution_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    input_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    result_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    execution_policy: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)

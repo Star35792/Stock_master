@@ -15,6 +15,49 @@ from app.services import (
 )
 
 
+class FakeJobLog:
+    _id_counter = 0
+
+    def __init__(self) -> None:
+        FakeJobLog._id_counter += 1
+        self.id = FakeJobLog._id_counter
+        self.status = "running"
+        self.rows_read = 0
+        self.rows_inserted = 0
+        self.rows_updated = 0
+        self.rows_failed = 0
+        self.metadata_: dict | None = None
+        self.error_message: str | None = None
+
+
+class FakeJobLogRepository:
+    def create(
+        self,
+        db: object,
+        *,
+        job_name: str,
+        job_type: str,
+        batch_id: int | None = None,
+        metadata: dict | None = None,
+    ) -> FakeJobLog:
+        job = FakeJobLog()
+        job.metadata_ = metadata
+        return job
+
+    def finish(
+        self, db: object, *, job_log: FakeJobLog, status: str, **kwargs: object
+    ) -> FakeJobLog:
+        job_log.status = status
+        if "error_message" in kwargs:
+            job_log.error_message = kwargs["error_message"]
+        for key in ("rows_read", "rows_inserted", "rows_updated", "rows_failed"):
+            if key in kwargs:
+                setattr(job_log, key, kwargs[key])
+        if kwargs.get("metadata"):
+            job_log.metadata_ = kwargs["metadata"]
+        return job_log
+
+
 class FakeSession:
     def __init__(self) -> None:
         self.closed = False
@@ -24,6 +67,9 @@ class FakeSession:
 
     def __exit__(self, *args: object) -> None:
         self.closed = True
+
+    def commit(self) -> None:
+        pass
 
 
 class FakeSyncService:
@@ -96,12 +142,14 @@ class FakeCompletionService:
 def test_scheduled_job_runs_sync_and_closes_session() -> None:
     session = FakeSession()
     service = FakeSyncService()
+    job_log_repo = FakeJobLogRepository()
 
     result = run_hithink_daily_sync(
         symbols=["600519.SH"],
         days=7,
         service=service,  # type: ignore[arg-type]
         session_factory=lambda: session,  # type: ignore[arg-type]
+        job_log_repository=job_log_repo,
     )
 
     assert service.calls == [
@@ -142,12 +190,14 @@ def test_scheduler_requires_positive_days() -> None:
 def test_scheduled_recent_completion_runs_and_closes_session() -> None:
     session = FakeSession()
     service = FakeCompletionService()
+    job_log_repo = FakeJobLogRepository()
 
     result = run_recent_data_completion(
         symbols=["600519.SH"],
         days=7,
         service=service,  # type: ignore[arg-type]
         session_factory=lambda: session,  # type: ignore[arg-type]
+        job_log_repository=job_log_repo,
     )
 
     assert service.calls == [

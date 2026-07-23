@@ -1,6 +1,15 @@
 from datetime import date
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, Index, String, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    Index,
+    Sequence,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -20,7 +29,9 @@ class TradingCalendar(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_trading_calendar_id_seq"), primary_key=True
+    )
     exchange: Mapped[str] = mapped_column(String(10), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     is_open: Mapped[bool] = mapped_column(nullable=False)

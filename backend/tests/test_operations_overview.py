@@ -2,8 +2,6 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
-from sqlalchemy.dialects import postgresql
-
 from app.repositories.operations import OperationsOverviewRepository
 from app.services.operations import OperationsOverviewService
 
@@ -419,7 +417,6 @@ def test_rejected_paper_order_query_matches_signed_risk_order_quantity() -> None
 
     sql = str(
         captured["statement"].compile(
-            dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         )
     )

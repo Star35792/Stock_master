@@ -20,9 +20,7 @@ class PaperTradingRepository:
         *,
         account_id: int,
     ) -> PaperAccount | None:
-        return db.scalar(
-            select(PaperAccount).where(PaperAccount.id == account_id).with_for_update()
-        )
+        return db.scalar(select(PaperAccount).where(PaperAccount.id == account_id))
 
     def get_position(
         self,
@@ -66,7 +64,6 @@ class PaperTradingRepository:
                 select(PaperPosition)
                 .where(PaperPosition.account_id == account_id)
                 .order_by(PaperPosition.symbol)
-                .with_for_update()
             )
         )
 

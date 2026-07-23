@@ -10,7 +10,7 @@
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |
 | `models` | ORM 表结构 |
 | `data_sources` | HiThink、Eastmoney、Xueqiu 等外部来源适配 |
-| `scheduler` | 工作日同步、近期补齐调度和因子批量计算日级调度（factor_pipeline） |
+| `scheduler` | 工作日同步、近期补齐、因子批量计算日级调度，以及 `daily_loop` 数据→因子闭环编排；所有调度入口写入 `system.job_log` |
 | `lake` | Parquet/DuckDB 离线数据湖 |
 | `backtest` | 日频事件回测内核 |
 | `strategies` | 策略研究模板 |
@@ -30,7 +30,7 @@
 - `portfolio`：组合计划和目标。
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
 - `trade`：模拟盘账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
-- `system`：任务、质量问题、数据源配置。
+- `system`：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
 
 ## 同步规则
 

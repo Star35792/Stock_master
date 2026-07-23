@@ -1,4 +1,3 @@
-from contextlib import nullcontext
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -13,8 +12,11 @@ from app.services.portfolio import (
 
 
 class FakeSession:
-    def begin_nested(self):
-        return nullcontext()
+    def flush(self):
+        return None
+
+    def rollback(self):
+        return None
 
 
 class FakePortfolioRepository:

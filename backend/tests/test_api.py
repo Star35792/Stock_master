@@ -4,14 +4,16 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from app.api.routes import approvals as approvals_module
-from app.api.routes import backtests as backtests_module
-from app.api.routes import daily_bars as daily_bars_module
-from app.api.routes import health as health_module
-from app.api.routes import operations as operations_module
-from app.api.routes import paper_accounts as paper_accounts_module
-from app.api.routes import portfolio as portfolio_module
-from app.api.routes import strategy_research as strategy_research_module
+from app.api.routes import (
+    approvals as approvals_module,
+    backtests as backtests_module,
+    daily_bars as daily_bars_module,
+    health as health_module,
+    operations as operations_module,
+    paper_accounts as paper_accounts_module,
+    portfolio as portfolio_module,
+    strategy_research as strategy_research_module,
+)
 from app.main import app
 from app.services.paper_approval import (
     PaperApprovalConflict,

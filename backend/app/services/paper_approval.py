@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
+from app.database.transaction import idempotent_write
 from app.repositories.trade import (
     PaperExecutionApprovalRepository,
     PaperTradingRepository,
@@ -274,7 +275,7 @@ class PaperExecutionApprovalService:
             "revocation_request_hash": None,
         }
         try:
-            with db.begin_nested():
+            with idempotent_write(db):
                 approval = self.repository.save(db, values=values)
         except IntegrityError as exc:
             existing = self.repository.get_by_idempotency_key(

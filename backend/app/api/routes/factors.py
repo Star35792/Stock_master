@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
+from app.factors.registry import register_all_factor_definitions
 from app.schemas import (
     FactorDefinitionRead,
     FactorProfileRead,
@@ -11,7 +12,6 @@ from app.schemas import (
     FactorValueRead,
     Page,
 )
-from app.factors.registry import register_all_factor_definitions
 from app.services import FactorQueryService
 
 router = APIRouter(prefix="/factors", tags=["factors"])

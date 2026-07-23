@@ -3,16 +3,16 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Date,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -31,10 +31,12 @@ class PortfolioPlanRecord(CreatedAtMixin, Base):
         {"schema": "portfolio"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("portfolio_portfolio_plan_id_seq"), primary_key=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
-    parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     total_equity: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     cash_before: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     target_cash: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
@@ -42,7 +44,7 @@ class PortfolioPlanRecord(CreatedAtMixin, Base):
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    input_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    input_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
 class PortfolioTargetRecord(CreatedAtMixin, Base):
@@ -53,8 +55,10 @@ class PortfolioTargetRecord(CreatedAtMixin, Base):
         {"schema": "portfolio"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    plan_id: Mapped[int] = mapped_column(ForeignKey("portfolio.portfolio_plan.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("portfolio_portfolio_target_id_seq"), primary_key=True
+    )
+    plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     security_type: Mapped[str] = mapped_column(String(20), nullable=False)
     industry: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -65,4 +69,4 @@ class PortfolioTargetRecord(CreatedAtMixin, Base):
     target_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
-    reasons: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    reasons: Mapped[list[str]] = mapped_column(JSON, nullable=False)

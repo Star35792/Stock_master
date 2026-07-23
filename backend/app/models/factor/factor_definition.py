@@ -1,17 +1,18 @@
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
     Index,
     Integer,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -36,28 +37,22 @@ class FactorDefinition(TimestampMixin, Base):
         {"schema": "factor"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("factor_factor_definition_id_seq"), primary_key=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     frequency: Mapped[str] = mapped_column(String(20), nullable=False)
-    inputs: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )
+    inputs: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     applicable_security_types: Mapped[list[str]] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
-        server_default=text("'[\"stock\", \"etf\", \"index\"]'::jsonb"),
+        default=lambda: ["stock", "etf", "index"],
     )
     window_days: Mapped[int | None] = mapped_column(Integer)
     version: Mapped[str] = mapped_column(String(50), nullable=False)
-    dependencies: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )
-    parameters_schema: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
-    )
+    dependencies: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    parameters_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))

@@ -15,9 +15,7 @@ class PaperExecutionApprovalRepository:
         approval_id: int,
     ) -> PaperExecutionApproval | None:
         return db.scalar(
-            select(PaperExecutionApproval)
-            .where(PaperExecutionApproval.id == approval_id)
-            .with_for_update()
+            select(PaperExecutionApproval).where(PaperExecutionApproval.id == approval_id)
         )
 
     def get_by_idempotency_key(

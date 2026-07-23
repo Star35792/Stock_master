@@ -272,6 +272,103 @@ class HithinkFinanceDataSource:
             },
         )
 
+    def search_tickers(
+        self,
+        *,
+        keyword: str,
+        exchange: str | None = None,
+        asset_type: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        if not keyword or not keyword.strip():
+            raise ValueError("keyword is required")
+        if limit < 1 or limit > 50:
+            raise ValueError("limit must be in [1, 50]")
+        return self._get(
+            "/api/meta/tickers/search",
+            {
+                "q": keyword.strip(),
+                "exchange": exchange,
+                "asset_type": asset_type,
+                "limit": limit,
+            },
+        ).get("item", [])
+
+    def fetch_adjustment_factors(
+        self,
+        *,
+        symbol: str,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._get(
+            "/api/a-share/corporate-actions/adjustment-factors",
+            {
+                "thscode": symbol.strip().upper(),
+                "from": from_date.isoformat() if from_date else None,
+                "to": to_date.isoformat() if to_date else None,
+            },
+        ).get("item", [])
+
+    def fetch_index_snapshots(self, *, symbols: list[str]) -> list[dict[str, Any]]:
+        if not symbols:
+            raise ValueError("symbols is required for index snapshots")
+        return self._get(
+            "/api/a-share-index/prices/snapshot",
+            {"thscodes": ",".join(symbol.strip().upper() for symbol in symbols)},
+        ).get("item", [])
+
+    def fetch_index_daily_bars(
+        self,
+        *,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[DailyBarRecord]:
+        data = self._get(
+            "/api/a-share-index/prices/historical",
+            {
+                "thscode": symbol.strip().upper(),
+                "interval": "1d",
+                "start": _date_to_ms(start_date),
+                "end": _date_to_ms(end_date),
+            },
+        )
+        return [
+            self._to_daily_bar(symbol.strip().upper(), "none", item)
+            for item in data.get("item", [])
+        ]
+
+    def fetch_hot_stock_list_history(self, *, trade_date: date) -> dict[str, Any]:
+        return self._get(
+            "/api/a-share/special-data/hot-stock-list-history",
+            {"date": trade_date.isoformat()},
+        )
+
+    def fetch_hot_stock_rank_trend(
+        self, *, symbol: str, start_date: date, end_date: date
+    ) -> dict[str, Any]:
+        if start_date > end_date:
+            raise ValueError("start_date must be on or before end_date")
+        return self._get(
+            "/api/a-share/special-data/hot-stock-rank-trend",
+            {
+                "thscode": symbol.strip().upper(),
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+            },
+        )
+
+    def fetch_anomaly_by_stock(self, *, symbols: list[str]) -> dict[str, Any]:
+        if not symbols:
+            raise ValueError("symbols is required")
+        if len(symbols) > 50:
+            raise ValueError("at most 50 symbols are allowed")
+        return self._get(
+            "/api/a-share/special-data/anomaly-analysis-stock",
+            {"thscodes": ",".join(symbol.strip().upper() for symbol in symbols)},
+        )
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         if not self.api_key:
             raise HithinkFinanceError("HITHINK_FINANCE_API_KEY is required")

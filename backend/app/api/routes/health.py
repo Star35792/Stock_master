@@ -34,7 +34,7 @@ def check_database() -> HealthComponent:
             db.execute(text("select 1"))
     except SQLAlchemyError as exc:
         return HealthComponent(status="error", message=str(exc))
-    return HealthComponent(status="ok")
+    return HealthComponent(status="ok", message="duckdb")
 
 
 def check_redis() -> HealthComponent:

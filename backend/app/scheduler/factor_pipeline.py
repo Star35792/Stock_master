@@ -19,7 +19,10 @@ from datetime import date, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
+from app.config.settings import settings
 from app.database.session import SessionLocal
+from app.lake import CuratedDailyBarReader
+from app.repositories.system import JobLogRepository
 from app.services import (
     BasicPriceVolumeFactorService,
     CapitalFlowFactorService,
@@ -32,6 +35,7 @@ from app.services import (
     SentimentFactorService,
     ValuationFactorService,
 )
+from app.services.job_logging import logged_job
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +79,7 @@ def run_all_factors(
     adjust_type: str = "qfq",
     code_version: str = "local",
     session_factory: Callable[[], Session] = SessionLocal,
+    job_log_repository: JobLogRepository | None = None,
 ) -> FactorBatchResult:
     """批量计算全部因子服务。每服务独立事务，单服务失败不影响其他。"""
     if start_date > end_date:
@@ -85,36 +90,76 @@ def run_all_factors(
         end_date=end_date,
         adjust_type=adjust_type,
     )
-    for service_cls, takes_factor_names in _FACTOR_SERVICES:
-        name = service_cls.__name__
-        with session_factory() as db:
-            try:
-                kwargs: dict = {
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "symbols": symbols,
-                    "adjust_type": adjust_type,
-                    "code_version": code_version,
-                }
-                if takes_factor_names:
-                    kwargs["factor_names"] = None
-                service_result = service_cls().run(db, **kwargs)
-                db.commit()
-                result.services[name] = {
-                    "status": "success",
-                    "total_rows": getattr(service_result, "total_rows", 0),
-                    "input_rows": getattr(service_result, "input_rows", 0),
-                    "run_ids": list(getattr(service_result, "run_ids", {}).values()),
-                }
-                logger.info("%s ok: total_rows=%s", name, result.services[name]["total_rows"])
-            except Exception as exc:  # noqa: BLE001 - per-service isolation
-                db.rollback()
-                logger.exception("%s failed", name)
-                result.services[name] = {
-                    "status": "failed",
-                    "error": str(exc),
-                    "total_rows": 0,
-                }
+    with session_factory() as db:
+        with logged_job(
+            db,
+            job_name="factor_pipeline",
+            job_type="schedule",
+            metadata={
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "adjust_type": adjust_type,
+                "symbols_count": len(symbols) if symbols is not None else None,
+                "code_version": code_version,
+            },
+            repository=job_log_repository,
+        ) as job:
+            # Serve qfq bars from the curated Parquet layer when enabled. Only
+            # qfq is materialized; any other adjust_type keeps the ORM path.
+            curated_reader = (
+                CuratedDailyBarReader()
+                if settings.factor_reads_curated and adjust_type == "qfq"
+                else None
+            )
+            for service_cls, takes_factor_names in _FACTOR_SERVICES:
+                name = service_cls.__name__
+                with session_factory() as db2:
+                    try:
+                        kwargs: dict = {
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "symbols": symbols,
+                            "adjust_type": adjust_type,
+                            "code_version": code_version,
+                        }
+                        if takes_factor_names:
+                            kwargs["factor_names"] = None
+                        service_kwargs = (
+                            {"daily_bar_repository": curated_reader}
+                            if curated_reader is not None
+                            else {}
+                        )
+                        service_result = service_cls(**service_kwargs).run(db2, **kwargs)
+                        db2.commit()
+                        result.services[name] = {
+                            "status": "success",
+                            "total_rows": getattr(service_result, "total_rows", 0),
+                            "input_rows": getattr(service_result, "input_rows", 0),
+                            "run_ids": list(getattr(service_result, "run_ids", {}).values()),
+                        }
+                        logger.info(
+                            "%s ok: total_rows=%s", name, result.services[name]["total_rows"]
+                        )
+                    except Exception as exc:  # noqa: BLE001 - per-service isolation
+                        db2.rollback()
+                        logger.exception("%s failed", name)
+                        result.services[name] = {
+                            "status": "failed",
+                            "error": str(exc),
+                            "total_rows": 0,
+                        }
+            job.rows_inserted = result.total_rows
+            job.rows_failed = len(result.failed)
+            if result.failed:
+                job.status = "partial"
+            job.metadata_ = {
+                **(job.metadata_ or {}),
+                "failed_services": result.failed,
+                "services": {
+                    name: svc.get("total_rows", 0) for name, svc in result.services.items()
+                },
+            }
+
     logger.info(
         "factor batch done: total_rows=%s failed=%s",
         result.total_rows,
@@ -133,6 +178,7 @@ def create_factor_pipeline_scheduler(
     minute: int = 30,
     timezone: str = "Asia/Shanghai",
     session_factory: Callable[[], Session] = SessionLocal,
+    job_log_repository: JobLogRepository | None = None,
 ) -> BlockingScheduler:
     """日级因子增量调度：每个交易日收盘后重算最近 lookback_days 窗口。
 
@@ -151,6 +197,7 @@ def create_factor_pipeline_scheduler(
             adjust_type=adjust_type,
             code_version=code_version,
             session_factory=session_factory,
+            job_log_repository=job_log_repository,
         )
 
     scheduler = BlockingScheduler(timezone=timezone)

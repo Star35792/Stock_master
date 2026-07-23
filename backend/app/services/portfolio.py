@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.database.transaction import idempotent_write
 from app.portfolio import PortfolioAsset, PortfolioBuilder, PortfolioConstraints
 from app.repositories.portfolio import PortfolioPlanRepository
 from app.schemas.portfolio import (
@@ -67,7 +68,7 @@ class PortfolioConstructionService:
             constraints=constraints,
         )
         try:
-            with db.begin_nested():
+            with idempotent_write(db):
                 record = self.repository.save(
                     db,
                     name=name,

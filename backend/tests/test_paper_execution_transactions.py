@@ -1,4 +1,3 @@
-import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -6,11 +5,13 @@ from threading import Barrier
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.settings import settings
+from app.database.base import Base
+from app.database.session import SCHEMAS
 from app.models.portfolio import PortfolioPlanRecord, PortfolioTargetRecord
 from app.models.risk import RiskCheck, RiskCheckOrder
 from app.models.trade import (
@@ -35,13 +36,22 @@ from app.services.paper_execution import PaperExecutionService
 from app.services.snapshot_hashes import hash_payload
 from app.trade import PaperBrokerAdapter
 
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-if TEST_DATABASE_URL is None and os.getenv("RUN_POSTGRES_INTEGRATION") == "1":
-    TEST_DATABASE_URL = settings.database_url
-pytestmark = pytest.mark.skipif(
-    not TEST_DATABASE_URL,
-    reason="TEST_DATABASE_URL is required for PostgreSQL transaction tests",
-)
+
+@pytest.fixture(scope="module")
+def session_factory(tmp_path_factory):
+    # A file-based DuckDB is required here: these tests open multiple
+    # concurrent sessions (and threads), which an in-memory database cannot
+    # share across connections.
+    db_path = tmp_path_factory.mktemp("paper_exec") / "test.duckdb"
+    engine = create_engine(f"duckdb:///{db_path}")
+    with engine.connect() as conn:
+        for schema in SCHEMAS:
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+        conn.commit()
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    yield factory
+    engine.dispose()
 
 
 class DatabaseRiskService:
@@ -81,18 +91,17 @@ class FailOnSecondFillRepository(PaperTradingRepository):
 class BarrierApprovalRepository(PaperExecutionApprovalRepository):
     def __init__(self, barrier: Barrier) -> None:
         self.barrier = barrier
+        self._synced = False
 
     def get_for_update(self, db: Session, *, approval_id: int):
-        self.barrier.wait(timeout=10)
+        # The barrier only forces the initial simultaneous collision. DuckDB's
+        # optimistic-concurrency loser retries execute(), which re-enters this
+        # method; waiting again would deadlock against the winner that has
+        # already moved on, so we synchronize exactly once.
+        if not self._synced:
+            self._synced = True
+            self.barrier.wait(timeout=10)
         return super().get_for_update(db, approval_id=approval_id)
-
-
-@pytest.fixture(scope="module")
-def session_factory():
-    engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    yield factory
-    engine.dispose()
 
 
 def _seed(session_factory):
@@ -301,7 +310,7 @@ def _seed(session_factory):
         return approval.id, approval.approval_hash, account.id
 
 
-def test_postgres_rolls_back_second_fill_failure(session_factory) -> None:
+def test_rolls_back_second_fill_failure(session_factory) -> None:
     approval_id, approval_hash, account_id = _seed(session_factory)
     service = PaperExecutionService(
         paper_repository=FailOnSecondFillRepository(),
@@ -346,7 +355,7 @@ def test_postgres_rolls_back_second_fill_failure(session_factory) -> None:
         )
 
 
-def test_postgres_concurrent_same_key_replays_one_batch(session_factory) -> None:
+def test_concurrent_same_key_replays_one_batch(session_factory) -> None:
     approval_id, approval_hash, _ = _seed(session_factory)
     barrier = Barrier(2)
     key = f"execute-{uuid4().hex}"
@@ -381,7 +390,7 @@ def test_postgres_concurrent_same_key_replays_one_batch(session_factory) -> None
         )
 
 
-def test_postgres_rejected_batch_requires_complete_before_after_state(
+def test_rejected_batch_requires_complete_before_after_state(
     session_factory,
 ) -> None:
     approval_id, _, _ = _seed(session_factory)

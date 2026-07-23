@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
+from app.database.transaction import idempotent_write
 from app.repositories.portfolio import PortfolioPlanRepository
 from app.repositories.risk import RiskCheckRepository
 from app.repositories.trade import (
@@ -345,7 +346,7 @@ class BoundRiskEvaluationService:
             "request_hash": request_hash,
         }
         try:
-            with db.begin_nested():
+            with idempotent_write(db):
                 check = self.risk_repository.save_evaluation(
                     db,
                     check_values=check_values,

@@ -2,19 +2,19 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
+    Sequence,
     String,
     Text,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -43,15 +43,13 @@ class FactorRun(CreatedAtMixin, Base):
         {"schema": "factor"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    definition_id: Mapped[int] = mapped_column(
-        ForeignKey("factor.factor_definition.id"), nullable=False
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("factor_factor_run_id_seq"), primary_key=True
     )
+    definition_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     factor_name: Mapped[str] = mapped_column(String(100), nullable=False)
     factor_version: Mapped[str] = mapped_column(String(50), nullable=False)
-    parameters: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
     input_start_date: Mapped[date | None] = mapped_column(Date)
     input_end_date: Mapped[date | None] = mapped_column(Date)
@@ -62,8 +60,6 @@ class FactorRun(CreatedAtMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'running'")
     )
-    rows_written: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    rows_written: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     error_message: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON)

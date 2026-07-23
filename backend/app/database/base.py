@@ -1,17 +1,6 @@
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
 
-SCHEMAS = (
-    "raw",
-    "market",
-    "fundamental",
-    "factor",
-    "strategy",
-    "portfolio",
-    "trade",
-    "system",
-)
-
 metadata = MetaData(
     naming_convention={
         "ix": "ix_%(column_0_label)s",

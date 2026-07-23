@@ -3,17 +3,17 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
-    ForeignKeyConstraint,
     Index,
     Numeric,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -24,7 +24,6 @@ class CorporateAction(TimestampMixin, Base):
     __tablename__ = "corporate_action"
     __table_args__ = (
         UniqueConstraint("symbol", "ex_date", "action_type", "source_name"),
-        ForeignKeyConstraint(["symbol"], ["market.security.symbol"]),
         CheckConstraint(
             "action_type in ('cash_dividend', 'bonus_share', 'transfer_share', "
             "'rights_issue', 'split', 'merge', 'mixed')",
@@ -59,7 +58,9 @@ class CorporateAction(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_corporate_action_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     ex_date: Mapped[date] = mapped_column(Date, nullable=False)
     action_type: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -73,5 +74,5 @@ class CorporateAction(TimestampMixin, Base):
     payment_date: Mapped[date | None] = mapped_column(Date)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_event_id: Mapped[str | None] = mapped_column(String(100))
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     note: Mapped[str | None] = mapped_column(Text)

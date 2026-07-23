@@ -104,10 +104,10 @@ factor / strategy / portfolio / risk / trade
 
 职责：
 
-- 记录导入任务、清洗任务、校验任务和修复任务。
+- 记录导入任务、清洗任务、校验任务、修复任务和因子计算任务（`system.job_log`）。
 - 记录数据质量问题。
 - 记录来源配置、任务状态、异常信息。
-- 支撑后续调度、报告和排障。
+- `scheduler.daily_loop` 每次运行留下 running → success/failed/partial 记录，支撑调度排障。
 
 ## 5. 核心数据流
 

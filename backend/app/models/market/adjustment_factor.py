@@ -5,9 +5,9 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     Date,
-    ForeignKeyConstraint,
     Index,
     Numeric,
+    Sequence,
     String,
     UniqueConstraint,
     text,
@@ -22,7 +22,6 @@ class AdjustmentFactor(TimestampMixin, Base):
     __tablename__ = "adjustment_factor"
     __table_args__ = (
         UniqueConstraint("symbol", "trade_date", "adjust_type", "source_name", "version"),
-        ForeignKeyConstraint(["symbol"], ["market.security.symbol"]),
         CheckConstraint(
             "adjust_type in ('qfq', 'hfq')",
             name="ck_adjustment_factor_adjust_type",
@@ -33,7 +32,9 @@ class AdjustmentFactor(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_adjustment_factor_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     adjust_type: Mapped[str] = mapped_column(String(10), nullable=False)

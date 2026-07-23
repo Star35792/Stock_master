@@ -1,8 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Index, Numeric, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, Date, Index, Numeric, Sequence, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -17,8 +16,10 @@ class RawCorporateAction(Base):
         {"schema": "raw"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    batch_id: Mapped[int] = mapped_column(ForeignKey("raw.import_batch.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("raw_corporate_action_id_seq"), primary_key=True
+    )
+    batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     ex_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -26,5 +27,5 @@ class RawCorporateAction(Base):
     per_share_bonus: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
     allotment_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
     allotment_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
-    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    raw_payload: Mapped[dict | None] = mapped_column(JSON)
     row_hash: Mapped[str] = mapped_column(String(64), nullable=False)

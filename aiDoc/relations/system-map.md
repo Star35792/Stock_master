@@ -27,7 +27,7 @@
 
 - `backend/app/lake`：离线数据湖和批量扫描工具，不替代 PostgreSQL 可信裁决。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和 dump 研究，不等同于后端 `market`。
-- 调度脚本基于 APScheduler blocking scheduler，不是 FastAPI 内置后台任务。
+- 调度脚本基于 APScheduler blocking scheduler，不是 FastAPI 内置后台任务；`daily_loop` 编排器按交易日串联 `daily_sync` 与 `factor_pipeline`，sync 失败时不继续执行因子计算，所有步骤写入 `system.job_log`。
 
 ## 文档同步触发
 

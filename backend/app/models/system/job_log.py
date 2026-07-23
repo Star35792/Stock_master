@@ -1,18 +1,18 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
+    Sequence,
     String,
     Text,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -39,13 +39,13 @@ class JobLog(Base):
         ),
         Index("ix_job_log_type_status_started", "job_type", "status", "started_at"),
         Index("ix_job_log_batch_id", "batch_id"),
-        {"schema": "system"},
+        {"schema": "metadata"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, Sequence("system_job_log_id_seq"), primary_key=True)
     job_name: Mapped[str] = mapped_column(String(100), nullable=False)
     job_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    batch_id: Mapped[int | None] = mapped_column(ForeignKey("raw.import_batch.id"))
+    batch_id: Mapped[int | None] = mapped_column(BigInteger)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -58,7 +58,7 @@ class JobLog(Base):
     rows_updated: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     rows_failed: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     error_message: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

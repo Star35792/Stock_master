@@ -338,7 +338,11 @@ ON CONFLICT (symbol) DO NOTHING
 
 def _driver_connection(db: Session):
     try:
-        return db.connection().connection.driver_connection
+        conn = db.connection().connection.driver_connection
+        # DuckDB does not support psycopg-style cursor.copy; fall back to ORM inserts.
+        if hasattr(conn, "copy"):
+            return conn
+        return None
     except AttributeError:
         return None
 

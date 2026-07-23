@@ -57,7 +57,7 @@
 
 ## 当前项目定位
 
-Stock Master 是 Python 3.13 + FastAPI + PostgreSQL + SQLAlchemy + Alembic 的个人量化平台。
+Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，采用 PostgreSQL 控制面与事务存储、DuckDB + Parquet 温数据主存储、Redis 热数据派生层、MinIO 冷数据与对象持久化的分层架构。
 
 项目已经从 V1 可信日线数据中心推进到 V6 最小运维工作台。当前优先目标是把已经落地的因子、回测、组合、风控和模拟盘能力产品化、可观测化，并继续保持可信数据中心规则：
 
@@ -147,7 +147,8 @@ models / database
 
 - 使用 Python 3.13。
 - 使用 FastAPI、SQLAlchemy 2.x、Alembic。
-- 数据库核心价格和金额字段使用 PostgreSQL `numeric`，不要用浮点保存核心金融数据。
+- PostgreSQL 保留控制面、审计、组合、风控和交易等强事务数据；大体量分析事实使用 DuckDB + Parquet，Redis 只保存可重建热视图，MinIO 保存不可变原始对象、Parquet release 和冷历史。
+- 数据中心核心价格、金额和比率必须使用精确定点类型；PostgreSQL 使用 `numeric`，Parquet/DuckDB 使用 `DECIMAL`，不要用浮点保存核心金融数据。
 - 字段命名使用 snake_case。
 - 证券代码统一命名为 `symbol`。
 - 交易日期统一命名为 `trade_date`。

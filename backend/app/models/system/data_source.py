@@ -1,14 +1,15 @@
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Index,
     Integer,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -25,13 +26,15 @@ class DataSource(TimestampMixin, Base):
         ),
         CheckConstraint("priority >= 0", name="ck_data_source_priority_non_negative"),
         Index("ix_data_source_active_priority", "is_active", "priority"),
-        {"schema": "system"},
+        {"schema": "metadata"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("system_data_source_id_seq"), primary_key=True
+    )
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False)
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
     description: Mapped[str | None] = mapped_column(Text)
-    config: Mapped[dict | None] = mapped_column(JSONB)
+    config: Mapped[dict | None] = mapped_column(JSON)

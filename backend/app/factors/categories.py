@@ -8,10 +8,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class FactorCategory(str, Enum):
+class FactorCategory(StrEnum):
     """因子决策域分类。"""
 
     PRICE_VOLUME_RISK = "price_volume_risk"

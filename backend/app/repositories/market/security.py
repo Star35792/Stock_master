@@ -79,6 +79,9 @@ class SecurityRepository:
             )
         )
 
+    def get_active_symbols(self, db: Session) -> list[str]:
+        return list(db.scalars(select(Security.symbol).where(Security.is_active.is_(True))).all())
+
     def list(
         self,
         db: Session,

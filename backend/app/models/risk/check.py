@@ -2,16 +2,16 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -34,25 +34,23 @@ class RiskCheck(CreatedAtMixin, Base):
         {"schema": "risk"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    plan_id: Mapped[int] = mapped_column(ForeignKey("portfolio.portfolio_plan.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("risk_risk_check_id_seq"), primary_key=True
+    )
+    plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_drawdown: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
-    limits: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    limits: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
-    account_id: Mapped[int | None] = mapped_column(
-        ForeignKey("trade.paper_account.id"), nullable=True
-    )
-    equity_snapshot_id: Mapped[int | None] = mapped_column(
-        ForeignKey("trade.paper_account_equity_snapshot.id"), nullable=True
-    )
+    account_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    equity_snapshot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     plan_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     readiness_account_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     readiness_market_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     readiness_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    readiness_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    readiness_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     adv_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    adv_inputs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    adv_inputs: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     risk_policy_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     evaluation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     evaluation_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -67,14 +65,16 @@ class RiskCheckOrder(CreatedAtMixin, Base):
         {"schema": "risk"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    check_id: Mapped[int] = mapped_column(ForeignKey("risk.risk_check.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("risk_risk_check_order_id_seq"), primary_key=True
+    )
+    check_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     side: Mapped[str] = mapped_column(String(10), nullable=False)
     order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    rejection_reasons: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    rule_results: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    rejection_reasons: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    rule_results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     reference_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     current_symbol_weight: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), nullable=True)
     projected_symbol_weight: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), nullable=True)

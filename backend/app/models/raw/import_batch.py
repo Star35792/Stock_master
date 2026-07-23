@@ -1,18 +1,19 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
     Index,
     Integer,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -44,13 +45,15 @@ class ImportBatch(Base):
         {"schema": "raw"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("raw_import_batch_id_seq"), primary_key=True
+    )
     batch_no: Mapped[str] = mapped_column(String(64), nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     file_path: Mapped[str | None] = mapped_column(Text)
-    request_params: Mapped[dict | None] = mapped_column(JSONB)
+    request_params: Mapped[dict | None] = mapped_column(JSON)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -1,7 +1,6 @@
 from datetime import date
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, CheckConstraint, Date, Index, Sequence, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -19,13 +18,15 @@ class RawFinancialPayload(Base):
         {"schema": "raw"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    batch_id: Mapped[int] = mapped_column(ForeignKey("raw.import_batch.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("raw_financial_payload_id_seq"), primary_key=True
+    )
+    batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     dataset: Mapped[str] = mapped_column(String(20), nullable=False)
     report_key: Mapped[str] = mapped_column(String(20), nullable=False)
     report_date: Mapped[date | None] = mapped_column(Date)
     period_end: Mapped[date | None] = mapped_column(Date)
-    raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    raw_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     row_hash: Mapped[str] = mapped_column(String(64), nullable=False)

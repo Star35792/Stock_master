@@ -2,8 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Date, Index, Numeric, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, Date, Index, Numeric, Sequence, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -19,7 +18,9 @@ class ValuationSnapshot(TimestampMixin, Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("market_valuation_snapshot_id_seq"), primary_key=True
+    )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     total_market_cap: Mapped[Decimal | None] = mapped_column(Numeric(30, 6))
@@ -32,4 +33,4 @@ class ValuationSnapshot(TimestampMixin, Base):
     close: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     currency: Mapped[str] = mapped_column(String(10), nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)

@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, Index, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Date, Index, Integer, Numeric, Sequence, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -16,7 +16,9 @@ class FactorProfile(TimestampMixin, Base):
         {"schema": "factor"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("factor_factor_profile_id_seq"), primary_key=True
+    )
     factor_name: Mapped[str] = mapped_column(String(100), nullable=False)
     factor_version: Mapped[str] = mapped_column(String(100), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)

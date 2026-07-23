@@ -1,7 +1,6 @@
 from datetime import date
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, BigInteger, Date, Index, Sequence, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -15,10 +14,12 @@ class RawVendorSnapshot(Base):
         {"schema": "raw"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    batch_id: Mapped[int] = mapped_column(ForeignKey("raw.import_batch.id"), nullable=False)
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("raw_vendor_snapshot_id_seq"), primary_key=True
+    )
+    batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
-    raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    raw_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     row_hash: Mapped[str] = mapped_column(String(64), nullable=False)

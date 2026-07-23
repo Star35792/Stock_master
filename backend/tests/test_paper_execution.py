@@ -1,4 +1,3 @@
-from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -18,8 +17,11 @@ NOW = datetime.now(UTC)
 
 
 class FakeSession:
-    def begin_nested(self):
-        return nullcontext()
+    def flush(self):
+        return None
+
+    def rollback(self):
+        return None
 
 
 class FakeApprovalRepository:

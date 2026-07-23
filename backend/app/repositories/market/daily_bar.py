@@ -135,7 +135,6 @@ class DailyBarRepository:
                     DailyBar.adjust_type == adjust_type,
                 )
                 .order_by(DailyBar.symbol)
-                .with_for_update()
             )
         )
 
