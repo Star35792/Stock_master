@@ -6,7 +6,16 @@ raw (unadjusted) daily bars against corporate-action events, compounds the
 per-event ratios backward, then normalizes so the most recent bar keeps its raw
 price (that is what makes it *forward* adjusted).
 
-The paths are substituted rather than parameterized because DuckDB's
+Two source modes are supported:
+
+- ``create_qfq_view`` reads daily bars and corporate actions from parquet globs.
+  This is the file-lake path used by ``LakeFactorPipeline`` and the offline
+  ``build_curated_layer`` script.
+- ``create_qfq_view_from_tables`` reads from live DuckDB tables. This is the path
+  used when rebuilding ``curated/prices_qfq`` from the ``daily_loop`` after it has
+  populated ``market.daily_bar`` and ``raw.corporate_action``.
+
+The paths are substituted rather than parameterized where DuckDB's
 ``read_parquet`` glob argument must be a literal inside ``CREATE VIEW``.
 """
 
@@ -22,24 +31,70 @@ def create_qfq_view(
     action_glob: str,
     view_name: str = "qfq_bars",
 ) -> None:
-    """Register a TEMP VIEW exposing forward-adjusted OHLCV for every symbol."""
-    sql = (
-        _QFQ_VIEW_SQL.replace("{view_name}", view_name)
-        .replace("{daily_path}", _sql_literal(daily_glob))
-        .replace("{action_path}", _sql_literal(action_glob))
+    """Register a TEMP VIEW exposing forward-adjusted OHLCV from parquet globs."""
+    daily_source = (
+        f"SELECT symbol, trade_date, open, high, low, close, volume, amount, "
+        f"CAST(NULL AS DECIMAL(12,6)) AS turnover_rate "
+        f"FROM read_parquet({_sql_literal(daily_glob)}, hive_partitioning=true)"
     )
-    connection.execute(sql)
+    action_source = (
+        "SELECT symbol, ex_date, dividend_per_share, per_share_bonus, "
+        "allotment_ratio, allotment_price "
+        f"FROM read_parquet({_sql_literal(action_glob)}, hive_partitioning=true)"
+    )
+    _create_view(connection, view_name, daily_source, action_source)
+
+
+def create_qfq_view_from_tables(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    daily_table: str = "market.daily_bar",
+    action_table: str = "raw.corporate_action",
+    view_name: str = "qfq_bars",
+) -> None:
+    """Register a TEMP VIEW exposing forward-adjusted OHLCV from live tables.
+
+    ``daily_table`` must expose ``symbol, trade_date, open, high, low, close,
+    volume, amount, turnover_rate`` and should already be filtered to the desired
+    ``adjust_type`` and ``quality_status`` by the caller (typically
+    ``adjust_type='none'`` and ``quality_status='trusted'``).  ``action_table``
+    must expose ``symbol, ex_date, dividend_per_share, per_share_bonus,
+    allotment_ratio, allotment_price``.
+    """
+    daily_source = (
+        f"SELECT symbol, trade_date, open, high, low, close, volume, amount, "
+        f"turnover_rate FROM {daily_table}"
+    )
+    action_source = (
+        "SELECT symbol, ex_date, dividend_per_share, per_share_bonus, "
+        f"allotment_ratio, allotment_price FROM {action_table}"
+    )
+    _create_view(connection, view_name, daily_source, action_source)
 
 
 def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _create_view(
+    connection: duckdb.DuckDBPyConnection,
+    view_name: str,
+    daily_source: str,
+    action_source: str,
+) -> None:
+    sql = (
+        _QFQ_VIEW_SQL.replace("{view_name}", view_name)
+        .replace("{daily_source}", daily_source)
+        .replace("{action_source}", action_source)
+    )
+    connection.execute(sql)
+
+
 _QFQ_VIEW_SQL = """
-CREATE TEMP VIEW {view_name} AS
+CREATE OR REPLACE TEMP VIEW {view_name} AS
 WITH daily AS (
-    SELECT symbol, trade_date, open, high, low, close, volume, amount
-    FROM read_parquet({daily_path}, hive_partitioning=true)
+    SELECT symbol, trade_date, open, high, low, close, volume, amount, turnover_rate
+    FROM ({daily_source})
 ), effective_events AS (
     SELECT
         e.symbol,
@@ -49,7 +104,7 @@ WITH daily AS (
         / nullif(prev_bar.close - coalesce(e.dividend_per_share, 0)
                  + coalesce(e.allotment_ratio, 0) * coalesce(e.allotment_price, 0), 0)
             AS ratio
-    FROM read_parquet({action_path}, hive_partitioning=true) e
+    FROM ({action_source}) e
     ASOF JOIN daily next_bar
       ON e.symbol = next_bar.symbol AND e.ex_date <= next_bar.trade_date
     ASOF LEFT JOIN daily prev_bar
@@ -75,6 +130,6 @@ WITH daily AS (
 SELECT symbol, trade_date,
        open * qfq_factor AS open_qfq, high * qfq_factor AS high_qfq,
        low * qfq_factor AS low_qfq, close * qfq_factor AS close_qfq,
-       volume, amount, qfq_factor
+       volume, amount, turnover_rate, qfq_factor
 FROM normalized
 """

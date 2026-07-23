@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+from app.config.settings import Settings
 from app.scheduler.daily_loop import run_daily_loop
 from app.scheduler.factor_pipeline import FactorBatchResult
 from app.services import (
@@ -249,3 +250,67 @@ def test_daily_loop_marks_partial_when_factor_service_fails(
     assert result.factor_result.failed == ["SomeService"]
     assert job_log_repo.jobs[0].status == "partial"
     assert "SomeService" in job_log_repo.jobs[0].error_message
+
+
+def test_daily_loop_skips_curated_build_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    security_repo = FakeSecurityRepository(["600519.SH"])
+
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=security_repo,
+        job_log_repository=job_log_repo,
+    )
+
+    assert result.failed is False
+    assert result.curated_result is None
+    assert result.curated_error is None
+    assert job_log_repo.jobs[0].metadata_.get("curated_rebuilt") is None
+
+
+def test_daily_loop_fails_when_curated_flag_requires_duckdb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    security_repo = FakeSecurityRepository(["600519.SH"])
+
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.settings",
+        Settings(factor_reads_curated=True),
+    )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        factor_adjust_type="qfq",
+        session_factory=lambda: session,
+        security_repository=security_repo,
+        job_log_repository=job_log_repo,
+    )
+
+    assert result.failed is True
+    assert result.curated_error is not None
+    assert "DuckDB" in result.curated_error
+    assert result.factor_result is None
+    assert job_log_repo.jobs[0].status == "failed"

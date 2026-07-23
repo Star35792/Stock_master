@@ -21,11 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import duckdb
 
 from app.lake.data_lake import DataLake, _compact_partitions
-from app.lake.qfq import create_qfq_view
+from app.lake.qfq import create_qfq_view, create_qfq_view_from_tables
 from app.lake.security_type import security_type_case_sql
 
 # Line items pulled out of the raw ``metrics`` JSON into typed DECIMAL columns.
@@ -91,13 +92,17 @@ class CuratedLayer:
         self.root = lake.root / "curated"
 
     def build_prices_qfq(self) -> CuratedDatasetResult:
-        """Materialize forward-adjusted OHLCV from the latest raw daily bars.
+        """Materialize forward-adjusted OHLCV from the latest file-lake raw bars.
 
-        The QFQ series is expensive to derive (it compounds every corporate
-        action per symbol), so it is computed once here rather than inside each
+        This is the offline-script path: it reads ``daily_bar`` and
+        ``corporate_action`` releases from the local parquet lake. The QFQ series
+        is expensive to derive, so it is computed once here rather than inside each
         factor run. Output is partitioned by year/month and sorted by
         (symbol, trade_date) to serve both per-symbol time series and
         per-date cross sections.
+
+        Raises ``FileExistsError`` if ``curated/prices_qfq`` already exists; the
+        caller must manage replacement for the offline path.
         """
         target = self.root / "prices_qfq"
         if target.exists():
@@ -114,38 +119,58 @@ class CuratedLayer:
             create_qfq_view(
                 connection, daily_glob=str(daily), action_glob=str(actions)
             )
-            stats = connection.execute(
-                "SELECT count(*), min(trade_date), max(trade_date) FROM qfq_bars"
-            ).fetchone()
-            connection.execute(
-                f"""
-                COPY (
-                    SELECT
-                        symbol,
-                        {security_type_case_sql("symbol")} AS security_type,
-                        trade_date,
-                        open_qfq AS open, high_qfq AS high,
-                        low_qfq AS low, close_qfq AS close,
-                        volume, amount,
-                        CAST(NULL AS DECIMAL(12,6)) AS turnover_rate,
-                        qfq_factor,
-                        year(trade_date) AS year, month(trade_date) AS month
-                    FROM qfq_bars
-                    ORDER BY symbol, trade_date
-                ) TO ? (
-                    FORMAT PARQUET, COMPRESSION ZSTD,
-                    PARTITION_BY (year, month), PER_THREAD_OUTPUT false,
-                    ROW_GROUP_SIZE 100000
-                )
-                """,
-                [str(target)],
-            )
+            stats = _copy_prices_qfq(connection, target, turnover_rate_null=True)
         except Exception:
             _cleanup(target)
             raise
         finally:
             connection.close()
         _compact_partitions(target)
+        return _result("prices_qfq", target, stats)
+
+    def build_prices_qfq_from_db(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        *,
+        daily_table: str = "market.daily_bar",
+        action_table: str = "raw.corporate_action",
+        trusted_filter: str = "quality_status = 'trusted' AND adjust_type = 'none'",
+    ) -> CuratedDatasetResult:
+        """Materialize forward-adjusted OHLCV from live DuckDB tables.
+
+        This is the ``daily_loop`` path: after ``market.daily_bar`` and
+        ``raw.corporate_action`` have been populated in the same DuckDB file, the
+        curated layer is rebuilt so ``CuratedDailyBarReader`` always serves current
+        data. The write is idempotent: it writes to a temporary directory and
+        atomically replaces ``curated/prices_qfq`` on success.
+
+        ``daily_table`` is wrapped with the caller-supplied ``trusted_filter``.
+        The default selects trusted unadjusted bars, which is the correct base for
+        forward adjustment.
+        """
+        target = self.root / "prices_qfq"
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        temp_target = self.root / f".prices_qfq.tmp-{stamp}-{uuid4().hex[:8]}"
+        temp_target.mkdir(parents=True, exist_ok=False)
+
+        daily_source = (
+            f"SELECT symbol, trade_date, open, high, low, close, volume, amount, "
+            f"turnover_rate FROM {daily_table} WHERE {trusted_filter}"
+        )
+        try:
+            connection.execute("SET threads = 1")
+            create_qfq_view_from_tables(
+                connection,
+                daily_table=f"({daily_source})",
+                action_table=action_table,
+            )
+            stats = _copy_prices_qfq(connection, temp_target, turnover_rate_null=False)
+        except Exception:
+            _cleanup(temp_target)
+            raise
+
+        _compact_partitions(temp_target)
+        _replace_directory(temp_target, target)
         return _result("prices_qfq", target, stats)
 
     def build_fundamentals_pit(self, source: str | Path) -> CuratedDatasetResult:
@@ -226,6 +251,56 @@ def _fundamentals_pit_select(source_glob: str) -> str:
         FROM read_parquet({literal}, hive_partitioning=true)
         GROUP BY symbol, report_date, period_end, fiscal_year, fiscal_period
     """
+
+
+def _copy_prices_qfq(
+    connection: duckdb.DuckDBPyConnection,
+    target: Path,
+    *,
+    turnover_rate_null: bool,
+) -> tuple:
+    """Write the materialized prices_qfq parquet set and return (count, min, max)."""
+    stats = connection.execute(
+        "SELECT count(*), min(trade_date), max(trade_date) FROM qfq_bars"
+    ).fetchone()
+    turnover_expr = (
+        "CAST(NULL AS DECIMAL(12,6)) AS turnover_rate"
+        if turnover_rate_null
+        else "turnover_rate"
+    )
+    connection.execute(
+        f"""
+        COPY (
+            SELECT
+                symbol,
+                {security_type_case_sql("symbol")} AS security_type,
+                trade_date,
+                open_qfq AS open, high_qfq AS high,
+                low_qfq AS low, close_qfq AS close,
+                volume, amount,
+                {turnover_expr},
+                qfq_factor,
+                year(trade_date) AS year, month(trade_date) AS month
+            FROM qfq_bars
+            ORDER BY symbol, trade_date
+        ) TO ? (
+            FORMAT PARQUET, COMPRESSION ZSTD,
+            PARTITION_BY (year, month), PER_THREAD_OUTPUT false,
+            ROW_GROUP_SIZE 100000
+        )
+        """,
+        [str(target)],
+    )
+    return stats
+
+
+def _replace_directory(source: Path, target: Path) -> None:
+    """Atomically replace ``target`` directory with ``source`` directory."""
+    if target.exists():
+        backup = target.with_suffix(f".backup-{datetime.now(UTC):%Y%m%dT%H%M%S}")
+        target.rename(backup)
+        _cleanup(backup)
+    source.rename(target)
 
 
 def _cleanup(target: Path) -> None:

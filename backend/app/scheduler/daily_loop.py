@@ -15,7 +15,10 @@ from datetime import date, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
-from app.database.session import SessionLocal
+from app.config.settings import settings
+from app.database.session import SessionLocal, driver_connection
+from app.lake import CuratedLayer, DataLake
+from app.lake.curated import CuratedDatasetResult
 from app.repositories.market import SecurityRepository
 from app.repositories.system import JobLogRepository
 from app.scheduler.daily_sync import run_hithink_daily_sync
@@ -28,8 +31,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DailyLoopResult:
     sync_result: HithinkDailySyncResult | None = None
+    curated_result: CuratedDatasetResult | None = None
     factor_result: FactorBatchResult | None = None
     sync_error: str | None = None
+    curated_error: str | None = None
     factor_error: str | None = None
     failed: bool = False
 
@@ -128,6 +133,38 @@ def run_daily_loop(
             db.commit()
             logger.exception("Daily loop failed at sync stage")
             return result
+
+        if settings.factor_reads_curated and factor_adjust_type == "qfq":
+            try:
+                duckdb_conn = driver_connection(db)
+                if duckdb_conn is None:
+                    raise RuntimeError("factor_reads_curated requires a DuckDB session")
+                curated_result = CuratedLayer(DataLake()).build_prices_qfq_from_db(
+                    duckdb_conn
+                )
+                result.curated_result = curated_result
+                job.metadata_ = {
+                    **(job.metadata_ or {}),
+                    "curated_rebuilt": True,
+                    "curated_path": curated_result.path,
+                    "curated_row_count": curated_result.row_count,
+                    "curated_min_date": curated_result.min_date,
+                    "curated_max_date": curated_result.max_date,
+                }
+            except Exception as exc:  # noqa: BLE001 - log and surface
+                error_message = f"curated build failed: {type(exc).__name__}: {exc}"
+                result.curated_error = error_message
+                result.failed = True
+                repo.finish(
+                    db,
+                    job_log=job,
+                    status="failed",
+                    error_message=error_message,
+                    metadata=job.metadata_,
+                )
+                db.commit()
+                logger.exception("Daily loop failed at curated build stage")
+                return result
 
         try:
             today = date.today()
