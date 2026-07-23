@@ -19,7 +19,7 @@ columns in the raw layer, so no timezone conversion happens here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -44,7 +44,11 @@ _PIT_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
         ),
         "current_assets": ("current_assets", "total_current_assets"),
         "current_liabilities": ("current_liabilities", "total_current_liabilities"),
-        "accounts_receivable": ("accounts_receivable", "notes_and_accounts_receivable", "receivable"),
+        "accounts_receivable": (
+            "accounts_receivable",
+            "notes_and_accounts_receivable",
+            "receivable",
+        ),
         "inventory": ("inventory", "inventories"),
     },
     "income": {

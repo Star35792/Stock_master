@@ -57,7 +57,7 @@
 
 ## 当前项目定位
 
-Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，采用 PostgreSQL 控制面与事务存储、DuckDB + Parquet 温数据主存储、Redis 热数据派生层、MinIO 冷数据与对象持久化的分层架构。
+Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，目标为 PostgreSQL 控制面与事务存储、DuckDB + Parquet 温数据主存储、Redis 热数据派生层、MinIO 冷数据与对象持久化的分层架构（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。当前已按 clean cut 切换到 DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载 `raw -> market -> factor -> ... -> trade` 全链路与控制面；`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，MinIO/Redis/Parquet release 仍为后续切片。
 
 项目已经从 V1 可信日线数据中心推进到 V6 最小运维工作台。当前优先目标是把已经落地的因子、回测、组合、风控和模拟盘能力产品化、可观测化，并继续保持可信数据中心规则：
 

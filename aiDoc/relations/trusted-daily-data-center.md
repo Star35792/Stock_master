@@ -253,10 +253,12 @@ V1 稳定后已经扩展出的能力：
 
 ## 10. 存储与工具边界
 
-当前仓库同时存在三类数据相关能力：
+存储已从 PostgreSQL 单库切换到 DuckDB 分层湖（clean cut，不搬运历史分析数据）。当前实际形态：
 
-- 后端 PostgreSQL 是业务事实源，承载 `raw -> market -> factor -> strategy -> portfolio/risk -> trade` 的可信链路。
-- `backend/app/lake` 是 Parquet/DuckDB 数据湖工具，适合大文件导入、版本化离线研究和批量扫描，不替代 PostgreSQL 的可信裁决。
+- 后端 DuckDB 单库（`data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor -> strategy -> portfolio/risk -> trade` 的可信链路与控制面（`system.job_log` 等）。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
+- `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release），当前由离线脚本（`scripts/lake/`、`scripts/maintenance/build_curated_layer.py`）驱动，尚未接入 `daily_loop`。`factor_reads_curated` 关闭时因子仍走 ORM 路径；置真且 `adjust_type='qfq'` 时才注入 `CuratedDailyBarReader`。
 - `libs/hithink_sdk/marketdb` 是独立 DuckDB SDK/toolkit，适合 notebook、离线研究和 HiThink dump 使用，不直接等同于后端 `market` 可信层。
 
-任何会进入策略、回测、组合和模拟盘的生产数据，仍应以 PostgreSQL 中经过质量校验和血缘追踪的 `market` / `factor` 层为准。
+目标分层架构（MinIO 冷存、Parquet release + manifest 原子切换、Redis 热层、PostgreSQL 控制面/DuckDB 温层分离）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`；其中 MinIO 客户端、Parquet release 发布/校验、Redis 缓存目前仍是 config-only 桩，属后续切片。
+
+任何会进入策略、回测、组合和模拟盘的生产数据，仍应以经过质量校验和血缘追踪的 `market` / `factor` 层为准。
