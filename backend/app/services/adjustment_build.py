@@ -167,6 +167,7 @@ SELECT
     d.close * f.factor,
     d.volume,
     d.amount,
+    d.turnover_rate,
     :source_name || '_qfq',
     d.source_count,
     d.quality_score,

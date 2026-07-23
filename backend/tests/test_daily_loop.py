@@ -281,12 +281,33 @@ def test_daily_loop_skips_curated_build_by_default(
     assert job_log_repo.jobs[0].metadata_.get("curated_rebuilt") is None
 
 
-def test_daily_loop_fails_when_curated_flag_requires_duckdb(
+def test_daily_loop_rebuilds_curated_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
     security_repo = FakeSecurityRepository(["600519.SH"])
+    rebuild_calls: list[dict] = []
+    curated_calls: list[str] = []
+
+    def fake_rebuild(self: object, db: object, **kwargs: object):
+        rebuild_calls.append(kwargs)
+        from app.services.adjustment_build import AdjustmentBuildResult
+
+        return AdjustmentBuildResult(factor_rows=10, qfq_bar_rows=20, version="local")
+
+    def fake_build_prices_qfq_from_db(self: object, db_path: str) -> object:
+        curated_calls.append(db_path)
+        from app.lake.curated import CuratedDatasetResult
+
+        return CuratedDatasetResult(
+            dataset="prices_qfq",
+            path="/tmp/prices_qfq",
+            row_count=20,
+            min_date="2026-01-01",
+            max_date="2026-01-10",
+            created_at="2026-01-10T00:00:00+00:00",
+        )
 
     monkeypatch.setattr(
         "app.scheduler.daily_loop.run_hithink_daily_sync",
@@ -300,6 +321,14 @@ def test_daily_loop_fails_when_curated_flag_requires_duckdb(
         "app.scheduler.daily_loop.settings",
         Settings(factor_reads_curated=True),
     )
+    monkeypatch.setattr(
+        "app.services.adjustment_build.AdjustmentBuildService.rebuild_qfq",
+        fake_rebuild,
+    )
+    monkeypatch.setattr(
+        "app.lake.curated.CuratedLayer.build_prices_qfq_from_db",
+        fake_build_prices_qfq_from_db,
+    )
 
     result = run_daily_loop(
         symbols=["600519.SH"],
@@ -309,8 +338,44 @@ def test_daily_loop_fails_when_curated_flag_requires_duckdb(
         job_log_repository=job_log_repo,
     )
 
+    assert result.failed is False
+    assert result.curated_result is not None
+    assert result.curated_result.row_count == 20
+    assert len(rebuild_calls) == 1
+    assert rebuild_calls[0].get("source_name") == "daily_loop"
+    assert len(curated_calls) == 1
+    assert curated_calls[0].endswith("stock_master.duckdb")
+    assert job_log_repo.jobs[0].metadata_["curated_rebuilt"] is True
+    assert job_log_repo.jobs[0].metadata_["adjustment_factor_rows"] == 10
+
+
+def test_daily_loop_fails_when_sync_adjust_type_incompatible_with_curated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    security_repo = FakeSecurityRepository(["600519.SH"])
+
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.settings",
+        Settings(factor_reads_curated=True),
+    )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        sync_adjust_type="qfq",
+        factor_adjust_type="qfq",
+        session_factory=lambda: session,
+        security_repository=security_repo,
+        job_log_repository=job_log_repo,
+    )
+
     assert result.failed is True
     assert result.curated_error is not None
-    assert "DuckDB" in result.curated_error
+    assert "sync_adjust_type='none'" in result.curated_error
     assert result.factor_result is None
     assert job_log_repo.jobs[0].status == "failed"

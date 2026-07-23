@@ -1,7 +1,6 @@
 from collections.abc import Generator
 from pathlib import Path
 
-import duckdb
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -56,18 +55,3 @@ def get_db() -> Generator[Session]:
         yield db
     finally:
         db.close()
-
-
-def driver_connection(db: Session) -> duckdb.DuckDBPyConnection | None:
-    """Return the raw DuckDB connection behind a SQLAlchemy session, if any.
-
-    Allows lake code to run native DuckDB SQL on the same transaction scope as
-    the ORM session. Returns ``None`` for other dialects.
-    """
-    try:
-        conn = db.connection().connection.driver_connection
-        if type(conn).__module__.startswith("duckdb"):
-            return conn
-    except AttributeError:
-        pass
-    return None

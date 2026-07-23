@@ -11,12 +11,13 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
-from app.database.session import SessionLocal, driver_connection
+from app.database.session import SessionLocal
 from app.lake import CuratedLayer, DataLake
 from app.lake.curated import CuratedDatasetResult
 from app.repositories.market import SecurityRepository
@@ -24,6 +25,7 @@ from app.repositories.system import JobLogRepository
 from app.scheduler.daily_sync import run_hithink_daily_sync
 from app.scheduler.factor_pipeline import FactorBatchResult, run_all_factors
 from app.services import HithinkDailySyncResult
+from app.services.adjustment_build import AdjustmentBuildService
 
 logger = logging.getLogger(__name__)
 
@@ -136,16 +138,26 @@ def run_daily_loop(
 
         if settings.factor_reads_curated and factor_adjust_type == "qfq":
             try:
-                duckdb_conn = driver_connection(db)
-                if duckdb_conn is None:
-                    raise RuntimeError("factor_reads_curated requires a DuckDB session")
+                if sync_adjust_type != "none":
+                    raise ValueError(
+                        "factor_adjust_type='qfq' with factor_reads_curated requires "
+                        f"sync_adjust_type='none', got '{sync_adjust_type}'"
+                    )
+                adjustment = AdjustmentBuildService().rebuild_qfq(
+                    db,
+                    source_name="daily_loop",
+                    version=code_version,
+                )
+                db_path = str(Path(settings.metadata_db_path).resolve())
                 curated_result = CuratedLayer(DataLake()).build_prices_qfq_from_db(
-                    duckdb_conn
+                    db_path
                 )
                 result.curated_result = curated_result
                 job.metadata_ = {
                     **(job.metadata_ or {}),
                     "curated_rebuilt": True,
+                    "adjustment_factor_rows": adjustment.factor_rows,
+                    "adjustment_qfq_bar_rows": adjustment.qfq_bar_rows,
                     "curated_path": curated_result.path,
                     "curated_row_count": curated_result.row_count,
                     "curated_min_date": curated_result.min_date,

@@ -26,7 +26,7 @@ from uuid import uuid4
 import duckdb
 
 from app.lake.data_lake import DataLake, _compact_partitions
-from app.lake.qfq import create_qfq_view, create_qfq_view_from_tables
+from app.lake.qfq import create_qfq_view
 from app.lake.security_type import security_type_case_sql
 
 # Line items pulled out of the raw ``metrics`` JSON into typed DECIMAL columns.
@@ -130,44 +130,64 @@ class CuratedLayer:
 
     def build_prices_qfq_from_db(
         self,
-        connection: duckdb.DuckDBPyConnection,
+        db_path: str,
         *,
         daily_table: str = "market.daily_bar",
-        action_table: str = "raw.corporate_action",
-        trusted_filter: str = "quality_status = 'trusted' AND adjust_type = 'none'",
+        trusted_filter: str = "quality_status = 'trusted' AND adjust_type = 'qfq'",
     ) -> CuratedDatasetResult:
         """Materialize forward-adjusted OHLCV from live DuckDB tables.
 
-        This is the ``daily_loop`` path: after ``market.daily_bar`` and
-        ``raw.corporate_action`` have been populated in the same DuckDB file, the
-        curated layer is rebuilt so ``CuratedDailyBarReader`` always serves current
-        data. The write is idempotent: it writes to a temporary directory and
-        atomically replaces ``curated/prices_qfq`` on success.
+        This is the ``daily_loop`` path: after ``AdjustmentBuildService`` has
+        populated ``market.daily_bar`` with ``adjust_type='qfq'`` rows, the curated
+        layer is rebuilt so ``CuratedDailyBarReader`` always serves current data.
+        A dedicated DuckDB connection is opened to avoid polluting the ORM session.
 
-        ``daily_table`` is wrapped with the caller-supplied ``trusted_filter``.
-        The default selects trusted unadjusted bars, which is the correct base for
-        forward adjustment.
+        The write is idempotent: it writes to a temporary directory and atomically
+        replaces ``curated/prices_qfq`` on success.
         """
         target = self.root / "prices_qfq"
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         temp_target = self.root / f".prices_qfq.tmp-{stamp}-{uuid4().hex[:8]}"
         temp_target.mkdir(parents=True, exist_ok=False)
 
-        daily_source = (
-            f"SELECT symbol, trade_date, open, high, low, close, volume, amount, "
-            f"turnover_rate FROM {daily_table} WHERE {trusted_filter}"
-        )
+        connection = duckdb.connect(db_path)
         try:
             connection.execute("SET threads = 1")
-            create_qfq_view_from_tables(
-                connection,
-                daily_table=f"({daily_source})",
-                action_table=action_table,
+            stats = connection.execute(
+                f"""
+                SELECT count(*), min(trade_date), max(trade_date)
+                FROM {daily_table}
+                WHERE {trusted_filter}
+                """
+            ).fetchone()
+            connection.execute(
+                f"""
+                COPY (
+                    SELECT
+                        symbol,
+                        {security_type_case_sql("symbol")} AS security_type,
+                        trade_date,
+                        open, high, low, close,
+                        volume, amount,
+                        turnover_rate,
+                        CAST(1 AS DECIMAL(24,10)) AS qfq_factor,
+                        year(trade_date) AS year, month(trade_date) AS month
+                    FROM {daily_table}
+                    WHERE {trusted_filter}
+                    ORDER BY symbol, trade_date
+                ) TO ? (
+                    FORMAT PARQUET, COMPRESSION ZSTD,
+                    PARTITION_BY (year, month), PER_THREAD_OUTPUT false,
+                    ROW_GROUP_SIZE 100000
+                )
+                """,
+                [str(temp_target)],
             )
-            stats = _copy_prices_qfq(connection, temp_target, turnover_rate_null=False)
         except Exception:
             _cleanup(temp_target)
             raise
+        finally:
+            connection.close()
 
         _compact_partitions(temp_target)
         _replace_directory(temp_target, target)
