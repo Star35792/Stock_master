@@ -41,10 +41,8 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 
 - Python 3.13
 - FastAPI
-- PostgreSQL
+- DuckDB（单库存储 + 本地 Parquet 温层）
 - SQLAlchemy 2.x
-- Alembic
-- Redis
 - Pandas / Polars
 - Backtrader
 - Plotly

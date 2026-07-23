@@ -6,18 +6,17 @@ Stock Master 不再以 PostgreSQL 承载全部数据。面向**单机单用户**
 
 ```text
 外部数据源
-  -> raw landing / cold archive (本地 FS，接口预留可切 MinIO/S3)
+  -> raw landing / cold archive (本地 FS)
   -> trusted warm datasets (Parquet)
   -> DuckDB query and transformation + control plane + transactional truth
-  -> (Redis hot views — 推迟)
   -> API / factor / backtest / portfolio / risk
 
 DuckDB   = 单库同时承载控制面、事务事实与温层查询/转换引擎（个人单用户规模）
 Parquet  = warm analytical facts（本地磁盘）
 本地 FS  = 冷存储与不可变 landing（新闻等追加式原始文档同样先落此处）
-MinIO    = 推迟，未接入（多机/上云/大规模冷归档时再启）
-Redis    = 推迟，未接入（热视图当前直接回源 DuckDB）
 ```
+
+存储只使用 DuckDB 单库 + 本地磁盘 Parquet/文件，不引入 MinIO 对象存储，也不引入 Redis 缓存层（决策见 §1.2）。
 
 “可信事实源”不再等于某个特定数据库产品。可信性由数据契约、不可变版本、manifest、校验状态、血缘和发布指针共同定义。
 
@@ -31,11 +30,14 @@ Redis    = 推迟，未接入（热视图当前直接回源 DuckDB）
 
 只有出现真正的多进程并发写、或 DuckDB 事务重试频繁失败时，才重新评估拆 SQLite。
 
-### 1.2 关于 MinIO 的决策（T2）
+### 1.2 关于 MinIO 与 Redis 的决策（T2）
 
-个人单机场景**暂不引入 MinIO**：本地文件系统已提供持久性，MinIO 只多一层常驻服务、桶/凭证管理与故障面，与目标 §7"低运维复杂度"相悖，且当前无任何代码依赖它。新闻类外部因子（追加式不可变文档）虽是对象存储的典型场景，但个人 A 股新闻量级不大，按同一 raw→curated→factor 模式落成本地 Parquet/JSONL 即可；其真正需求是时点时间戳（防前视）、raw 不可变 + checksum 和 news-release→factor 血缘，与底层是 MinIO 还是本地盘无关。
+个人单机场景**不引入 MinIO，也不引入 Redis**：
 
-留门方式：raw/冷存落地走一个薄 blob-store 接口（`put/get/exists/checksum`），当前只需 `LocalFsBlobStore`；真到多机/上云再加 `MinioBlobStore`（S3 API 配置切换，非重写）。该接口在接入 raw 落地/新闻数据时再建，不提前投机构建。
+- MinIO：本地文件系统已提供持久性，MinIO 只多一层常驻服务、桶/凭证管理与故障面，与 §7"低运维复杂度"相悖，且无任何代码依赖它。新闻类外部因子（追加式不可变文档）虽是对象存储的典型场景，但个人 A 股新闻量级不大，按同一 raw→curated→factor 模式落成本地 Parquet/JSONL 即可；其真正需求是时点时间戳（防前视）、raw 不可变 + checksum 和 news-release→factor 血缘，与底层是 MinIO 还是本地盘无关。
+- Redis：单用户本地查询量下 DuckDB 直接回源的延迟已可接受，缓存层是纯负担且无代码消费；一旦引入还要处理版本化失效与故障降级，收益为负。
+
+只有真出现多机（研究机 + 调度机共享存储）、上云、或大规模冷归档时，才重新评估对象存储。届时 raw/冷存落地走一个薄 blob-store 接口（`put/get/exists/checksum`）留门即可（S3 API 配置切换，非重写），当前不提前构建。
 
 ## 2. 各存储职责
 
@@ -71,19 +73,19 @@ Parquet 保存列式数据文件，DuckDB 负责查询、转换、质量检查�
 
 禁止按单个 `symbol` 生成海量小分区。写入先进入 staging，校验通过后生成不可变 release，再原子切换 active manifest。修订数据生成新 release，不原地修改已发布 Parquet。
 
-### Redis：热数据派生层（推迟）
+### 热读取：直接回源 DuckDB（不引入 Redis）
 
-当前未接入。热读取（最新行情摘要、最近 K 线窗口、最新因子横截面/榜单、运维概览）直接回源 DuckDB；个人单用户查询量下延迟可接受。将来若引入，Redis 只保存可重建、短生命周期的派生视图，缓存键必须包含数据集 release/version 以便版本化失效；Redis 故障只能降级回源，不能导致事实丢失。
+热读取（最新行情摘要、最近 K 线窗口、最新因子横截面/榜单、运维概览）直接查询 DuckDB，不设缓存层。个人单用户查询量下延迟可接受，且省去版本化失效与故障降级的复杂度（决策见 §1.2）。
 
-### 冷存储与温层持久化后端：本地 FS（MinIO 推迟）
+### 冷存储与温层持久化后端：本地 FS
 
-冷存与不可变 landing 当前落本地文件系统：
+冷存与不可变 landing 落本地文件系统：
 
 - 外部供应商原始文件和不可变 landing 对象（含未来的新闻等追加式原始文档）。
 - 已发布 Parquet release 的持久副本。
 - 历史 manifest、校验报告、回测/研究制品和备份。
 
-访问统一走薄 blob-store 接口（`put/get/exists/checksum`，当前实现 `LocalFsBlobStore`），键规划为 `dataset/release/partition` 并启用 checksum，不得用覆盖同键模拟更新。真到多机/上云/大规模冷归档时，加 `MinioBlobStore` 实现即可切换，active release 和审计引用的版本不得删除。
+访问按 `dataset/release/partition` 组织目录并对已发布文件记录 checksum，不得用覆盖同键模拟更新；active release 和审计引用的版本不得删除。
 
 ## 3. 数据集发布合同
 
@@ -100,17 +102,16 @@ Parquet 保存列式数据文件，DuckDB 负责查询、转换、质量检查�
 
 1. 写 staging 文件。
 2. DuckDB 校验 schema、主键唯一性、行数、日期范围和金融质量规则。
-3. 上传 MinIO 并核对 checksum。
-4. 在 PostgreSQL 事务中登记 release 并切换 active 指针。
-5. 预热 Redis 常用视图。
-6. 延迟清理旧本地缓存；不能先删旧版本再发布新版本。
+3. 校验通过后把文件移入 `dataset/release/partition` 持久目录并记录 checksum。
+4. 在 DuckDB 事务中登记 release 并原子切换 active 指针。
+5. 延迟清理旧本地缓存；不能先删旧版本再发布新版本。
 
 ## 4. 时点、精度与血缘
 
 - 价格、金额和比率在 Parquet 中使用定点 `DECIMAL`，禁止为了方便统一转为 `DOUBLE`。
 - 财务、估值和事件数据保留 `source_available_at` / `first_seen_at` / `effective_at`，因子只能读取计算时点已可得版本。
 - 每条因子 release 绑定输入 market release、因子定义版本、代码版本和参数。
-- 人工修复写 PostgreSQL 审计记录，并据此重建新的温层 release；不得直接编辑 Parquet 文件。
+- 人工修复写 DuckDB 审计记录，并据此重建新的温层 release；不得直接编辑 Parquet 文件。
 - 回测与风控必须绑定明确 release，禁止使用无版本的“最新数据”重放历史结果。
 
 ## 5. 切换顺序
@@ -121,20 +122,20 @@ Parquet 保存列式数据文件，DuckDB 负责查询、转换、质量检查�
 2. 温层接入：把 `lake` 的 `curated/prices_qfq`、`fundamentals_pit` 与 factor release 从离线脚本接入 `daily_loop`，让 `factor_reads_curated` 可安全开启（接入前先修 QFQ 浮点精度与 `turnover_rate=NULL` 降级）。
 3. 因子值：按运行批量写 Parquet 温层，控制面只保留定义、运行与摘要；API 从 DuckDB 分页查询。
 4. 财务/估值/另类数据（含未来新闻因子）和回测明细按相同 raw→curated→factor 模式重建。
-5. blob-store 接口 + `LocalFsBlobStore` 用于 raw 不可变落地；MinIO/Redis 按 §1.1/§1.2 推迟。
+5. raw 不可变落地直接写本地 FS 的 `dataset/release/partition` 目录并记录 checksum；不引入 MinIO/Redis（见 §1.2）。
 
 ## 6. 验收标准
 
 - 新环境从空库重建后，核心 API、因子和回测可以使用新数据工作。
 - DuckDB 中的交易、风控和审计事务行为在换库后保持不变（幂等、并发安全、可追溯）。
 - 相同温层 release 的 DuckDB 查询结果可重复，重启后仍可读。
-- MinIO/Redis 未接入不影响正确性；将来接入后，Redis 清空须能回源恢复，MinIO 不可用时不得发布不完整 release。
+- 发布流程在本地 FS 上保持原子性：release 未完整写入并登记前不切换 active 指针，中断不产生半发布状态。
 - 任意回测结果可追溯到输入对象 checksum、温层 release、代码和参数版本。
 
 ## 7. 明确非目标
 
 - 不把 DuckDB 当多写高并发 OLTP 数据库；个人单用户规模下以乐观并发重试兜底即可。
 - 不为控制面额外引入 SQLite 或 PostgreSQL（见 §1.1）。
-- 不在个人单机阶段引入 MinIO/Redis（见 §1.2/§2）。
+- 不引入 MinIO 对象存储与 Redis 缓存层（见 §1.2）；只用 DuckDB 单库 + 本地 Parquet/文件。
 - 不保留或搬运历史 PostgreSQL 分析数据；只保留结构与契约并重新采集，也不建设双写兼容层。
 - 不在首阶段引入 Spark、Iceberg、Delta Lake 等分布式组件；优先保持 DuckDB + 本地 Parquet 的低运维复杂度。

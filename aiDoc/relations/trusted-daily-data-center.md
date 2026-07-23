@@ -259,6 +259,6 @@ V1 稳定后已经扩展出的能力：
 - `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release），当前由离线脚本（`scripts/lake/`、`scripts/maintenance/build_curated_layer.py`）驱动，尚未接入 `daily_loop`。`factor_reads_curated` 关闭时因子仍走 ORM 路径；置真且 `adjust_type='qfq'` 时才注入 `CuratedDailyBarReader`。
 - `libs/hithink_sdk/marketdb` 是独立 DuckDB SDK/toolkit，适合 notebook、离线研究和 HiThink dump 使用，不直接等同于后端 `market` 可信层。
 
-目标分层架构（MinIO 冷存、Parquet release + manifest 原子切换、Redis 热层、PostgreSQL 控制面/DuckDB 温层分离）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`；其中 MinIO 客户端、Parquet release 发布/校验、Redis 缓存目前仍是 config-only 桩，属后续切片。
+分层存储架构（DuckDB 单库承载控制面+事务+温层查询、本地 Parquet 温层、本地 FS 冷存；不引入 PostgreSQL/SQLite/MinIO/Redis）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`；其中 Parquet release 发布/校验与温层接入 `daily_loop` 属后续切片。
 
 任何会进入策略、回测、组合和模拟盘的生产数据，仍应以经过质量校验和血缘追踪的 `market` / `factor` 层为准。

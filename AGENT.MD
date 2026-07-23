@@ -57,7 +57,7 @@
 
 ## 当前项目定位
 
-Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，目标为 PostgreSQL 控制面与事务存储、DuckDB + Parquet 温数据主存储、Redis 热数据派生层、MinIO 冷数据与对象持久化的分层架构（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。当前已按 clean cut 切换到 DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载 `raw -> market -> factor -> ... -> trade` 全链路与控制面；`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，MinIO/Redis/Parquet release 仍为后续切片。
+Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，面向单机单用户采用极简分层存储：DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载控制面、事务事实与 `raw -> market -> factor -> ... -> trade` 全链路，大体量列式温层落本地 Parquet（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。经评估不引入 PostgreSQL/SQLite/MinIO/Redis。`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，接入 `daily_loop` 与 Parquet release 为后续切片。
 
 项目已经从 V1 可信日线数据中心推进到 V6 最小运维工作台。当前优先目标是把已经落地的因子、回测、组合、风控和模拟盘能力产品化、可观测化，并继续保持可信数据中心规则：
 
@@ -146,9 +146,9 @@ models / database
 ### 代码风格
 
 - 使用 Python 3.13。
-- 使用 FastAPI、SQLAlchemy 2.x、Alembic。
-- PostgreSQL 保留控制面、审计、组合、风控和交易等强事务数据；大体量分析事实使用 DuckDB + Parquet，Redis 只保存可重建热视图，MinIO 保存不可变原始对象、Parquet release 和冷历史。
-- 数据中心核心价格、金额和比率必须使用精确定点类型；PostgreSQL 使用 `numeric`，Parquet/DuckDB 使用 `DECIMAL`，不要用浮点保存核心金融数据。
+- 使用 FastAPI、SQLAlchemy 2.x。
+- DuckDB 单库（`data/stock_master.duckdb`）承载控制面、审计、组合、风控、交易等强事务数据与大体量分析事实的查询；大体量列式温层落本地 Parquet。不引入 PostgreSQL、SQLite、MinIO 或 Redis（决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。
+- 数据中心核心价格、金额和比率必须使用精确定点类型；DuckDB 使用 `Numeric`/`DECIMAL`，Parquet 使用 `DECIMAL`，不要用浮点保存核心金融数据。
 - 字段命名使用 snake_case。
 - 证券代码统一命名为 `symbol`。
 - 交易日期统一命名为 `trade_date`。
