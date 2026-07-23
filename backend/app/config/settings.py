@@ -1,7 +1,6 @@
 from functools import cached_property
 from hashlib import sha256
 from pathlib import Path
-from urllib.parse import quote
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,13 +25,6 @@ class Settings(BaseSettings):
 
     metadata_db_path: str = "data/stock_master.duckdb"
 
-    redis_url_override: str | None = Field(default=None, alias="REDIS_URL", repr=False)
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_db: int = 0
-    redis_username: str | None = None
-    redis_password: str | None = Field(default=None, repr=False)
-
     akshare_timeout_seconds: int = 30
 
     hithink_finance_api_key: str | None = Field(default=None, repr=False)
@@ -46,12 +38,6 @@ class Settings(BaseSettings):
     # ORM path regardless of this flag.
     factor_reads_curated: bool = False
 
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = Field(default="stock_master", repr=False)
-    minio_secret_key: str = Field(default="stock_master_dev_secret", repr=False)
-    minio_bucket: str = "stock-master"
-    minio_secure: bool = False
-
     eastmoney_timeout_seconds: int = 15
     eastmoney_retries: int = 2
     xueqiu_cookie: str | None = Field(default=None, repr=False)
@@ -60,19 +46,6 @@ class Settings(BaseSettings):
     @cached_property
     def database_url(self) -> str:
         return f"duckdb:///{self.metadata_db_path}"
-
-    @cached_property
-    def redis_url(self) -> str:
-        if self.redis_url_override:
-            return self.redis_url_override
-
-        auth = ""
-        if self.redis_password:
-            username = quote(self.redis_username or "")
-            password = quote(self.redis_password)
-            auth = f"{username}:{password}@" if username else f":{password}@"
-
-        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
 
 settings = Settings()

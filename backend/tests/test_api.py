@@ -31,12 +31,7 @@ def test_health(monkeypatch) -> None:
     monkeypatch.setattr(
         health_module,
         "check_database",
-        lambda: health_module.HealthComponent(status="ok"),
-    )
-    monkeypatch.setattr(
-        health_module,
-        "check_redis",
-        lambda: health_module.HealthComponent(status="ok"),
+        lambda: health_module.HealthComponent(status="ok", message="duckdb"),
     )
 
     response = client.get("/health")
@@ -44,8 +39,7 @@ def test_health(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "database": {"status": "ok", "message": None},
-        "redis": {"status": "ok", "message": None},
+        "database": {"status": "ok", "message": "duckdb"},
     }
 
 
@@ -53,11 +47,6 @@ def test_health_returns_503_when_dependency_is_down(monkeypatch) -> None:
     monkeypatch.setattr(
         health_module,
         "check_database",
-        lambda: health_module.HealthComponent(status="ok"),
-    )
-    monkeypatch.setattr(
-        health_module,
-        "check_redis",
         lambda: health_module.HealthComponent(status="error", message="connection refused"),
     )
 
@@ -65,7 +54,7 @@ def test_health_returns_503_when_dependency_is_down(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert response.json()["status"] == "degraded"
-    assert response.json()["redis"] == {"status": "error", "message": "connection refused"}
+    assert response.json()["database"] == {"status": "error", "message": "connection refused"}
 
 
 def test_openapi_contains_v1_routes() -> None:
