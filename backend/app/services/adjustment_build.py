@@ -10,6 +10,7 @@ class AdjustmentBuildResult:
     factor_rows: int
     qfq_bar_rows: int
     version: str
+    release_id: str | None = None
 
 
 class AdjustmentBuildService:
@@ -20,6 +21,7 @@ class AdjustmentBuildService:
         source_name: str = "hithink_finance_dump",
         version: str = "v1",
         qfq_start_date: date | None = None,
+        release_id: str | None = None,
     ) -> AdjustmentBuildResult:
         if not source_name.strip():
             raise ValueError("source_name must not be empty")
@@ -30,19 +32,23 @@ class AdjustmentBuildService:
             "source_name": source_name,
             "version": version,
             "qfq_start_date": qfq_start_date,
+            "release_id": release_id,
         }
         try:
             db.execute(text(_DELETE_FACTORS_SQL), params)
-            factor_result = db.execute(text(_BUILD_FACTORS_SQL), params)
-            qfq_result = db.execute(text(_BUILD_QFQ_BARS_SQL), params)
+            db.execute(text(_BUILD_FACTORS_SQL), params)
+            db.execute(text(_BUILD_QFQ_BARS_SQL), params)
+            factor_rows = int(db.scalar(text(_COUNT_FACTORS_SQL), params) or 0)
+            qfq_bar_rows = int(db.scalar(text(_COUNT_QFQ_BARS_SQL), params) or 0)
             db.commit()
         except Exception:
             db.rollback()
             raise
         return AdjustmentBuildResult(
-            factor_rows=max(factor_result.rowcount or 0, 0),
-            qfq_bar_rows=max(qfq_result.rowcount or 0, 0),
+            factor_rows=factor_rows,
+            qfq_bar_rows=qfq_bar_rows,
             version=version,
+            release_id=release_id,
         )
 
 
@@ -55,7 +61,7 @@ WHERE source_name = :source_name
 
 _BUILD_FACTORS_SQL = """
 INSERT INTO market.adjustment_factor (
-    symbol, trade_date, adjust_type, factor, source_name, version, quality_status
+    symbol, trade_date, adjust_type, factor, source_name, version, release_id, quality_status
 )
 WITH effective_events AS (
     SELECT
@@ -144,6 +150,7 @@ SELECT
     backward_factor / NULLIF(last_factor, 0),
     :source_name,
     :version,
+    :release_id,
     'trusted'
 FROM normalized
 WHERE backward_factor > 0 AND last_factor > 0
@@ -152,7 +159,7 @@ WHERE backward_factor > 0 AND last_factor > 0
 _BUILD_QFQ_BARS_SQL = """
 INSERT INTO market.daily_bar (
     symbol, security_type, trade_date, adjust_type,
-    open, high, low, close, volume, amount,
+    open, high, low, close, volume, amount, turnover_rate,
     source_name, source_count, quality_score, quality_status,
     is_suspect, selected_raw_id
 )
@@ -194,10 +201,28 @@ ON CONFLICT (symbol, trade_date, adjust_type) DO UPDATE SET
     close = EXCLUDED.close,
     volume = EXCLUDED.volume,
     amount = EXCLUDED.amount,
+    turnover_rate = EXCLUDED.turnover_rate,
     source_name = EXCLUDED.source_name,
     source_count = EXCLUDED.source_count,
     quality_score = EXCLUDED.quality_score,
     quality_status = EXCLUDED.quality_status,
     is_suspect = EXCLUDED.is_suspect,
     selected_raw_id = EXCLUDED.selected_raw_id
+"""
+
+_COUNT_FACTORS_SQL = """
+SELECT COUNT(*) FROM market.adjustment_factor
+WHERE source_name = :source_name
+  AND version = :version
+  AND adjust_type = 'qfq'
+"""
+
+_COUNT_QFQ_BARS_SQL = """
+SELECT COUNT(*) FROM market.daily_bar
+WHERE adjust_type = 'qfq'
+  AND source_name = :source_name || '_qfq'
+  AND (
+      CAST(:qfq_start_date AS date) IS NULL
+      OR trade_date >= CAST(:qfq_start_date AS date)
+  )
 """

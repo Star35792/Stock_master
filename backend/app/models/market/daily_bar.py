@@ -67,7 +67,10 @@ class DailyBar(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_daily_bar_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("market_daily_bar_id_seq"),
+        server_default=text("nextval('market_daily_bar_id_seq')"),
+        primary_key=True,
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     security_type: Mapped[str] = mapped_column(String(20), nullable=False)

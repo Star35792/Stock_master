@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.data_sources import HithinkDumpDataSource, HithinkDumpKind
 from app.data_sources.base import DailyBarRecord
+from app.lake.security_type import security_type_case_sql
 from app.models.market import CorporateAction
 from app.models.raw import RawCorporateAction
 from app.repositories.market import SecurityRepository
@@ -72,39 +73,54 @@ class HithinkDumpCollectionService:
         )
         row_count = 0
         try:
-            driver_connection = _driver_connection(db)
-            if driver_connection is not None:
-                with driver_connection.cursor() as cursor:
-                    with cursor.copy(_DAILY_BAR_COPY_SQL) as copy:
-                        for chunk in self.data_source.iter_daily_rows(dump.path):
-                            for item in chunk:
-                                copy.write_row(
-                                    _daily_copy_row(
-                                        batch.id,
-                                        self.data_source.name,
-                                        self.data_source.source_type,
-                                        item,
-                                    )
-                                )
-                            row_count += len(chunk)
+            duckdb_conn = _duckdb_connection(db)
+            if duckdb_conn is not None:
+                # DuckDB-native bulk load: read the Parquet once and insert
+                # directly into raw.daily_bar. This preserves the raw-layer
+                # audit via raw.import_batch while avoiding Python-level ORM
+                # churn for multi-million-row dumps.
+                _bulk_import_daily_duckdb(
+                    duckdb_conn,
+                    batch_id=batch.id,
+                    source_name=self.data_source.name,
+                    source_type=self.data_source.source_type,
+                    path=dump.path,
+                )
+                row_count = _count_batch_rows(db, batch.id)
             else:
-                for chunk in self.data_source.iter_daily_rows(dump.path):
-                    symbols = {str(item["thscode"]).upper() for item in chunk}
-                    security_types = self.security_repository.get_security_types(db, symbols)
-                    rows = [
-                        _to_raw_daily_bar(
-                            batch_id=batch.id,
-                            source_name=self.data_source.name,
-                            source_type=self.data_source.source_type,
-                            source_priority=40,
-                            record=_to_record(item),
-                            security_type=security_types.get(str(item["thscode"]).upper()),
-                        )
-                        for item in chunk
-                    ]
-                    db.add_all(rows)
-                    db.flush()
-                    row_count += len(rows)
+                driver_connection = _driver_connection(db)
+                if driver_connection is not None:
+                    with driver_connection.cursor() as cursor:
+                        with cursor.copy(_DAILY_BAR_COPY_SQL) as copy:
+                            for chunk in self.data_source.iter_daily_rows(dump.path):
+                                for item in chunk:
+                                    copy.write_row(
+                                        _daily_copy_row(
+                                            batch.id,
+                                            self.data_source.name,
+                                            self.data_source.source_type,
+                                            item,
+                                        )
+                                    )
+                                row_count += len(chunk)
+                else:
+                    for chunk in self.data_source.iter_daily_rows(dump.path):
+                        symbols = {str(item["thscode"]).upper() for item in chunk}
+                        security_types = self.security_repository.get_security_types(db, symbols)
+                        rows = [
+                            _to_raw_daily_bar(
+                                batch_id=batch.id,
+                                source_name=self.data_source.name,
+                                source_type=self.data_source.source_type,
+                                source_priority=40,
+                                record=_to_record(item),
+                                security_type=security_types.get(str(item["thscode"]).upper()),
+                            )
+                            for item in chunk
+                        ]
+                        db.add_all(rows)
+                        db.flush()
+                        row_count += len(rows)
             self.repository.finish_batch(
                 db,
                 batch,
@@ -159,42 +175,58 @@ class HithinkDumpCollectionService:
         )
         row_count = 0
         try:
-            for chunk in self.data_source.iter_adjustment_rows(dump.path, chunk_size=1_000):
-                raw_rows = [_to_raw_action(batch.id, self.data_source.name, item) for item in chunk]
-                db.add_all(raw_rows)
-                market_by_key = {}
-                for item in chunk:
-                    market_row = _to_market_action(self.data_source.name, item)
-                    if not _valid_market_action(market_row):
-                        continue
-                    key = (
-                        market_row["symbol"],
-                        market_row["ex_date"],
-                        market_row["action_type"],
-                        market_row["source_name"],
-                    )
-                    market_by_key[key] = market_row
-                market_rows = list(market_by_key.values())
-                if market_rows:
-                    statement = insert(CorporateAction).values(market_rows)
-                    statement = statement.on_conflict_do_update(
-                        index_elements=[
-                            CorporateAction.symbol,
-                            CorporateAction.ex_date,
-                            CorporateAction.action_type,
-                            CorporateAction.source_name,
-                        ],
-                        set_={
-                            "cash_dividend": statement.excluded.cash_dividend,
-                            "bonus_share_ratio": statement.excluded.bonus_share_ratio,
-                            "rights_issue_ratio": statement.excluded.rights_issue_ratio,
-                            "rights_issue_price": statement.excluded.rights_issue_price,
-                            "raw_payload": statement.excluded.raw_payload,
-                        },
-                    )
-                    db.execute(statement)
-                db.flush()
-                row_count += len(chunk)
+            duckdb_conn = _duckdb_connection(db)
+            if duckdb_conn is not None:
+                _bulk_import_adjustments_duckdb(
+                    duckdb_conn,
+                    batch_id=batch.id,
+                    source_name=self.data_source.name,
+                    path=dump.path,
+                )
+                row_count = _count_batch_rows_in_table(
+                    db,
+                    table="raw.corporate_action",
+                    batch_id=batch.id,
+                )
+            else:
+                for chunk in self.data_source.iter_adjustment_rows(dump.path, chunk_size=1_000):
+                    raw_rows = [
+                        _to_raw_action(batch.id, self.data_source.name, item) for item in chunk
+                    ]
+                    db.add_all(raw_rows)
+                    market_by_key = {}
+                    for item in chunk:
+                        market_row = _to_market_action(self.data_source.name, item)
+                        if not _valid_market_action(market_row):
+                            continue
+                        key = (
+                            market_row["symbol"],
+                            market_row["ex_date"],
+                            market_row["action_type"],
+                            market_row["source_name"],
+                        )
+                        market_by_key[key] = market_row
+                    market_rows = list(market_by_key.values())
+                    if market_rows:
+                        statement = insert(CorporateAction).values(market_rows)
+                        statement = statement.on_conflict_do_update(
+                            index_elements=[
+                                CorporateAction.symbol,
+                                CorporateAction.ex_date,
+                                CorporateAction.action_type,
+                                CorporateAction.source_name,
+                            ],
+                            set_={
+                                "cash_dividend": statement.excluded.cash_dividend,
+                                "bonus_share_ratio": statement.excluded.bonus_share_ratio,
+                                "rights_issue_ratio": statement.excluded.rights_issue_ratio,
+                                "rights_issue_price": statement.excluded.rights_issue_price,
+                                "raw_payload": statement.excluded.raw_payload,
+                            },
+                        )
+                        db.execute(statement)
+                    db.flush()
+                    row_count += len(chunk)
             self.repository.finish_batch(
                 db,
                 batch,
@@ -215,10 +247,12 @@ class HithinkDumpCollectionService:
         )
 
     def build_market_daily(self, db: Session, *, batch_no: str) -> int:
-        db.execute(text(_ENSURE_DUMP_SECURITIES_SQL), {"batch_no": batch_no})
-        result = db.execute(text(_BUILD_MARKET_DAILY_SQL), {"batch_no": batch_no})
+        params = {"batch_no": batch_no}
+        db.execute(text(_ENSURE_DUMP_SECURITIES_SQL), params)
+        db.execute(text(_BUILD_MARKET_DAILY_SQL), params)
+        market_rows = int(db.scalar(text(_COUNT_MARKET_DAILY_SQL), params) or 0)
         db.commit()
-        return max(result.rowcount or 0, 0)
+        return market_rows
 
 
 def _to_record(item: dict) -> DailyBarRecord:
@@ -296,6 +330,17 @@ ON CONFLICT (symbol, trade_date, adjust_type) DO UPDATE SET
     selected_raw_id = EXCLUDED.selected_raw_id
 """
 
+_COUNT_MARKET_DAILY_SQL = """
+SELECT COUNT(*)
+FROM market.daily_bar d
+JOIN raw.daily_bar r
+  ON r.id = d.selected_raw_id
+JOIN raw.import_batch b
+  ON b.id = r.batch_id
+WHERE b.batch_no = :batch_no
+  AND d.adjust_type = 'none'
+"""
+
 _ENSURE_DUMP_SECURITIES_SQL = """
 INSERT INTO market.security (
     symbol, raw_symbol, name, security_type, exchange, currency,
@@ -306,16 +351,16 @@ SELECT
     split_part(r.symbol, '.', 1),
     r.symbol,
     CASE
-        WHEN split_part(r.symbol, '.', 1)
-          LIKE ANY (ARRAY['15%', '16%', '18%', '51%', '56%', '58%'])
+        WHEN substr(split_part(r.symbol, '.', 1), 1, 2)
+          IN ('15', '16', '18', '51', '56', '58')
             THEN 'etf'
-        WHEN split_part(r.symbol, '.', 1) LIKE '399%'
+        WHEN substr(split_part(r.symbol, '.', 1), 1, 3) = '399'
           OR (
               split_part(r.symbol, '.', 2) = 'SH'
-              AND split_part(r.symbol, '.', 1) LIKE '000%'
+              AND substr(split_part(r.symbol, '.', 1), 1, 3) = '000'
           ) THEN 'index'
-        WHEN split_part(r.symbol, '.', 1)
-          LIKE ANY (ARRAY['00%', '30%', '60%', '68%', '83%', '87%', '92%'])
+        WHEN substr(split_part(r.symbol, '.', 1), 1, 2)
+          IN ('00', '30', '60', '68', '83', '87', '92')
             THEN 'stock'
         ELSE 'unknown'
     END,
@@ -334,6 +379,150 @@ WHERE b.batch_no = :batch_no
 GROUP BY r.symbol
 ON CONFLICT (symbol) DO NOTHING
 """
+
+
+def _duckdb_connection(db: Session):
+    try:
+        conn = db.connection().connection.driver_connection
+        if type(conn).__module__.startswith("duckdb"):
+            return conn
+    except AttributeError:
+        pass
+    return None
+
+
+def _bulk_import_daily_duckdb(
+    connection,
+    *,
+    batch_id: int,
+    source_name: str,
+    source_type: str,
+    path,
+) -> None:
+    symbol_expr = "upper(thscode)"
+    connection.execute(
+        f"""
+        INSERT INTO raw.daily_bar (
+            batch_id, source_name, source_type, source_priority,
+            symbol, raw_symbol, security_type, trade_date, adjust_type,
+            open, high, low, close, volume, amount
+        )
+        SELECT
+            ?, ?, ?, 40,
+            {symbol_expr},
+            {symbol_expr},
+            {security_type_case_sql(symbol_expr)},
+            epoch_ms(date_ms + 28800000)::DATE,
+            'none',
+            open_price, high_price, low_price, close_price, volume, turnover
+        FROM read_parquet(?)
+        WHERE adjusted = 'none'
+        """,
+        [batch_id, source_name, source_type, str(path)],
+    )
+
+
+def _count_batch_rows(db: Session, batch_id: int) -> int:
+    return _count_batch_rows_in_table(db, table="raw.daily_bar", batch_id=batch_id)
+
+
+def _count_batch_rows_in_table(db: Session, *, table: str, batch_id: int) -> int:
+    if table not in {"raw.daily_bar", "raw.corporate_action"}:
+        raise ValueError(f"unsupported raw table: {table}")
+    return int(
+        db.scalar(
+            text(f"SELECT count(*) FROM {table} WHERE batch_id = :batch_id"),
+            {"batch_id": batch_id},
+        )
+        or 0
+    )
+
+
+def _bulk_import_adjustments_duckdb(
+    connection,
+    *,
+    batch_id: int,
+    source_name: str,
+    path,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO raw.corporate_action (
+            batch_id, source_name, symbol, ex_date,
+            dividend_per_share, per_share_bonus,
+            allotment_ratio, allotment_price, raw_payload, row_hash
+        )
+        SELECT
+            ?, ?, upper(thscode), epoch_ms(ex_date_ms + 28800000)::DATE,
+            dividend_per_share, per_share_bonus,
+            allotment_ratio, allotment_price,
+            to_json(struct_pack(
+                thscode := thscode,
+                ticker := ticker,
+                ex_date_ms := ex_date_ms,
+                dividend_per_share := dividend_per_share,
+                per_share_bonus := per_share_bonus,
+                allotment_ratio := allotment_ratio,
+                allotment_price := allotment_price,
+                currency := currency
+            )),
+            sha256(to_json(struct_pack(
+                thscode := thscode,
+                ticker := ticker,
+                ex_date_ms := ex_date_ms,
+                dividend_per_share := dividend_per_share,
+                per_share_bonus := per_share_bonus,
+                allotment_ratio := allotment_ratio,
+                allotment_price := allotment_price,
+                currency := currency
+            )))
+        FROM read_parquet(?)
+        """,
+        [batch_id, source_name, str(path)],
+    )
+    connection.execute(
+        """
+        INSERT INTO market.corporate_action (
+            symbol, ex_date, action_type,
+            cash_dividend, bonus_share_ratio,
+            rights_issue_ratio, rights_issue_price,
+            source_name, raw_payload
+        )
+        SELECT
+            upper(thscode),
+            epoch_ms(ex_date_ms + 28800000)::DATE,
+            CASE
+                WHEN ((coalesce(dividend_per_share, 0) <> 0)::INT
+                    + (coalesce(per_share_bonus, 0) <> 0)::INT
+                    + (coalesce(allotment_ratio, 0) <> 0)::INT) > 1 THEN 'mixed'
+                WHEN coalesce(dividend_per_share, 0) <> 0 THEN 'cash_dividend'
+                WHEN coalesce(per_share_bonus, 0) <> 0 THEN 'bonus_share'
+                ELSE 'rights_issue'
+            END,
+            dividend_per_share,
+            per_share_bonus,
+            allotment_ratio,
+            allotment_price,
+            ?,
+            to_json(struct_pack(
+                thscode := thscode,
+                ticker := ticker,
+                ex_date_ms := ex_date_ms,
+                dividend_per_share := dividend_per_share,
+                per_share_bonus := per_share_bonus,
+                allotment_ratio := allotment_ratio,
+                allotment_price := allotment_price,
+                currency := currency
+            ))
+        FROM read_parquet(?)
+        WHERE coalesce(dividend_per_share, 0) >= 0
+          AND coalesce(per_share_bonus, 0) >= 0
+          AND coalesce(allotment_ratio, 0) >= 0
+          AND coalesce(allotment_price, 0) >= 0
+        ON CONFLICT (symbol, ex_date, action_type, source_name) DO NOTHING
+        """,
+        [source_name, str(path)],
+    )
 
 
 def _driver_connection(db: Session):

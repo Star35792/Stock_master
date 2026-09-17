@@ -200,11 +200,11 @@ class BacktestRepository:
         run.final_equity = result.final_equity
         run.total_return = result.total_return
         run.status = "success"
-        run.finished_at = db.scalar(select(func.clock_timestamp()))
+        run.finished_at = db.scalar(select(func.now()))
         db.add(run)
 
     def fail_run(self, db: Session, *, run: BacktestRun, error_message: str) -> None:
         run.status = "failed"
         run.error_message = error_message
-        run.finished_at = db.scalar(select(func.clock_timestamp()))
+        run.finished_at = db.scalar(select(func.now()))
         db.add(run)

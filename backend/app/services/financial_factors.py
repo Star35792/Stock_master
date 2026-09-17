@@ -361,6 +361,7 @@ class FinancialFactorService:
         factor_names: list[str] | None = None,
         adjust_type: str = "qfq",
         code_version: str = "local",
+        release_id: str | None = None,
     ) -> FinancialFactorRunResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -432,6 +433,7 @@ class FinancialFactorService:
                     "availability_policy": "report_date_before_trade_date",
                 },
                 code_version=code_version,
+                release_id=release_id,
                 input_start_date=min((row.report_date for row in statements), default=None),
                 input_end_date=end_date,
                 metadata={

@@ -74,7 +74,7 @@ class ManualCorrectionRepository:
             new_value=new_value,
             reason=reason,
             corrected_by=corrected_by,
-            applied_at=db.scalar(select(func.clock_timestamp())),
+            applied_at=db.scalar(select(func.now())),
         )
         db.add(correction)
         return correction

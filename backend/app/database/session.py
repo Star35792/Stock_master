@@ -37,15 +37,52 @@ SCHEMAS = (
     "portfolio",
     "risk",
     "trade",
+    "lake",
     "metadata",
 )
 
+
+def _create_schemas(bind: Engine) -> None:
+    with bind.connect() as conn:
+        for schema in SCHEMAS:
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+        conn.commit()
+
+
+def apply_schema_compatibility(bind: Engine) -> None:
+    """Apply idempotent upgrades required by pre-release DuckDB databases.
+
+    ``MetaData.create_all`` creates new tables but does not add columns to
+    existing tables. Keep the small compatibility bridge explicit until a
+    versioned DuckDB migration runner replaces it.
+    """
+    statements = (
+        "ALTER TABLE factor.factor_run ADD COLUMN IF NOT EXISTS release_id VARCHAR",
+        "ALTER TABLE market.adjustment_factor "
+        "ADD COLUMN IF NOT EXISTS release_id VARCHAR",
+    )
+    with bind.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
+def initialize_database(bind: Engine | None = None) -> None:
+    """Create missing schemas/tables and upgrade supported legacy layouts."""
+    resolved_bind = bind or engine
+    _create_schemas(resolved_bind)
+
+    # Import model modules lazily so Base.metadata is complete without creating
+    # a session/models import cycle at module load time.
+    import app.models  # noqa: F401
+    from app.database.base import Base
+
+    Base.metadata.create_all(bind=resolved_bind)
+    apply_schema_compatibility(resolved_bind)
+
+
 Path(settings.metadata_db_path).parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(settings.database_url)
-with engine.connect() as conn:
-    for schema in SCHEMAS:
-        conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-    conn.commit()
+_create_schemas(engine)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 

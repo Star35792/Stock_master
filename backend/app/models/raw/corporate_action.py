@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import JSON, BigInteger, Date, Index, Numeric, Sequence, String
+from sqlalchemy import JSON, BigInteger, Date, Index, Numeric, Sequence, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -17,7 +17,10 @@ class RawCorporateAction(Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("raw_corporate_action_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("raw_corporate_action_id_seq"),
+        server_default=text("nextval('raw_corporate_action_id_seq')"),
+        primary_key=True,
     )
     batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)

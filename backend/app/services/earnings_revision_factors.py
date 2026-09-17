@@ -126,6 +126,7 @@ class EarningsRevisionFactorService:
         factor_names: list[str] | None = None,
         adjust_type: str = "qfq",
         code_version: str = "local",
+        release_id: str | None = None,
     ) -> EarningsRevisionFactorRunResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -192,6 +193,7 @@ class EarningsRevisionFactorService:
                     "lookback_days": LOOKBACK_DAYS,
                 },
                 code_version=code_version,
+                release_id=release_id,
                 input_start_date=input_start_date,
                 input_end_date=end_date,
                 metadata={

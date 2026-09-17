@@ -30,6 +30,7 @@
 - `portfolio`：组合计划和目标。
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
 - `trade`：模拟盘账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
+- `lake`：内容寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
 - `system`：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
 
 ## 同步规则

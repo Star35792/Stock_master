@@ -78,6 +78,7 @@ def run_all_factors(
     symbols: list[str] | None = None,
     adjust_type: str = "qfq",
     code_version: str = "local",
+    release_id: str | None = None,
     session_factory: Callable[[], Session] = SessionLocal,
     job_log_repository: JobLogRepository | None = None,
 ) -> FactorBatchResult:
@@ -101,6 +102,7 @@ def run_all_factors(
                 "adjust_type": adjust_type,
                 "symbols_count": len(symbols) if symbols is not None else None,
                 "code_version": code_version,
+                "release_id": release_id,
             },
             repository=job_log_repository,
         ) as job:
@@ -121,6 +123,7 @@ def run_all_factors(
                             "symbols": symbols,
                             "adjust_type": adjust_type,
                             "code_version": code_version,
+                            "release_id": release_id,
                         }
                         if takes_factor_names:
                             kwargs["factor_names"] = None

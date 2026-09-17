@@ -34,6 +34,7 @@ class FactorRunRead(BaseModel):
     factor_version: str
     parameters: dict[str, Any]
     code_version: str
+    release_id: str | None = None
     input_start_date: date | None
     input_end_date: date | None
     started_at: datetime

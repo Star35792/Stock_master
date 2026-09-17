@@ -30,16 +30,13 @@ class TradingCalendarRepository:
             for record in records
         ]
         statement = insert(TradingCalendar).values(rows)
-        statement = statement.on_conflict_do_update(
+        # Trading days are immutable facts; DuckDB's ON CONFLICT DO UPDATE can
+        # hit index-corruption bugs on this table, so we simply ignore duplicates.
+        statement = statement.on_conflict_do_nothing(
             index_elements=[TradingCalendar.exchange, TradingCalendar.trade_date],
-            set_={
-                "is_open": statement.excluded.is_open,
-                "is_half_day": statement.excluded.is_half_day,
-                "source_name": statement.excluded.source_name,
-            },
         )
-        db.execute(statement)
-        return len(rows)
+        result = db.execute(statement)
+        return max(result.rowcount or 0, 0)
 
     def get_open_dates(self, db: Session, *, exchange: str, dates: set) -> set:
         if not dates:

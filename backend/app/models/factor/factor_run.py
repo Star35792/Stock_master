@@ -51,6 +51,7 @@ class FactorRun(CreatedAtMixin, Base):
     factor_version: Mapped[str] = mapped_column(String(50), nullable=False)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    release_id: Mapped[str | None] = mapped_column(String(64))
     input_start_date: Mapped[date | None] = mapped_column(Date)
     input_end_date: Mapped[date | None] = mapped_column(Date)
     started_at: Mapped[datetime] = mapped_column(

@@ -154,6 +154,7 @@ class FactorQueryService:
         code_version: str,
         input_start_date: date | None,
         input_end_date: date | None,
+        release_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> FactorRunRead:
         definition = self.definition_repository.get_by_name_version(
@@ -169,6 +170,7 @@ class FactorQueryService:
             definition=definition,
             parameters=parameters,
             code_version=code_version,
+            release_id=release_id,
             input_start_date=input_start_date,
             input_end_date=input_end_date,
             metadata=metadata,

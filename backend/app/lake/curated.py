@@ -82,6 +82,8 @@ class CuratedDatasetResult:
     min_date: str | None
     max_date: str | None
     created_at: str
+    release_id: str | None = None
+    checksum: str | None = None
 
 
 class CuratedLayer:
@@ -150,6 +152,9 @@ class CuratedLayer:
         temp_target = self.root / f".prices_qfq.tmp-{stamp}-{uuid4().hex[:8]}"
         temp_target.mkdir(parents=True, exist_ok=False)
 
+        qualified_filter = trusted_filter.replace(
+            "quality_status", "d.quality_status"
+        ).replace("adjust_type", "d.adjust_type")
         connection = duckdb.connect(db_path)
         try:
             connection.execute("SET threads = 1")
@@ -164,17 +169,27 @@ class CuratedLayer:
                 f"""
                 COPY (
                     SELECT
-                        symbol,
-                        {security_type_case_sql("symbol")} AS security_type,
-                        trade_date,
-                        open, high, low, close,
-                        volume, amount,
-                        turnover_rate,
-                        CAST(1 AS DECIMAL(24,10)) AS qfq_factor,
-                        year(trade_date) AS year, month(trade_date) AS month
-                    FROM {daily_table}
-                    WHERE {trusted_filter}
-                    ORDER BY symbol, trade_date
+                        d.symbol,
+                        {security_type_case_sql("d.symbol")} AS security_type,
+                        d.trade_date,
+                        d.open, d.high, d.low, d.close,
+                        d.volume, d.amount,
+                        d.turnover_rate,
+                        COALESCE(f.factor, CAST(1 AS DECIMAL(24,10))) AS qfq_factor,
+                        year(d.trade_date) AS year, month(d.trade_date) AS month
+                    FROM {daily_table} d
+                    LEFT JOIN LATERAL (
+                        SELECT af.factor
+                        FROM market.adjustment_factor af
+                        WHERE af.symbol = d.symbol
+                          AND af.trade_date = d.trade_date
+                          AND af.adjust_type = 'qfq'
+                          AND af.source_name = 'daily_loop'
+                        ORDER BY af.updated_at DESC, af.id DESC
+                        LIMIT 1
+                    ) f ON true
+                    WHERE {qualified_filter}
+                    ORDER BY d.symbol, d.trade_date
                 ) TO ? (
                     FORMAT PARQUET, COMPRESSION ZSTD,
                     PARTITION_BY (year, month), PER_THREAD_OUTPUT false,

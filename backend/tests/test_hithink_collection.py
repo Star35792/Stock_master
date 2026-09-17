@@ -168,3 +168,69 @@ def test_hithink_historical_uses_server_next_offset() -> None:
     )
 
     assert calls == [0, 100]
+
+
+def _ticker(symbol: str) -> dict:
+    code, exchange = symbol.split(".")
+    return {
+        "thscode": symbol,
+        "ticker": code,
+        "name": symbol,
+        "asset_type": "a-share",
+        "exchange": exchange,
+        "currency": "CNY",
+    }
+
+
+def test_hithink_securities_stops_when_page_repeats() -> None:
+    source = HithinkFinanceDataSource(api_key="test")
+    calls: list[int] = []
+    page = [_ticker("600000.SH"), _ticker("000001.SZ")]
+
+    def fake_get(path: str, params: dict) -> dict:
+        calls.append(params["offset"])
+        return {"item": page}
+
+    source._get = fake_get  # type: ignore[method-assign]
+    rows = source.fetch_securities(limit=2)
+
+    assert calls == [0, 2]
+    assert [row.symbol for row in rows] == ["600000.SH", "000001.SZ"]
+
+
+def test_hithink_securities_uses_server_next_offset() -> None:
+    source = HithinkFinanceDataSource(api_key="test")
+    calls: list[int] = []
+
+    def fake_get(path: str, params: dict) -> dict:
+        calls.append(params["offset"])
+        if params["offset"] == 0:
+            return {
+                "next_offset": 100,
+                "item": [_ticker("600000.SH"), _ticker("000001.SZ")],
+            }
+        return {"item": []}
+
+    source._get = fake_get  # type: ignore[method-assign]
+    rows = source.fetch_securities(limit=2)
+
+    assert calls == [0, 100]
+    assert len(rows) == 2
+
+
+def test_hithink_securities_stops_at_total() -> None:
+    source = HithinkFinanceDataSource(api_key="test")
+    calls: list[int] = []
+
+    def fake_get(path: str, params: dict) -> dict:
+        calls.append(params["offset"])
+        return {
+            "total": 2,
+            "item": [_ticker("600000.SH"), _ticker("000001.SZ")],
+        }
+
+    source._get = fake_get  # type: ignore[method-assign]
+    rows = source.fetch_securities(limit=2)
+
+    assert calls == [0]
+    assert len(rows) == 2

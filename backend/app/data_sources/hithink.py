@@ -60,17 +60,23 @@ class HithinkFinanceDataSource:
         }
         offset = 0
         records: list[DailyBarRecord] = []
+        seen: set[int] = set()
         while True:
             data = self._get(
                 "/api/a-share/prices/historical",
                 {**params, "offset": offset},
             )
             page = data.get("item", [])
-            records.extend(
-                self._to_daily_bar(symbol.upper(), adjust_type, item) for item in page
-            )
             if not page:
                 return records
+            new_items = [item for item in page if item.get("date_ms") not in seen]
+            if not new_items:
+                # API is repeating records (offset ignored or pagination exhausted).
+                return records
+            seen.update(item.get("date_ms") for item in new_items)
+            records.extend(
+                self._to_daily_bar(symbol.upper(), adjust_type, item) for item in new_items
+            )
             next_offset = data.get("next_offset")
             if next_offset is None:
                 total = data.get("total")
@@ -126,6 +132,7 @@ class HithinkFinanceDataSource:
     ) -> list[SecurityRecord]:
         offset = 0
         records: list[SecurityRecord] = []
+        seen: set[str] = set()
         while True:
             data = self._get(
                 "/api/meta/tickers/list",
@@ -137,10 +144,33 @@ class HithinkFinanceDataSource:
                 },
             )
             page = data.get("item", [])
-            records.extend(self._to_security(item) for item in page)
-            if len(page) < limit:
+            if not page:
                 return records
-            offset += limit
+
+            new_records = []
+            for item in page:
+                record = self._to_security(item)
+                if record.symbol not in seen:
+                    seen.add(record.symbol)
+                    new_records.append(record)
+
+            if not new_records:
+                # Server is repeating the same page; pagination is not advancing.
+                return records
+
+            records.extend(new_records)
+
+            next_offset = data.get("next_offset")
+            if next_offset is None:
+                total = data.get("total")
+                if total is not None and offset + len(page) >= int(total):
+                    return records
+                next_offset = offset + len(page)
+
+            next_offset = int(next_offset)
+            if next_offset <= offset:
+                raise HithinkFinanceError("HiThink securities pagination did not advance")
+            offset = next_offset
 
     def fetch_trading_days(
         self, *, exchanges: tuple[str, ...] = ("SH", "SZ", "BJ")

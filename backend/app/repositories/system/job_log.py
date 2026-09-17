@@ -7,6 +7,9 @@ from app.models.system import JobLog
 
 
 class JobLogRepository:
+    def get(self, db: Session, job_id: int) -> JobLog | None:
+        return db.get(JobLog, job_id)
+
     def create(
         self,
         db: Session,

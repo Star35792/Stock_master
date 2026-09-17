@@ -1,6 +1,6 @@
 # 仓库概览 Reference
 
-Stock Master 是 Python 3.13 + FastAPI + PostgreSQL + SQLAlchemy + Alembic 的个人量化平台，前端为 Vue3 运维工作台。
+Stock Master 是 Python 3.13 + FastAPI + DuckDB + SQLAlchemy 的个人量化平台，前端为 Vue3 运维工作台。
 
 ## 主要目录
 
@@ -17,6 +17,6 @@ Stock Master 是 Python 3.13 + FastAPI + PostgreSQL + SQLAlchemy + Alembic 的�
 
 ## 不要误用
 
-- `libs/hithink_sdk/marketdb` 不是后端 PostgreSQL 可信层。
-- `backend/app/lake` 不是生产事实源。
+- `libs/hithink_sdk/marketdb` 不是后端的 DuckDB 可信层。
+- `backend/app/lake` 的 curated 数据集是因子服务可配置的生产消费源，不替代 DuckDB 事实层。
 - 历史模板、外部参考资料和工具缓存不作为当前实现规范。

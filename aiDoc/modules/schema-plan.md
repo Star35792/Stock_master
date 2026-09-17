@@ -477,6 +477,7 @@ V1 暂不引入以下设计：
 - `risk.*`：`risk_check` 保留旧行 nullable 兼容，并为新正式评估绑定 account、equity snapshot、plan/readiness/ADV/policy/evaluation 哈希及幂等键；`risk_check_order` 复制参考价、投影权重、服务端 ADV 20/15 输入和逐规则结果。风险记录不等于交易订单。
 - `fundamental.*`：财务报表与指标。
 - `market.alternative_data_snapshot`、`market.index_constituent_snapshot` 和 `market.valuation_snapshot`：另类数据、指数成分和估值快照。
+- `lake.release`：按 `dataset + checksum` 生成内容寻址 `release_id`，记录 schema 版本、日期范围、行数、父 release、代码版本、质量状态、文件 manifest 和 active 指针。`factor.factor_run.release_id` 绑定因子输入 release，`market.adjustment_factor.release_id` 绑定复权血缘。现有 DuckDB 由启动/日循环入口执行幂等兼容升级，为这两个既有表补充 nullable `release_id`；新表仍由 SQLAlchemy metadata 创建。
 
 仍暂不创建或不作为当前主线：
 

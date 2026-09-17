@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     hithink_finance_timeout_seconds: int = 30
     hithink_dump_cache_dir: str = "data/hithink_dumps"
     data_lake_root: str = "data/warm"
+    raw_landing_root: str = "data/raw_landing"
     # When true, price-based factor services read forward-adjusted bars from the
     # materialized curated/prices_qfq Parquet instead of the ORM daily_bar table.
     # Only qfq is served by the curated reader; other adjust types still use the

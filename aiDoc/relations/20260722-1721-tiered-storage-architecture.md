@@ -119,10 +119,11 @@ Parquet 保存列式数据文件，DuckDB 负责查询、转换、质量检查�
 已按 clean cut 完成第一步：历史 PostgreSQL 分析数据不迁移，只保留字段契约、质量规则、血缘语义和事务域表结构，全部 ORM 已切到 DuckDB 单库并从外部源重建分析数据。剩余步骤（温层接入日循环、Parquet release）按下列顺序推进：
 
 1. （已完成）DuckDB 单库承载 `raw -> market -> factor -> ... -> trade` 全链路与控制面，`daily_loop` 串联 `daily_sync` 与 `factor_pipeline` 并写 `system.job_log`。
-2. （已完成）`curated/prices_qfq` 接入 `daily_loop`：当 `factor_reads_curated=true` 且 `factor_adjust_type='qfq'` 时，`daily_loop` 在同步后从 `market.daily_bar`（`quality_status='trusted' AND adjust_type='none'`）和 `raw.corporate_action` 重建 QFQ 前复权 Parquet，并携带真实 `turnover_rate`。`CuratedDailyBarReader` 随即读取这份最新温层。重建是幂等的（先写临时目录再原子替换），失败会中断后续因子计算。`fundamentals_pit` 与 factor release 仍由离线脚本驱动，待后续接入。
-3. 因子值：按运行批量写 Parquet 温层，控制面只保留定义、运行与摘要；API 从 DuckDB 分页查询。
-4. 财务/估值/另类数据（含未来新闻因子）和回测明细按相同 raw→curated→factor 模式重建。
-5. raw 不可变落地直接写本地 FS 的 `dataset/release/partition` 目录并记录 checksum；不引入 MinIO/Redis（见 §1.2）。
+2. （已完成）`curated/prices_qfq` 接入 `daily_loop`：当 `factor_reads_curated=true` 且 `factor_adjust_type='qfq'` 时，`daily_loop` 在同步后从 `market.daily_bar` 的可信 QFQ 行重建前复权 Parquet，并从 `market.adjustment_factor` 携带逐日真实 `qfq_factor` 与 `turnover_rate`。重建是幂等的（先写临时目录再原子替换），失败会中断后续因子计算。
+3. （已完成 P0.2a）`lake.release` 记录 market/curated 数据集的内容寻址 `release_id`、schema、日期范围、行数、checksum、父版本、代码版本、质量状态和 active 指针。日循环先登记 pending release 并把 curated release 绑定到 `factor.factor_run.release_id`；认证门禁通过后才原子切换 active，失败时旧 active 继续服务。`market.adjustment_factor.release_id` 记录复权版本血缘。
+4. 因子值：按运行批量写 Parquet 温层，控制面只保留定义、运行与摘要；API 从 DuckDB 分页查询。
+5. 财务/估值/另类数据（含未来新闻因子）和回测明细按相同 raw→curated→factor 模式重建。
+6. raw 不可变落地直接写本地 FS 的 `dataset/release/partition` 目录并记录 checksum；不引入 MinIO/Redis（见 §1.2）。
 
 ## 6. 验收标准
 

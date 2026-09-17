@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -59,7 +60,10 @@ class CorporateAction(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_corporate_action_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("market_corporate_action_id_seq"),
+        server_default=text("nextval('market_corporate_action_id_seq')"),
+        primary_key=True,
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     ex_date: Mapped[date] = mapped_column(Date, nullable=False)

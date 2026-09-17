@@ -33,7 +33,10 @@ class AdjustmentFactor(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_adjustment_factor_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("market_adjustment_factor_id_seq"),
+        server_default=text("nextval('market_adjustment_factor_id_seq')"),
+        primary_key=True,
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -41,6 +44,7 @@ class AdjustmentFactor(TimestampMixin, Base):
     factor: Mapped[Decimal] = mapped_column(Numeric(24, 10), nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     version: Mapped[str] = mapped_column(String(50), nullable=False, server_default=text("'v1'"))
+    release_id: Mapped[str | None] = mapped_column(String(64))
     quality_status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'trusted'")
     )

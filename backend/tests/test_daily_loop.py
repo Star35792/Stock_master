@@ -1,4 +1,5 @@
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,6 +32,12 @@ class FakeJobLogRepository:
     def __init__(self) -> None:
         self.jobs: list[FakeJobLog] = []
 
+    def get(self, db: object, job_id: int) -> FakeJobLog | None:
+        for job in self.jobs:
+            if job.id == job_id:
+                return job
+        return None
+
     def create(
         self,
         db: object,
@@ -62,6 +69,7 @@ class FakeJobLogRepository:
 class FakeSession:
     def __init__(self) -> None:
         self.closed = False
+        self.executed: list[tuple[object, ...]] = []
 
     def __enter__(self) -> "FakeSession":
         return self
@@ -71,6 +79,61 @@ class FakeSession:
 
     def commit(self) -> None:
         pass
+
+    def rollback(self) -> None:
+        pass
+
+    def execute(self, statement: object, params: object | None = None) -> object:
+        self.executed.append((statement, params))
+        return self
+
+    def scalar(self, statement: object | None = None) -> object | None:
+        raise RuntimeError("scalar not supported on FakeSession")
+
+    def scalar_one_or_none(self) -> None:
+        return None
+
+    def fetchone(self) -> tuple | None:
+        raise RuntimeError("fetchone not supported on FakeSession")
+
+
+@pytest.fixture(autouse=True)
+def _reset_daily_loop_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep daily_loop tests independent of local .env overrides (e.g.
+    # FACTOR_READS_CURATED=true). Tests that explicitly enable curated mode
+    # monkeypatch settings again after this fixture runs.
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.settings",
+        Settings(factor_reads_curated=False),
+    )
+    # Mock trading calendar so all existing tests see today as a trading day.
+    day = date.today()
+
+    def fake_get_open_dates(self, db, *, exchange, dates):
+        return {day}
+
+    monkeypatch.setattr(
+        "app.repositories.market.TradingCalendarRepository.get_open_dates",
+        fake_get_open_dates,
+    )
+    monkeypatch.setattr(
+        "app.repositories.market.TradingCalendarRepository.get_many_on_date",
+        lambda self, db, exchanges, trade_date: [SimpleNamespace(is_open=True)],
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop._gather_certification_metadata",
+        lambda db, target_date, **kwargs: {
+            "target_trade_date": target_date.isoformat(),
+            "gate_status": "pending",
+            "publish_eligible": False,
+            "reason_codes": [],
+            "gate_market_date_missing": False,
+            "gate_duplicate_keys": False,
+            "gate_qfq_coverage_anomaly": False,
+            "gate_core_factor_partial": False,
+            "gate_query_error": False,
+        },
+    )
 
 
 class FakeSecurityRepository:
@@ -222,7 +285,7 @@ def test_daily_loop_marks_failed_when_sync_raises(monkeypatch: pytest.MonkeyPatc
     assert "sync broken" in job_log_repo.jobs[0].error_message
 
 
-def test_daily_loop_marks_partial_when_factor_service_fails(
+def test_daily_loop_marks_failed_when_factor_service_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = FakeSession()
@@ -245,10 +308,10 @@ def test_daily_loop_marks_partial_when_factor_service_fails(
         job_log_repository=job_log_repo,
     )
 
-    assert result.failed is False
+    assert result.failed is True
     assert result.factor_result is not None
     assert result.factor_result.failed == ["SomeService"]
-    assert job_log_repo.jobs[0].status == "partial"
+    assert job_log_repo.jobs[0].status == "failed"
     assert "SomeService" in job_log_repo.jobs[0].error_message
 
 
@@ -330,6 +393,33 @@ def test_daily_loop_rebuilds_curated_when_enabled(
         fake_build_prices_qfq_from_db,
     )
 
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.ReleaseService.compute_parquet_checksum",
+        lambda path: "c" * 64,
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop._compute_market_qfq_checksum",
+        lambda db: "m" * 64,
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop._market_qfq_result",
+        lambda db: SimpleNamespace(
+            row_count=20,
+            min_date=date(2026, 1, 1),
+            max_date=date(2026, 1, 10),
+        ),
+    )
+    release_ids = iter(["market-release", "curated-release"])
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.ReleaseService.build_release",
+        lambda self, db, **kwargs: SimpleNamespace(release_id=next(release_ids)),
+    )
+    activated: list[str] = []
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.ReleaseRepository.activate",
+        lambda self, db, *, release_id: activated.append(release_id),
+    )
+
     result = run_daily_loop(
         symbols=["600519.SH"],
         factor_adjust_type="qfq",
@@ -344,7 +434,7 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     assert len(rebuild_calls) == 1
     assert rebuild_calls[0].get("source_name") == "daily_loop"
     assert len(curated_calls) == 1
-    assert curated_calls[0].endswith("stock_master.duckdb")
+    assert curated_calls[0].endswith(".duckdb")
     assert job_log_repo.jobs[0].metadata_["curated_rebuilt"] is True
     assert job_log_repo.jobs[0].metadata_["adjustment_factor_rows"] == 10
 
@@ -379,3 +469,78 @@ def test_daily_loop_fails_when_sync_adjust_type_incompatible_with_curated(
     assert "sync_adjust_type='none'" in result.curated_error
     assert result.factor_result is None
     assert job_log_repo.jobs[0].status == "failed"
+
+
+def test_daily_loop_skips_on_non_trading_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    security_repo = FakeSecurityRepository(["600519.SH"])
+
+    def fake_get_many_on_date(self, db, *, exchanges, trade_date):
+        return [SimpleNamespace(is_open=False)]
+
+    monkeypatch.setattr(
+        "app.repositories.market.TradingCalendarRepository.get_many_on_date",
+        fake_get_many_on_date,
+    )
+
+    sync_calls: list[dict] = []
+
+    def fake_sync(**kwargs: object) -> object:
+        sync_calls.append(kwargs)
+        return _fake_sync_result()
+
+    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=security_repo,
+        job_log_repository=job_log_repo,
+    )
+
+    assert result.skipped is True
+    assert result.skip_reason == "MARKET_CLOSED"
+    assert result.failed is False
+    assert len(sync_calls) == 0
+    assert len(job_log_repo.jobs) == 1
+    assert job_log_repo.jobs[0].status == "success"
+    assert job_log_repo.jobs[0].metadata_.get("gate_status") == "skipped"
+    assert job_log_repo.jobs[0].metadata_.get("publish_eligible") is False
+    assert "MARKET_CLOSED" in job_log_repo.jobs[0].metadata_.get("reason_codes", [])
+
+
+def test_daily_loop_fails_when_calendar_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    security_repo = FakeSecurityRepository(["600519.SH"])
+
+    def fake_get_many_on_date(self, db, *, exchanges, trade_date):
+        return []
+
+    monkeypatch.setattr(
+        "app.repositories.market.TradingCalendarRepository.get_many_on_date",
+        fake_get_many_on_date,
+    )
+
+    sync_calls: list[dict] = []
+
+    def fake_sync(**kwargs: object) -> object:
+        sync_calls.append(kwargs)
+        return _fake_sync_result()
+
+    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=security_repo,
+        job_log_repository=job_log_repo,
+    )
+
+    assert result.failed is True
+    assert result.skip_reason == "CALENDAR_MISSING"
+    assert len(sync_calls) == 0
+    assert len(job_log_repo.jobs) == 1
+    assert job_log_repo.jobs[0].status == "failed"
+    assert "CALENDAR_MISSING" in job_log_repo.jobs[0].metadata_.get("reason_codes", [])

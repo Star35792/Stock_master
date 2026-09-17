@@ -48,4 +48,4 @@ class RawDailyBarImportRepository:
         batch.accepted_count = accepted_count
         batch.rejected_count = rejected_count
         batch.error_message = error_message
-        batch.finished_at = db.scalar(select(func.clock_timestamp()))
+        batch.finished_at = db.scalar(select(func.now()))

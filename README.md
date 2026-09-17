@@ -12,7 +12,7 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 
 已有：
 
-- Python/FastAPI/PostgreSQL/SQLAlchemy/Alembic 基础工程。
+- Python/FastAPI/DuckDB/SQLAlchemy 基础工程。
 - `raw -> market -> factor -> research/backtest -> portfolio/risk -> trade` 分层闭环。
 - 参考数据同步、真实采集、`raw -> market` 构建统一入口。
 - HiThink、东方财富补充源、CSV、数据湖和近期缺口补采的导入/维护入口。
@@ -60,7 +60,7 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 
 ## 阶段规划
 
-1. **V1 可信日线数据中心**：多源导入 + PostgreSQL + 原始留痕 + 质量校验 + 人工修复。
+1. **V1 可信日线数据中心**：多源导入 + DuckDB + 原始留痕 + 质量校验 + 人工修复。
 2. **V2 复权、ETF 和指数增强**：复权因子、交易日历、ETF/指数扩展。
 3. **V3 因子工厂**：技术面、量价、趋势、资金面等因子沉淀。
 4. **V4 策略与回测**：多因子评分、ETF 轮动、股票选股、绩效分析。
@@ -75,10 +75,11 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 ```bash
 cd backend
 cp .env.example .env
-docker compose up -d
 uv sync --extra dev
-uv run alembic upgrade head
+# 启动 API 服务（表结构在首次启动时自动创建）
 uv run uvicorn app.main:app --reload
+# 或运行单次日更闭环
+uv run python scripts/scheduler/run_daily_loop.py
 ```
 
 常用验证命令：

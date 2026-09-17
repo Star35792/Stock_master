@@ -5,12 +5,25 @@ FastAPI app, so we override ``get_db`` with an in-memory DuckDB instance that
 has all schemas and tables pre-created.
 """
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+import atexit
+import os
+import shutil
+import tempfile
+from pathlib import Path
 
-from app.database.base import Base
-from app.database.session import SCHEMAS, get_db
-from app.main import app
+# app.database.session creates its engine at import time. Force that module-level
+# engine onto an isolated file before importing any app module, so collecting the
+# test suite never opens data/stock_master.duckdb.
+_test_db_root = Path(tempfile.mkdtemp(prefix="stock-master-tests-"))
+os.environ["METADATA_DB_PATH"] = str(_test_db_root / "session.duckdb")
+atexit.register(shutil.rmtree, _test_db_root, ignore_errors=True)
+
+from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+
+from app.database.base import Base  # noqa: E402
+from app.database.session import SCHEMAS, get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
 _test_engine = create_engine("duckdb:///:memory:")
 with _test_engine.connect() as conn:

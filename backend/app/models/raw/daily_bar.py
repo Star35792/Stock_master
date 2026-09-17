@@ -13,6 +13,7 @@ from sqlalchemy import (
     Sequence,
     String,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,7 +46,12 @@ class RawDailyBar(Base):
         {"schema": "raw"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, Sequence("raw_daily_bar_id_seq"), primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        Sequence("raw_daily_bar_id_seq"),
+        server_default=text("nextval('raw_daily_bar_id_seq')"),
+        primary_key=True,
+    )
     batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)

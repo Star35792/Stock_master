@@ -71,6 +71,7 @@ class FactorCrossSectionService:
         symbols: list[str] | None = None,
         size_factor_name: str | None = None,
         size_factor_version: str | None = None,
+        release_id: str | None = None,
     ) -> CrossSectionRunResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -187,6 +188,7 @@ class FactorCrossSectionService:
                     "size_factor_version": size_factor_version,
                 },
                 code_version=code_version,
+                release_id=release_id,
                 input_start_date=start_date,
                 input_end_date=end_date,
                 metadata={"transform": transform_name},

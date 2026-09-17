@@ -59,6 +59,7 @@ class CompositeFactorService:
         symbols: list[str] | None = None,
         allowed_security_types: set[str] | None = None,
         code_version: str = "local",
+        release_id: str | None = None,
     ) -> CompositeFactorRunResult:
         self._validate_inputs(
             factor_specs=factor_specs,
@@ -133,6 +134,7 @@ class CompositeFactorService:
                 "coverage_policy": "complete_components",
             },
             code_version=code_version,
+            release_id=release_id,
             input_start_date=start_date,
             input_end_date=end_date,
             metadata={

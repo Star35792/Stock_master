@@ -20,6 +20,31 @@ def _seed_db_tables(db_path: Path) -> None:
         connection.execute("CREATE SCHEMA IF NOT EXISTS market")
         connection.execute(
             """
+            CREATE TABLE market.adjustment_factor (
+                id BIGINT,
+                symbol VARCHAR,
+                trade_date DATE,
+                adjust_type VARCHAR,
+                factor DECIMAL(24,10),
+                source_name VARCHAR,
+                version VARCHAR,
+                updated_at TIMESTAMPTZ
+            )
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO market.adjustment_factor
+            VALUES (?, ?, ?, 'qfq', ?, 'daily_loop', 'v1', now())
+            """,
+            [
+                (1, "000001.SZ", date(2026, 1, 5), Decimal("0.9")),
+                (2, "000001.SZ", date(2026, 1, 6), Decimal("0.9")),
+                (3, "000001.SZ", date(2026, 1, 7), Decimal("1.0")),
+            ],
+        )
+        connection.execute(
+            """
             CREATE TABLE market.daily_bar (
                 symbol VARCHAR,
                 security_type VARCHAR,
@@ -111,7 +136,9 @@ def test_build_prices_qfq_from_db_uses_real_turnover_rate(tmp_path) -> None:
     assert float(rows[0]["turnover_rate"]) == pytest.approx(0.01)
     assert float(rows[1]["turnover_rate"]) == pytest.approx(0.02)
     assert float(rows[2]["turnover_rate"]) == pytest.approx(0.015)
-    assert rows[0]["qfq_factor"] == pytest.approx(1.0)
+    assert float(rows[0]["qfq_factor"]) == pytest.approx(0.9)
+    assert float(rows[1]["qfq_factor"]) == pytest.approx(0.9)
+    assert float(rows[2]["qfq_factor"]) == pytest.approx(1.0)
 
 
 def test_build_prices_qfq_from_db_is_idempotent(tmp_path) -> None:

@@ -51,7 +51,7 @@ class HithinkDumpDataSource:
         if not self.api_key:
             raise HithinkFinanceError("HITHINK_FINANCE_API_KEY is required")
         request = Request(
-            f"{self.base_url}/dump/market-dumps/{kind.value}/download-url",
+            f"{self.base_url}/api/dump/market-dumps/{kind.value}/download-url",
             headers={"X-api-key": self.api_key},
             method="GET",
         )

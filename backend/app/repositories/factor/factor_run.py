@@ -17,6 +17,7 @@ class FactorRunRepository:
         code_version: str,
         input_start_date: date | None,
         input_end_date: date | None,
+        release_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> FactorRun:
         run = FactorRun(
@@ -25,6 +26,7 @@ class FactorRunRepository:
             factor_version=definition.version,
             parameters=parameters,
             code_version=code_version,
+            release_id=release_id,
             input_start_date=input_start_date,
             input_end_date=input_end_date,
             status="running",
@@ -91,6 +93,6 @@ class FactorRunRepository:
         run.status = status
         run.rows_written = rows_written
         run.error_message = error_message
-        run.finished_at = db.scalar(select(func.clock_timestamp()))
+        run.finished_at = db.scalar(select(func.now()))
         db.add(run)
         return run

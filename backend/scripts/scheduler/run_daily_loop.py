@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 
-from app.database.session import SessionLocal
+from app.database.session import SessionLocal, initialize_database
 from app.scheduler.daily_loop import run_daily_loop
 
 logging.basicConfig(
@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    initialize_database()
     result = run_daily_loop(
         symbols=_parse_symbols(args.symbols),
         sync_days=args.sync_days,
@@ -78,6 +79,8 @@ def main() -> int:
         session_factory=SessionLocal,
     )
     print(f"daily_loop.failed={result.failed}")
+    print(f"daily_loop.skipped={result.skipped}")
+    print(f"daily_loop.skip_reason={result.skip_reason or ''}")
     print(f"daily_loop.sync_error={result.sync_error or ''}")
     print(f"daily_loop.factor_error={result.factor_error or ''}")
     if result.sync_result:

@@ -35,7 +35,10 @@ class Security(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_security_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("market_security_id_seq"),
+        server_default=text("nextval('market_security_id_seq')"),
+        primary_key=True,
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     raw_symbol: Mapped[str | None] = mapped_column(String(30))

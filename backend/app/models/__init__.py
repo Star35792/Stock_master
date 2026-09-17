@@ -1,5 +1,6 @@
 from app.models.factor import FactorDefinition, FactorProfile, FactorRun, FactorValue
 from app.models.fundamental import FinancialIndicator, FinancialStatement
+from app.models.lake import Release
 from app.models.market import (
     AdjustmentFactor,
     AlternativeDataSnapshot,
@@ -70,6 +71,7 @@ __all__ = [
     "RawDailyBar",
     "RawFinancialPayload",
     "RawVendorSnapshot",
+    "Release",
     "RiskCheck",
     "RiskCheckOrder",
     "Security",

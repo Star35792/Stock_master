@@ -15,7 +15,7 @@
 
 ## 事实源边界
 
-- PostgreSQL 是业务事实源。
+- DuckDB 是当前唯一业务事实存储，本地 Parquet 保存 curated 温层数据集。
 - `raw` 保存来源、批次、原始 payload 和异常数据。
 - `market` 是可信消费层。
 - `factor` 保存可复现的因子定义、运行和值。
@@ -25,8 +25,8 @@
 
 ## 工具边界
 
-- `backend/app/lake`：离线数据湖和批量扫描工具，不替代 PostgreSQL 可信裁决。
-- `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和 dump 研究，不等同于后端 `market`。
+- `backend/app/lake`：本地 Parquet 数据湖和批量扫描工具；curated 数据集是因子服务可配置的生产消费源，与 DuckDB 事实层共同组成单机存储架构。
+- `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。
 - 调度脚本基于 APScheduler blocking scheduler，不是 FastAPI 内置后台任务；`daily_loop` 编排器按交易日串联 `daily_sync` 与 `factor_pipeline`，sync 失败时不继续执行因子计算，所有步骤写入 `system.job_log`。
 
 ## 文档同步触发
