@@ -9,7 +9,7 @@ from app.repositories.factor import FactorValueRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.schemas.strategy import RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
-from app.strategies import FactorScoreSpec, MultiFactorStrategy
+from app.strategies import FactorScoreSpec, MultiFactorStrategy, StrategyFactorFrame
 
 
 class StrategyResearchService:
@@ -140,11 +140,15 @@ class StrategyResearchService:
             symbol.upper(): security_type
             for symbol, security_type in security_types.items()
         }
+        strategy_frame = StrategyFactorFrame.from_rows(
+            as_of_date=end_date,
+            rows_by_factor=factor_rows,
+        )
         signals = MultiFactorStrategy(
             top_n=top_n,
             allowed_security_types=allowed_security_types,
-        ).generate(
-            factor_rows=factor_rows,
+        ).generate_history(
+            frame=strategy_frame,
             security_types=normalized_security_types,
         )
         contract = self._build_research_contract(
@@ -168,6 +172,7 @@ class StrategyResearchService:
             validation_mode=validation_mode,
             training_start_date=training_start_date,
             training_end_date=training_end_date,
+            strategy_input_snapshot=strategy_frame.snapshot(),
         )
         return self.backtest_service.run(
             db,
@@ -193,6 +198,7 @@ class StrategyResearchService:
                 trade_date=row.trade_date,
                 symbol=row.symbol.upper(),
                 value=row.value,
+                run_id=getattr(row, "run_id", None),
             )
             for row in rows
         ]
@@ -220,6 +226,7 @@ class StrategyResearchService:
         validation_mode: str,
         training_start_date: date | None,
         training_end_date: date | None,
+        strategy_input_snapshot: dict[str, Any],
     ) -> dict[str, Any]:
         return {
             "strategy_name": strategy_name,
@@ -247,6 +254,7 @@ class StrategyResearchService:
             "lot_size": lot_size,
             "code_version": code_version,
             "data_version": data_version,
+            "strategy_input_snapshot": strategy_input_snapshot,
             "validation_mode": validation_mode,
             "training_start_date": (
                 training_start_date.isoformat() if training_start_date else None

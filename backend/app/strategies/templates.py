@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.backtest import TargetWeightSignal
+from app.strategies.inputs import StrategyFactorFrame
 
 
 @dataclass(frozen=True)
@@ -25,9 +26,12 @@ class CrossSectionSelectionStrategy:
     def generate(
         self,
         *,
-        factor_rows: dict[FactorScoreSpec, list[Any]],
+        frame: StrategyFactorFrame,
         security_types: dict[str, str],
+        previous_symbols: set[str] | None = None,
     ) -> list[TargetWeightSignal]:
+        frame.require_exact_as_of()
+        factor_rows = frame.rows_by_factor
         scores_by_date: dict[date, dict[str, Decimal]] = defaultdict(
             lambda: defaultdict(Decimal)
         )
@@ -53,8 +57,8 @@ class CrossSectionSelectionStrategy:
                     coverage_by_date[trade_date][symbol] += 1
 
         signals: list[TargetWeightSignal] = []
-        previous_symbols: set[str] = set()
         factor_count = len(factor_rows)
+        prior_selection = set(previous_symbols or set())
         for signal_date in sorted(scores_by_date):
             complete_scores = {
                 symbol: score / total_weight
@@ -69,11 +73,32 @@ class CrossSectionSelectionStrategy:
                 )[: self.top_n]
             }
             weight = Decimal(1) / Decimal(len(selected)) if selected else Decimal()
-            for symbol in sorted(previous_symbols - selected):
+            for symbol in sorted(prior_selection - selected):
                 signals.append(TargetWeightSignal(signal_date, symbol, Decimal()))
             for symbol in sorted(selected):
                 signals.append(TargetWeightSignal(signal_date, symbol, weight))
-            previous_symbols = selected
+        return signals
+
+    def generate_history(
+        self,
+        *,
+        frame: StrategyFactorFrame,
+        security_types: dict[str, str],
+    ) -> list[TargetWeightSignal]:
+        signals: list[TargetWeightSignal] = []
+        previous_symbols: set[str] = set()
+        for as_of_date in frame.observation_dates:
+            daily_signals = self.generate(
+                frame=frame.for_date(as_of_date),
+                security_types=security_types,
+                previous_symbols=previous_symbols,
+            )
+            signals.extend(daily_signals)
+            previous_symbols = {
+                signal.symbol
+                for signal in daily_signals
+                if signal.target_weight > 0
+            }
         return signals
 
     @staticmethod
@@ -102,7 +127,16 @@ class IndexTimingStrategy:
         self.threshold = threshold
         self.invested_weight = invested_weight
 
-    def generate(self, *, rows: list[Any], symbol: str) -> list[TargetWeightSignal]:
+    def generate(
+        self,
+        *,
+        frame: StrategyFactorFrame,
+        symbol: str,
+    ) -> list[TargetWeightSignal]:
+        frame.require_exact_as_of()
+        if len(frame.rows_by_factor) != 1:
+            raise ValueError("index timing strategy requires exactly one factor input")
+        rows = next(iter(frame.rows_by_factor.values()))
         return [
             TargetWeightSignal(
                 signal_date=row.trade_date,
@@ -113,6 +147,18 @@ class IndexTimingStrategy:
             )
             for row in rows
             if row.symbol == symbol
+        ]
+
+    def generate_history(
+        self,
+        *,
+        frame: StrategyFactorFrame,
+        symbol: str,
+    ) -> list[TargetWeightSignal]:
+        return [
+            signal
+            for as_of_date in frame.observation_dates
+            for signal in self.generate(frame=frame.for_date(as_of_date), symbol=symbol)
         ]
 
 

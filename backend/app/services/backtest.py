@@ -1,3 +1,7 @@
+import hashlib
+import json
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -5,8 +9,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.backtest import BacktestResult, DailyEventBacktestEngine, TargetWeightSignal
-from app.repositories.market import CorporateActionRepository, DailyBarRepository
+from app.backtest import (
+    ENGINE_VERSION,
+    BacktestResult,
+    DailyEventBacktestEngine,
+    TargetWeightSignal,
+)
+from app.repositories.market import (
+    CorporateActionRepository,
+    DailyBarRepository,
+    TradingCalendarRepository,
+)
 from app.repositories.strategy import BacktestPerformanceRepository, BacktestRepository
 from app.schemas.common import Page
 from app.schemas.strategy import (
@@ -23,6 +36,49 @@ from app.services.performance import BacktestPerformanceService
 
 _EXECUTION_ADJUST_TYPE = "none"
 _CORPORATE_ACTION_POLICY = "reject"
+_DATA_SNAPSHOT_VERSION = "trusted_market_slice_v1"
+_FEE_MODEL_VERSION = "linear_commission_v1"
+_BAR_SNAPSHOT_FIELDS = (
+    "symbol",
+    "trade_date",
+    "security_type",
+    "adjust_type",
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "volume",
+    "amount",
+    "turnover_rate",
+    "source_name",
+    "source_count",
+    "quality_score",
+    "quality_status",
+    "is_suspect",
+    "selected_raw_id",
+)
+_ACTION_SNAPSHOT_FIELDS = (
+    "symbol",
+    "ex_date",
+    "action_type",
+    "cash_dividend",
+    "bonus_share_ratio",
+    "transfer_share_ratio",
+    "rights_issue_ratio",
+    "rights_issue_price",
+    "split_ratio",
+    "record_date",
+    "payment_date",
+    "source_name",
+    "source_event_id",
+)
+
+
+class BacktestDataChangedError(RuntimeError):
+    """Raised when trusted market inputs change while a backtest is running."""
+
+    code = "backtest_data_changed"
 
 
 @dataclass(frozen=True)
@@ -37,11 +93,19 @@ class DailyBacktestService:
         daily_bar_repository: DailyBarRepository | None = None,
         backtest_repository: BacktestRepository | None = None,
         corporate_action_repository: CorporateActionRepository | None = None,
+        trading_calendar_repository: TradingCalendarRepository | None = None,
+        verification_session_factory: Callable[[Session], Any] | None = None,
     ) -> None:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.backtest_repository = backtest_repository or BacktestRepository()
         self.corporate_action_repository = (
             corporate_action_repository or CorporateActionRepository()
+        )
+        self.trading_calendar_repository = (
+            trading_calendar_repository or TradingCalendarRepository()
+        )
+        self.verification_session_factory = (
+            verification_session_factory or _independent_verification_session
         )
 
     def run(
@@ -102,6 +166,16 @@ class DailyBacktestService:
             "adjust_type": adjust_type,
             "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
             "corporate_action_policy": _CORPORATE_ACTION_POLICY,
+            "engine_version": ENGINE_VERSION,
+            "fee_model_version": _FEE_MODEL_VERSION,
+            "minimum_commission": "0",
+            "sell_stamp_duty_rate": "0",
+            "calculation_precision_policy": "unquantized_decimal_until_persistence_v1",
+            "fee_model_limitations": [
+                "no_minimum_commission",
+                "no_sell_stamp_duty",
+                "no_exchange_fees",
+            ],
             "commission_rate": str(commission_rate),
             "slippage_bps": str(slippage_bps),
             "lot_size": lot_size,
@@ -114,6 +188,18 @@ class DailyBacktestService:
                 "adjust_type": adjust_type,
                 "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
                 "corporate_action_policy": _CORPORATE_ACTION_POLICY,
+                "engine_version": ENGINE_VERSION,
+                "fee_model_version": _FEE_MODEL_VERSION,
+                "minimum_commission": "0",
+                "sell_stamp_duty_rate": "0",
+                "calculation_precision_policy": (
+                    "unquantized_decimal_until_persistence_v1"
+                ),
+                "fee_model_limitations": [
+                    "no_minimum_commission",
+                    "no_sell_stamp_duty",
+                    "no_exchange_fees",
+                ],
                 "symbols": symbols,
                 "signals": serialized_signals,
             }
@@ -150,18 +236,222 @@ class DailyBacktestService:
                 symbols=symbols,
                 quality_status="trusted",
             )
+            execution_calendar = self._load_execution_calendar(
+                db,
+                symbols=symbols,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            snapshot_before = _build_market_snapshot(
+                bars=execution_bars,
+                corporate_actions=corporate_actions,
+                execution_calendar=execution_calendar,
+                start_date=start_date,
+                end_date=end_date,
+                symbols=symbols,
+            )
+            data_snapshot = {
+                **snapshot_before,
+                "verification_status": "pending",
+            }
+            self.backtest_repository.update_data_snapshot(
+                db,
+                run=run,
+                data_snapshot=data_snapshot,
+            )
             result = DailyEventBacktestEngine(
                 initial_cash=initial_cash,
                 commission_rate=commission_rate,
                 slippage_bps=slippage_bps,
                 lot_size=lot_size,
-            ).run(bars=execution_bars, signals=normalized_signals)
+            ).run(
+                bars=execution_bars,
+                signals=normalized_signals,
+                execution_calendar=execution_calendar,
+            )
+            with self.verification_session_factory(db) as verification_db:
+                verification_scope = (
+                    "independent_session"
+                    if verification_db is not db
+                    else "same_session_fallback"
+                )
+                corporate_actions_after = (
+                    self.corporate_action_repository.list_for_symbols_date_range(
+                        verification_db,
+                        symbols=set(symbols),
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                )
+                execution_bars_after = (
+                    self.daily_bar_repository.list_for_factor_calculation(
+                        verification_db,
+                        start_date=start_date,
+                        end_date=end_date,
+                        adjust_type=_EXECUTION_ADJUST_TYPE,
+                        symbols=symbols,
+                        quality_status="trusted",
+                    )
+                )
+                execution_calendar_after = self._load_execution_calendar(
+                    verification_db,
+                    symbols=set(symbols),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            snapshot_after = _build_market_snapshot(
+                bars=execution_bars_after,
+                corporate_actions=corporate_actions_after,
+                execution_calendar=execution_calendar_after,
+                start_date=start_date,
+                end_date=end_date,
+                symbols=symbols,
+            )
+            verification_status = (
+                "verified"
+                if snapshot_after["sha256"] == snapshot_before["sha256"]
+                else "changed"
+            )
+            data_snapshot = {
+                **snapshot_before,
+                "verification_status": verification_status,
+                "verification_scope": verification_scope,
+                "post_run_sha256": snapshot_after["sha256"],
+            }
+            self.backtest_repository.update_data_snapshot(
+                db,
+                run=run,
+                data_snapshot=data_snapshot,
+            )
+            if verification_status == "changed":
+                raise BacktestDataChangedError(
+                    "backtest_data_changed: trusted market data changed while "
+                    "the backtest was running"
+                )
             self.backtest_repository.save_result(db, run=run, result=result)
         except Exception as exc:
             self.backtest_repository.fail_run(db, run=run, error_message=str(exc))
             db.commit()
             raise
         return PersistedBacktestResult(run_id=run.id, result=result)
+
+    def _load_execution_calendar(
+        self,
+        db: Session,
+        *,
+        symbols: list[str] | set[str],
+        start_date: date,
+        end_date: date,
+    ) -> dict[str, list[date]]:
+        symbols_by_exchange: dict[str, list[str]] = {}
+        for symbol in sorted(symbols):
+            exchange = _symbol_exchange(symbol)
+            if exchange is None:
+                raise ValueError(
+                    "cannot resolve exchange from symbol for execution calendar: "
+                    f"{symbol}"
+                )
+            symbols_by_exchange.setdefault(exchange, []).append(symbol)
+        result: dict[str, list[date]] = {}
+        for exchange, exchange_symbols in symbols_by_exchange.items():
+            dates = self.trading_calendar_repository.list_open_dates(
+                db,
+                exchange=exchange,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if not dates:
+                raise ValueError(
+                    "trusted trading calendar is unavailable for exchange "
+                    f"{exchange} in the backtest interval"
+                )
+            for symbol in exchange_symbols:
+                result[symbol] = dates
+        return result
+
+
+def _build_market_snapshot(
+    *,
+    bars: list[Any],
+    corporate_actions: list[Any],
+    execution_calendar: dict[str, list[date]],
+    start_date: date,
+    end_date: date,
+    symbols: list[str],
+) -> dict[str, Any]:
+    bar_records = [_snapshot_record(row, _BAR_SNAPSHOT_FIELDS) for row in bars]
+    action_records = [
+        _snapshot_record(row, _ACTION_SNAPSHOT_FIELDS) for row in corporate_actions
+    ]
+    bar_records.sort(key=_snapshot_sort_key)
+    action_records.sort(key=_snapshot_sort_key)
+    calendar_records = [
+        {
+            "symbol": symbol,
+            "trade_dates": [trade_date.isoformat() for trade_date in dates],
+        }
+        for symbol, dates in sorted(execution_calendar.items())
+    ]
+    content = json.dumps(
+        {
+            "bars": bar_records,
+            "corporate_actions": action_records,
+            "execution_calendar": calendar_records,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        "snapshot_version": _DATA_SNAPSHOT_VERSION,
+        "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
+        "quality_status": "trusted",
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "symbols": list(symbols),
+        "bar_count": len(bar_records),
+        "corporate_action_count": len(action_records),
+        "calendar_session_count": sum(
+            len(record["trade_dates"]) for record in calendar_records
+        ),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def _snapshot_record(row: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        field: _snapshot_value(getattr(row, field, None))
+        for field in fields
+    }
+
+
+def _snapshot_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _snapshot_sort_key(record: dict[str, Any]) -> str:
+    return json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _symbol_exchange(symbol: str) -> str | None:
+    if "." not in symbol:
+        return None
+    exchange = symbol.rsplit(".", 1)[1].upper()
+    return exchange if exchange in {"SH", "SZ", "BJ", "HK"} else None
+
+
+@contextmanager
+def _independent_verification_session(db: Session) -> Iterator[Session]:
+    get_bind = getattr(db, "get_bind", None)
+    if not callable(get_bind):
+        yield db
+        return
+    with Session(bind=get_bind()) as verification_db:
+        yield verification_db
 
 
 class BacktestQueryService:

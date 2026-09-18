@@ -1,4 +1,5 @@
 from app.backtest.engine import (
+    ENGINE_VERSION,
     BacktestResult,
     BacktestTrade,
     DailyEventBacktestEngine,
@@ -16,6 +17,7 @@ __all__ = [
     "BacktestPerformanceAnalyzer",
     "BacktestTrade",
     "DailyEventBacktestEngine",
+    "ENGINE_VERSION",
     "EquitySnapshot",
     "PositionSnapshot",
     "PerformanceReport",

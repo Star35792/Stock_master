@@ -20,11 +20,13 @@ class FakeFactorValueRepository:
                     trade_date=date(2026, 7, 1),
                     symbol="aaa",
                     value=Decimal("1"),
+                    run_id=11,
                 ),
                 SimpleNamespace(
                     trade_date=date(2026, 7, 1),
                     symbol="BBB",
                     value=Decimal("2"),
+                    run_id=11,
                 ),
             ]
         if kwargs["factor_name"] == "quality_20":
@@ -33,11 +35,13 @@ class FakeFactorValueRepository:
                     trade_date=date(2026, 7, 1),
                     symbol="AAA",
                     value=Decimal("3"),
+                    run_id=12,
                 ),
                 SimpleNamespace(
                     trade_date=date(2026, 7, 1),
                     symbol="BBB",
                     value=Decimal("1"),
+                    run_id=12,
                 ),
             ]
         return []
@@ -212,6 +216,13 @@ def test_strategy_research_service_runs_factor_selection_backtest() -> None:
     contract = backtest_service.kwargs["research_contract"]
     assert contract["benchmark"] == "000300.SH"
     assert contract["allowed_security_types"] == ["stock"]
+    assert contract["strategy_input_snapshot"]["contract_version"] == (
+        "strategy_factor_frame_v1"
+    )
+    assert contract["strategy_input_snapshot"]["as_of_date"] == "2026-07-01"
+    assert contract["strategy_input_snapshot"]["row_count"] == 4
+    assert contract["strategy_input_snapshot"]["factor_run_ids"] == [11, 12]
+    assert len(contract["strategy_input_snapshot"]["sha256"]) == 64
     assert contract["factor_specs"] == [
         {
             "factor_name": "momentum_20",

@@ -1,8 +1,11 @@
+from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Any
+
+ENGINE_VERSION = "daily_event_v2"
 
 
 @dataclass(frozen=True)
@@ -79,14 +82,28 @@ class DailyEventBacktestEngine:
         *,
         bars: list[Any],
         signals: list[TargetWeightSignal],
+        execution_calendar: dict[str, list[date]],
     ) -> BacktestResult:
         bars_by_date: dict[date, dict[str, Any]] = defaultdict(dict)
         for bar in bars:
+            if bar.symbol in bars_by_date[bar.trade_date]:
+                raise ValueError(
+                    "duplicate market bar: "
+                    f"{bar.symbol} {bar.trade_date.isoformat()}"
+                )
             bars_by_date[bar.trade_date][bar.symbol] = bar
         signals_by_date: dict[date, list[TargetWeightSignal]] = defaultdict(list)
+        seen_signals: set[tuple[date, str]] = set()
         for signal in signals:
             if signal.target_weight < 0 or signal.target_weight > 1:
                 raise ValueError("target_weight must be between 0 and 1")
+            signal_key = (signal.signal_date, signal.symbol)
+            if signal_key in seen_signals:
+                raise ValueError(
+                    "duplicate target signal: "
+                    f"{signal.symbol} {signal.signal_date.isoformat()}"
+                )
+            seen_signals.add(signal_key)
             signals_by_date[signal.signal_date].append(signal)
         for trade_date, daily_signals in signals_by_date.items():
             total_weight = sum(
@@ -96,15 +113,41 @@ class DailyEventBacktestEngine:
             if total_weight > 1:
                 raise ValueError(f"target weights exceed 1 on {trade_date.isoformat()}")
 
+        missing_calendars = sorted(
+            {signal.symbol for signal in signals} - set(execution_calendar)
+        )
+        if missing_calendars:
+            raise ValueError(
+                "execution calendar is required for every signal symbol: "
+                + ", ".join(missing_calendars)
+            )
+        empty_calendars = sorted(
+            symbol for symbol, days in execution_calendar.items() if not days
+        )
+        if empty_calendars:
+            raise ValueError(
+                "execution calendar must contain open dates: "
+                + ", ".join(empty_calendars)
+            )
+        calendars = {
+            symbol: tuple(sorted(set(days)))
+            for symbol, days in execution_calendar.items()
+        }
+        timeline = sorted(
+            set(bars_by_date).union(
+                day for days in calendars.values() for day in days
+            )
+        )
+
         cash = self.initial_cash
         quantities: dict[str, int] = defaultdict(int)
         last_close: dict[str, Decimal] = {}
-        pending_targets: dict[str, tuple[date, Decimal]] = {}
+        pending_targets: dict[str, tuple[date, Decimal, date]] = {}
         trades: list[BacktestTrade] = []
         positions: list[PositionSnapshot] = []
         equity_curve: list[EquitySnapshot] = []
 
-        for trade_date in sorted(bars_by_date):
+        for trade_date in timeline:
             daily_bars = bars_by_date[trade_date]
             open_prices = {
                 symbol: bar.open for symbol, bar in daily_bars.items()
@@ -117,10 +160,16 @@ class DailyEventBacktestEngine:
             executable = {
                 symbol: target
                 for symbol, target in pending_targets.items()
-                if symbol in daily_bars
+                if target[2] == trade_date
             }
+            missing_execution_bars = sorted(set(executable) - set(daily_bars))
+            if missing_execution_bars:
+                raise ValueError(
+                    "missing trusted execution bar on scheduled trade date "
+                    f"{trade_date.isoformat()}: {', '.join(missing_execution_bars)}"
+                )
             orders = []
-            for symbol, (signal_date, target_weight) in executable.items():
+            for symbol, (signal_date, target_weight, _) in executable.items():
                 reference_price = daily_bars[symbol].open
                 target_quantity = self._round_lot(
                     opening_equity * target_weight / reference_price
@@ -130,7 +179,7 @@ class DailyEventBacktestEngine:
                     orders.append(
                         (quantity_delta > 0, symbol, signal_date, quantity_delta)
                     )
-            orders.sort(key=lambda order: order[0])
+            orders.sort(key=lambda order: (order[0], order[1], order[2]))
 
             for is_buy, symbol, signal_date, quantity_delta in orders:
                 reference_price = daily_bars[symbol].open
@@ -173,7 +222,8 @@ class DailyEventBacktestEngine:
             for symbol, bar in daily_bars.items():
                 last_close[symbol] = bar.close
             market_value = Decimal()
-            for symbol, quantity in quantities.items():
+            for symbol in sorted(quantities):
+                quantity = quantities[symbol]
                 if quantity == 0 or symbol not in last_close:
                     continue
                 value = Decimal(quantity) * last_close[symbol]
@@ -198,9 +248,17 @@ class DailyEventBacktestEngine:
             )
 
             for signal in signals_by_date.get(trade_date, []):
+                scheduled_date = self._next_execution_date(
+                    symbol=signal.symbol,
+                    signal_date=signal.signal_date,
+                    calendars=calendars,
+                )
+                if scheduled_date is None:
+                    continue
                 pending_targets[signal.symbol] = (
                     signal.signal_date,
                     signal.target_weight,
+                    scheduled_date,
                 )
 
         final_equity = (
@@ -232,3 +290,14 @@ class DailyEventBacktestEngine:
 
     def _round_lot(self, quantity: Decimal) -> int:
         return int(quantity) // self.lot_size * self.lot_size
+
+    @staticmethod
+    def _next_execution_date(
+        *,
+        symbol: str,
+        signal_date: date,
+        calendars: dict[str, tuple[date, ...]],
+    ) -> date | None:
+        available_dates = calendars[symbol]
+        index = bisect_right(available_dates, signal_date)
+        return available_dates[index] if index < len(available_dates) else None
