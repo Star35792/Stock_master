@@ -7,6 +7,7 @@ from app.schemas.trade import (
     PaperAccountRead,
     PaperEquitySnapshotCreateRequest,
     PaperEquitySnapshotRead,
+    PaperLedgerAuditRead,
 )
 from app.services.paper_equity import (
     PaperAccountNotFound,
@@ -15,14 +16,33 @@ from app.services.paper_equity import (
     PaperEquitySnapshotService,
     PaperEquityValidationError,
 )
+from app.services.paper_ledger_audit import (
+    PaperLedgerAccountNotFound,
+    PaperLedgerAuditService,
+)
 
 router = APIRouter(prefix="/paper-accounts", tags=["paper-accounts"])
 service = PaperEquitySnapshotService()
+audit_service = PaperLedgerAuditService()
 
 
 @router.get("", response_model=list[PaperAccountRead])
 def list_paper_accounts(db: DatabaseSession) -> list[PaperAccountRead]:
     return service.list_accounts(db)
+
+
+@router.get(
+    "/{account_id}/ledger-audit",
+    response_model=PaperLedgerAuditRead,
+)
+def get_paper_ledger_audit(
+    db: DatabaseSession,
+    account_id: Annotated[int, Path(gt=0)],
+) -> PaperLedgerAuditRead:
+    try:
+        return audit_service.audit_account(db, account_id=account_id)
+    except PaperLedgerAccountNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post(

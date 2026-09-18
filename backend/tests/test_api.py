@@ -452,6 +452,58 @@ def test_list_paper_accounts_returns_selectable_accounts(monkeypatch) -> None:
     ]
 
 
+def test_get_paper_ledger_audit_is_read_only(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_audit(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "account_id": 1,
+            "account_name": "本地模拟账户",
+            "status": "consistent",
+            "actual_cash_balance": "100000.0000",
+            "expected_cash_balance": "100000.0000",
+            "cash_difference": "0.0000",
+            "fill_count": 2,
+            "completed_execution_batch_count": 1,
+            "unlinked_fill_count": 0,
+            "positions": [],
+            "issues": [],
+            "read_only": True,
+            "auto_repair_performed": False,
+        }
+
+    monkeypatch.setattr(
+        paper_accounts_module.audit_service,
+        "audit_account",
+        fake_audit,
+    )
+
+    response = client.get("/api/v1/paper-accounts/1/ledger-audit")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "consistent"
+    assert response.json()["read_only"] is True
+    assert response.json()["auto_repair_performed"] is False
+    assert captured == {"account_id": 1}
+
+
+def test_get_paper_ledger_audit_maps_missing_account_to_404(monkeypatch) -> None:
+    def fake_audit(db, **kwargs):
+        raise paper_accounts_module.PaperLedgerAccountNotFound("paper account not found")
+
+    monkeypatch.setattr(
+        paper_accounts_module.audit_service,
+        "audit_account",
+        fake_audit,
+    )
+
+    response = client.get("/api/v1/paper-accounts/999/ledger-audit")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "paper account not found"
+
+
 def test_capture_paper_equity_snapshot_forwards_only_date_and_account(monkeypatch) -> None:
     captured: dict = {}
 

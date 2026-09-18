@@ -58,3 +58,40 @@ class PaperEquitySnapshotRead(BaseModel):
     orders_created: Literal[False] = False
     access_scope: Literal["local_single_user"] = "local_single_user"
     components: list[PaperEquityComponentRead]
+
+
+class PaperLedgerAuditIssueRead(BaseModel):
+    code: str
+    severity: Literal["warning", "error"]
+    message: str
+    execution_batch_id: int | None = None
+    order_id: int | None = None
+    fill_id: int | None = None
+    symbol: str | None = None
+
+
+class PaperLedgerPositionAuditRead(BaseModel):
+    symbol: str
+    expected_quantity: int
+    actual_quantity: int
+    quantity_difference: int
+    expected_average_cost: Decimal
+    actual_average_cost: Decimal
+    average_cost_difference: Decimal
+    consistent: bool
+
+
+class PaperLedgerAuditRead(BaseModel):
+    account_id: int
+    account_name: str
+    status: Literal["consistent", "inconsistent", "unverifiable"]
+    actual_cash_balance: Decimal
+    expected_cash_balance: Decimal | None
+    cash_difference: Decimal | None
+    fill_count: int
+    completed_execution_batch_count: int
+    unlinked_fill_count: int
+    positions: list[PaperLedgerPositionAuditRead]
+    issues: list[PaperLedgerAuditIssueRead]
+    read_only: Literal[True] = True
+    auto_repair_performed: Literal[False] = False

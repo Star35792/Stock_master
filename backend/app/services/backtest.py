@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.backtest import BacktestResult, DailyEventBacktestEngine, TargetWeightSignal
-from app.repositories.market import DailyBarRepository
+from app.repositories.market import CorporateActionRepository, DailyBarRepository
 from app.repositories.strategy import BacktestPerformanceRepository, BacktestRepository
 from app.schemas.common import Page
 from app.schemas.strategy import (
@@ -21,6 +21,9 @@ from app.schemas.strategy import (
 )
 from app.services.performance import BacktestPerformanceService
 
+_EXECUTION_ADJUST_TYPE = "none"
+_CORPORATE_ACTION_POLICY = "reject"
+
 
 @dataclass(frozen=True)
 class PersistedBacktestResult:
@@ -33,9 +36,13 @@ class DailyBacktestService:
         self,
         daily_bar_repository: DailyBarRepository | None = None,
         backtest_repository: BacktestRepository | None = None,
+        corporate_action_repository: CorporateActionRepository | None = None,
     ) -> None:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.backtest_repository = backtest_repository or BacktestRepository()
+        self.corporate_action_repository = (
+            corporate_action_repository or CorporateActionRepository()
+        )
 
     def run(
         self,
@@ -93,6 +100,8 @@ class DailyBacktestService:
         ]
         parameters = {
             "adjust_type": adjust_type,
+            "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
+            "corporate_action_policy": _CORPORATE_ACTION_POLICY,
             "commission_rate": str(commission_rate),
             "slippage_bps": str(slippage_bps),
             "lot_size": lot_size,
@@ -102,6 +111,9 @@ class DailyBacktestService:
         if research_contract is not None:
             parameters = {
                 **research_contract,
+                "adjust_type": adjust_type,
+                "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
+                "corporate_action_policy": _CORPORATE_ACTION_POLICY,
                 "symbols": symbols,
                 "signals": serialized_signals,
             }
@@ -117,11 +129,24 @@ class DailyBacktestService:
             initial_cash=initial_cash,
         )
         try:
-            bars = self.daily_bar_repository.list_for_factor_calculation(
+            corporate_actions = (
+                self.corporate_action_repository.list_for_symbols_date_range(
+                    db,
+                    symbols=set(symbols),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            )
+            if corporate_actions:
+                raise ValueError(
+                    "backtest interval contains corporate actions; "
+                    "event accounting is not implemented"
+                )
+            execution_bars = self.daily_bar_repository.list_for_factor_calculation(
                 db,
                 start_date=start_date,
                 end_date=end_date,
-                adjust_type=adjust_type,
+                adjust_type=_EXECUTION_ADJUST_TYPE,
                 symbols=symbols,
                 quality_status="trusted",
             )
@@ -130,7 +155,7 @@ class DailyBacktestService:
                 commission_rate=commission_rate,
                 slippage_bps=slippage_bps,
                 lot_size=lot_size,
-            ).run(bars=bars, signals=normalized_signals)
+            ).run(bars=execution_bars, signals=normalized_signals)
             self.backtest_repository.save_result(db, run=run, result=result)
         except Exception as exc:
             self.backtest_repository.fail_run(db, run=run, error_message=str(exc))

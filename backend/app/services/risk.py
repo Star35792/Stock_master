@@ -35,7 +35,11 @@ class PortfolioRiskService:
         average_daily_amounts: dict[str, Decimal],
         limits: RiskLimits,
         code_version: str,
+        market_prices: dict[str, Decimal] | None = None,
+        current_cycle_turnover: Decimal = Decimal(),
     ) -> PersistedRiskCheck:
+        if current_cycle_turnover < 0:
+            raise ValueError("current_cycle_turnover must be non-negative")
         plan, targets = self.plan_repository.get_with_targets(db, plan_id=plan_id)
         if plan is None:
             raise ValueError("portfolio plan not found")
@@ -55,29 +59,36 @@ class PortfolioRiskService:
             )
 
         decisions = []
+        cycle_turnover = current_cycle_turnover
         for target in targets:
             if target.order_quantity == 0:
                 continue
             current_symbol_weight = (
                 Decimal(target.current_quantity) * target.price / plan.total_equity
             )
-            decisions.append(
-                self.engine.check(
-                    order=OrderRiskInput(
-                        symbol=target.symbol,
-                        industry=target.industry,
-                        order_quantity=target.order_quantity,
-                        price=target.price,
-                        current_symbol_weight=current_symbol_weight,
-                        projected_symbol_weight=target.final_weight,
-                        current_industry_weight=current_industry_weights[target.industry],
-                        projected_industry_weight=projected_industry_weights[target.industry],
-                        average_daily_amount=average_daily_amounts.get(target.symbol),
-                        current_drawdown=current_drawdown,
-                    ),
-                    limits=limits,
-                )
+            projected_cycle_turnover = cycle_turnover + (
+                abs(Decimal(target.order_quantity)) * target.price / plan.total_equity
             )
+            decision = self.engine.check(
+                order=OrderRiskInput(
+                    symbol=target.symbol,
+                    industry=target.industry,
+                    order_quantity=target.order_quantity,
+                    price=target.price,
+                    current_symbol_weight=current_symbol_weight,
+                    projected_symbol_weight=target.final_weight,
+                    current_industry_weight=current_industry_weights[target.industry],
+                    projected_industry_weight=projected_industry_weights[target.industry],
+                    average_daily_amount=average_daily_amounts.get(target.symbol),
+                    current_drawdown=current_drawdown,
+                    market_price=(market_prices or {}).get(target.symbol),
+                    projected_cycle_turnover=projected_cycle_turnover,
+                ),
+                limits=limits,
+            )
+            decisions.append(decision)
+            if decision.passed:
+                cycle_turnover = projected_cycle_turnover
         check = self.risk_repository.save(
             db,
             plan_id=plan_id,
