@@ -16,6 +16,8 @@ from pathlib import Path
 # test suite never opens data/stock_master.duckdb.
 _test_db_root = Path(tempfile.mkdtemp(prefix="stock-master-tests-"))
 os.environ["METADATA_DB_PATH"] = str(_test_db_root / "session.duckdb")
+# API tests must never launch vendor downloads using a developer's .env key.
+os.environ["AUTO_DATA_SYNC_ENABLED"] = "false"
 atexit.register(shutil.rmtree, _test_db_root, ignore_errors=True)
 
 from sqlalchemy import create_engine, text  # noqa: E402

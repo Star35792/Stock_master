@@ -32,6 +32,8 @@ def main() -> int:
     print(f"batch={result.batch_no}")
     print(f"release={result.release_tag}")
     print(f"rows={result.row_count}")
+    print(f"accepted_rows={result.accepted_count}")
+    print(f"skipped_rows={result.skipped_count}")
     print(f"window={result.start_date}..{result.end_date}")
     print(f"adjustment_release={adjustment_result.release_tag}")
     print(f"adjustment_rows={adjustment_result.row_count}")

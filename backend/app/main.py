@@ -6,12 +6,19 @@ from app.api import api_router
 from app.api.routes import health_router
 from app.config.settings import settings
 from app.database.session import initialize_database
+from app.scheduler.auto_data_sync import AutoDataSyncWorker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
-    yield
+    worker = AutoDataSyncWorker(settings)
+    app.state.auto_data_sync = worker
+    worker.start()
+    try:
+        yield
+    finally:
+        await worker.stop()
 
 
 def create_app() -> FastAPI:

@@ -84,6 +84,18 @@ uv run uvicorn app.main:app --reload
 uv run python scripts/scheduler/run_daily_loop.py
 ```
 
+在 `backend/.env` 配置 `HITHINK_FINANCE_API_KEY` 后，API 启动会立即在后台同步日线，
+之后每次同步结束等待一小时再检查。首次自动同步使用供应商历史全量包建立基线，
+后续扫描近期包，只新增缺失或修订的原始记录；停机超过近期包覆盖的交易日范围时自动回补历史。
+首次下载和入库可能较久，API 可继续提供已有数据；同步结束后重新查询行情即可看到更新。
+上海时间 18:00 前不发布当天日线，实际更新以供应商已发布且通过现有校验的数据为准。
+自动任务更新未复权日线，不自动重建前复权、因子、回测或交易。
+
+`AUTO_DATA_SYNC_ENABLED=false` 可关闭；`AUTO_DATA_SYNC_INTERVAL_SECONDS` 可调整间隔
+（默认 3600 秒，最小 60 秒）。缺少 API key 时记录警告并跳过，失败记录到现有作业日志
+`auto_data_sync` 并在下个周期重试。DuckDB 服务使用单个 worker，避免同时运行其他写库调度脚本；
+正常关闭会等待正在执行的同步完成，以免中断写库。
+
 常用验证命令：
 
 ```bash

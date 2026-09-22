@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     hithink_finance_base_url: str = "https://fuyao.aicubes.cn"
     hithink_finance_timeout_seconds: int = 30
     hithink_dump_cache_dir: str = "data/hithink_dumps"
+    auto_data_sync_enabled: bool = True
+    auto_data_sync_interval_seconds: int = Field(default=3600, ge=60)
     data_lake_root: str = "data/warm"
     raw_landing_root: str = "data/raw_landing"
     # When true, price-based factor services read forward-adjusted bars from the

@@ -12,12 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.data_sources import HithinkDumpDataSource, HithinkDumpKind
 from app.data_sources.base import DailyBarRecord
-from app.lake.security_type import security_type_case_sql
+from app.data_sources.hithink_dump import HithinkDump
 from app.models.market import CorporateAction
 from app.models.raw import RawCorporateAction
 from app.repositories.market import SecurityRepository
 from app.repositories.raw import RawDailyBarImportRepository
-from app.services.hithink_collection import _infer_security_type, _to_raw_daily_bar
+from app.services.hithink_collection import _to_raw_daily_bar
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -30,6 +30,8 @@ class HithinkDumpCollectionResult:
     start_date: date
     end_date: date
     row_count: int
+    accepted_count: int
+    skipped_count: int
 
 
 @dataclass(frozen=True)
@@ -52,9 +54,13 @@ class HithinkDumpCollectionService:
         self.repository = repository or RawDailyBarImportRepository()
         self.security_repository = security_repository or SecurityRepository()
 
-    def collect(self, db: Session, *, full: bool = False) -> HithinkDumpCollectionResult:
+    def collect(
+        self, db: Session, *, full: bool = False, dump: HithinkDump | None = None
+    ) -> HithinkDumpCollectionResult:
         kind = HithinkDumpKind.FULL_DAILY if full else HithinkDumpKind.RECENT_DAILY
-        dump = self.data_source.download(kind)
+        dump = dump or self.data_source.download(kind)
+        if dump.kind != kind:
+            raise ValueError("dump kind does not match requested collection")
         start_date, end_date = self.data_source.daily_date_range(dump.path)
         batch_no = f"hithink_dump_{datetime.now(UTC):%Y%m%d%H%M%S}_{uuid4().hex[:8]}"
         batch = self.repository.create_batch(
@@ -72,61 +78,50 @@ class HithinkDumpCollectionService:
             },
         )
         row_count = 0
+        accepted_count = 0
+        skipped_count = 0
         try:
             duckdb_conn = _duckdb_connection(db)
             if duckdb_conn is not None:
-                # DuckDB-native bulk load: read the Parquet once and insert
-                # directly into raw.daily_bar. This preserves the raw-layer
-                # audit via raw.import_batch while avoiding Python-level ORM
-                # churn for multi-million-row dumps.
-                _bulk_import_daily_duckdb(
+                bulk_result = self.repository.bulk_import_hithink_daily_dump(
                     duckdb_conn,
                     batch_id=batch.id,
                     source_name=self.data_source.name,
                     source_type=self.data_source.source_type,
                     path=dump.path,
                 )
-                row_count = _count_batch_rows(db, batch.id)
+                row_count = bulk_result.input_count
+                accepted_count = bulk_result.inserted_count
+                skipped_count = bulk_result.skipped_count
             else:
-                driver_connection = _driver_connection(db)
-                if driver_connection is not None:
-                    with driver_connection.cursor() as cursor:
-                        with cursor.copy(_DAILY_BAR_COPY_SQL) as copy:
-                            for chunk in self.data_source.iter_daily_rows(dump.path):
-                                for item in chunk:
-                                    copy.write_row(
-                                        _daily_copy_row(
-                                            batch.id,
-                                            self.data_source.name,
-                                            self.data_source.source_type,
-                                            item,
-                                        )
-                                    )
-                                row_count += len(chunk)
-                else:
-                    for chunk in self.data_source.iter_daily_rows(dump.path):
-                        symbols = {str(item["thscode"]).upper() for item in chunk}
-                        security_types = self.security_repository.get_security_types(db, symbols)
-                        rows = [
-                            _to_raw_daily_bar(
-                                batch_id=batch.id,
-                                source_name=self.data_source.name,
-                                source_type=self.data_source.source_type,
-                                source_priority=40,
-                                record=_to_record(item),
-                                security_type=security_types.get(str(item["thscode"]).upper()),
-                            )
-                            for item in chunk
-                        ]
-                        db.add_all(rows)
-                        db.flush()
-                        row_count += len(rows)
+                for chunk in self.data_source.iter_daily_rows(dump.path):
+                    symbols = {str(item["thscode"]).upper() for item in chunk}
+                    security_types = self.security_repository.get_security_types(db, symbols)
+                    for item in chunk:
+                        row_count += 1
+                        row = _to_raw_daily_bar(
+                            batch_id=batch.id,
+                            source_name=self.data_source.name,
+                            source_type=self.data_source.source_type,
+                            source_priority=40,
+                            record=_to_record(item),
+                            security_type=security_types.get(str(item["thscode"]).upper()),
+                        )
+                        if self.repository.add_daily_bar_if_changed(db, row):
+                            accepted_count += 1
+                        else:
+                            skipped_count += 1
+                    db.flush()
+            batch.request_params = {
+                **batch.request_params,
+                "skipped_count": skipped_count,
+            }
             self.repository.finish_batch(
                 db,
                 batch,
                 status="success",
                 row_count=row_count,
-                accepted_count=row_count,
+                accepted_count=accepted_count,
                 rejected_count=0,
             )
             db.commit()
@@ -159,6 +154,8 @@ class HithinkDumpCollectionService:
             start_date=start_date,
             end_date=end_date,
             row_count=row_count,
+            accepted_count=accepted_count,
+            skipped_count=skipped_count,
         )
 
     def collect_adjustments(self, db: Session) -> HithinkAdjustmentCollectionResult:
@@ -246,13 +243,30 @@ class HithinkDumpCollectionService:
             row_count=row_count,
         )
 
-    def build_market_daily(self, db: Session, *, batch_no: str) -> int:
-        params = {"batch_no": batch_no}
+    def build_market_daily(
+        self, db: Session, *, batch_no: str, end_date: date | None = None
+    ) -> int:
+        from sqlalchemy import select
+
+        from app.models.raw import ImportBatch
+
+        batch = db.scalar(select(ImportBatch).where(ImportBatch.batch_no == batch_no))
+        if batch is None:
+            raise ValueError(f"Unknown import batch: {batch_no}")
+        request_params = batch.request_params or {}
+        params = {
+            "batch_id": batch.id,
+            "source_name": batch.source_name,
+            "start_date": request_params.get("start_date"),
+            "end_date": request_params.get("end_date"),
+            "cap_date": end_date,
+        }
         db.execute(text(_ENSURE_DUMP_SECURITIES_SQL), params)
         db.execute(text(_BUILD_MARKET_DAILY_SQL), params)
         market_rows = int(db.scalar(text(_COUNT_MARKET_DAILY_SQL), params) or 0)
         db.commit()
         return market_rows
+
 
 
 def _to_record(item: dict) -> DailyBarRecord:
@@ -279,14 +293,30 @@ def _decimal(value: object) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
-_DAILY_BAR_COPY_SQL = """
-COPY raw.daily_bar (
-    batch_id, source_name, source_type, source_priority, symbol, raw_symbol,
-    security_type, trade_date, adjust_type, open, high, low, close, volume, amount
-) FROM STDIN
+# Reuse unchanged raw versions after interrupted market builds. Rank before
+# validation so a newer invalid revision cannot silently revive an older value.
+_DUMP_CANDIDATES_SQL = """
+WITH candidates AS (
+    SELECT r.*, row_number() OVER (
+        PARTITION BY r.symbol, r.trade_date, r.adjust_type ORDER BY r.id DESC
+    ) AS version_rank
+    FROM raw.daily_bar r
+    WHERE r.source_name = :source_name
+      AND r.adjust_type = 'none'
+      AND (
+        (CAST(:start_date AS DATE) IS NOT NULL AND CAST(:end_date AS DATE) IS NOT NULL
+         AND r.trade_date BETWEEN CAST(:start_date AS DATE) AND CAST(:end_date AS DATE))
+        OR ((CAST(:start_date AS DATE) IS NULL OR CAST(:end_date AS DATE) IS NULL)
+            AND r.batch_id = :batch_id)
+      )
+      AND (CAST(:cap_date AS DATE) IS NULL OR r.trade_date <= CAST(:cap_date AS DATE))
+), latest AS (
+    SELECT * FROM candidates WHERE version_rank = 1
+)
 """
 
-_BUILD_MARKET_DAILY_SQL = """
+
+_BUILD_MARKET_DAILY_SQL = _DUMP_CANDIDATES_SQL + """
 INSERT INTO market.daily_bar (
     symbol, security_type, trade_date, adjust_type, open, high, low, close,
     pre_close, change_amount, pct_change, volume, amount, turnover_rate,
@@ -299,11 +329,13 @@ SELECT
     r.pre_close, r.change_amount, r.pct_change, r.volume, r.amount,
     r.turnover_rate, r.amplitude, r.source_name,
     1, 100.00, 'trusted', false, r.id
-FROM raw.daily_bar r
-JOIN raw.import_batch b ON b.id = r.batch_id
+FROM latest r
 JOIN market.security s ON s.symbol = r.symbol
-WHERE b.batch_no = :batch_no
-  AND r.adjust_type = 'none'
+JOIN market.trading_calendar c
+  ON c.exchange = split_part(r.symbol, '.', 2)
+ AND c.trade_date = r.trade_date
+ AND c.is_open = true
+WHERE r.adjust_type = 'none'
   AND r.open > 0 AND r.high > 0 AND r.low > 0 AND r.close > 0
   AND r.high >= r.open AND r.high >= r.close AND r.high >= r.low
   AND r.low <= r.open AND r.low <= r.close AND r.low <= r.high
@@ -328,20 +360,20 @@ ON CONFLICT (symbol, trade_date, adjust_type) DO UPDATE SET
     quality_status = EXCLUDED.quality_status,
     is_suspect = EXCLUDED.is_suspect,
     selected_raw_id = EXCLUDED.selected_raw_id
+WHERE market.daily_bar.quality_status <> 'manual_fixed'
+  AND market.daily_bar.selected_raw_id IS DISTINCT FROM EXCLUDED.selected_raw_id
+  AND (market.daily_bar.selected_raw_id IS NULL
+       OR market.daily_bar.selected_raw_id < EXCLUDED.selected_raw_id)
 """
 
-_COUNT_MARKET_DAILY_SQL = """
+_COUNT_MARKET_DAILY_SQL = _DUMP_CANDIDATES_SQL + """
 SELECT COUNT(*)
 FROM market.daily_bar d
-JOIN raw.daily_bar r
-  ON r.id = d.selected_raw_id
-JOIN raw.import_batch b
-  ON b.id = r.batch_id
-WHERE b.batch_no = :batch_no
-  AND d.adjust_type = 'none'
+JOIN latest r ON r.id = d.selected_raw_id
+WHERE d.adjust_type = 'none'
 """
 
-_ENSURE_DUMP_SECURITIES_SQL = """
+_ENSURE_DUMP_SECURITIES_SQL = _DUMP_CANDIDATES_SQL + """
 INSERT INTO market.security (
     symbol, raw_symbol, name, security_type, exchange, currency,
     list_date, is_active, source_name
@@ -373,9 +405,7 @@ SELECT
     min(r.trade_date),
     false,
     'hithink_finance_dump'
-FROM raw.daily_bar r
-JOIN raw.import_batch b ON b.id = r.batch_id
-WHERE b.batch_no = :batch_no
+FROM latest r
 GROUP BY r.symbol
 ON CONFLICT (symbol) DO NOTHING
 """
@@ -389,41 +419,6 @@ def _duckdb_connection(db: Session):
     except AttributeError:
         pass
     return None
-
-
-def _bulk_import_daily_duckdb(
-    connection,
-    *,
-    batch_id: int,
-    source_name: str,
-    source_type: str,
-    path,
-) -> None:
-    symbol_expr = "upper(thscode)"
-    connection.execute(
-        f"""
-        INSERT INTO raw.daily_bar (
-            batch_id, source_name, source_type, source_priority,
-            symbol, raw_symbol, security_type, trade_date, adjust_type,
-            open, high, low, close, volume, amount
-        )
-        SELECT
-            ?, ?, ?, 40,
-            {symbol_expr},
-            {symbol_expr},
-            {security_type_case_sql(symbol_expr)},
-            epoch_ms(date_ms + 28800000)::DATE,
-            'none',
-            open_price, high_price, low_price, close_price, volume, turnover
-        FROM read_parquet(?)
-        WHERE adjusted = 'none'
-        """,
-        [batch_id, source_name, source_type, str(path)],
-    )
-
-
-def _count_batch_rows(db: Session, batch_id: int) -> int:
-    return _count_batch_rows_in_table(db, table="raw.daily_bar", batch_id=batch_id)
 
 
 def _count_batch_rows_in_table(db: Session, *, table: str, batch_id: int) -> int:
@@ -522,43 +517,6 @@ def _bulk_import_adjustments_duckdb(
         ON CONFLICT (symbol, ex_date, action_type, source_name) DO NOTHING
         """,
         [source_name, str(path)],
-    )
-
-
-def _driver_connection(db: Session):
-    try:
-        conn = db.connection().connection.driver_connection
-        # DuckDB does not support psycopg-style cursor.copy; fall back to ORM inserts.
-        if hasattr(conn, "copy"):
-            return conn
-        return None
-    except AttributeError:
-        return None
-
-
-def _daily_copy_row(
-    batch_id: int,
-    source_name: str,
-    source_type: str,
-    item: dict,
-) -> tuple:
-    symbol = str(item["thscode"]).upper()
-    return (
-        batch_id,
-        source_name,
-        source_type,
-        40,
-        symbol,
-        symbol,
-        _infer_security_type(symbol),
-        datetime.fromtimestamp(int(item["date_ms"]) / 1000, tz=_SHANGHAI).date(),
-        "none",
-        _decimal(item["open_price"]),
-        _decimal(item["high_price"]),
-        _decimal(item["low_price"]),
-        _decimal(item["close_price"]),
-        _decimal(item.get("volume")),
-        _decimal(item.get("turnover")),
     )
 
 

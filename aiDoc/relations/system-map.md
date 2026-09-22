@@ -27,7 +27,8 @@
 
 - `backend/app/lake`：本地 Parquet 数据湖和批量扫描工具；curated 数据集是因子服务可配置的生产消费源，与 DuckDB 事实层共同组成单机存储架构。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。
-- 调度脚本基于 APScheduler blocking scheduler，不是 FastAPI 内置后台任务；`daily_loop` 编排器按交易日串联 `daily_sync` 与 `factor_pipeline`，sync 失败时不继续执行因子计算，所有步骤写入 `system.job_log`。
+- API 生命周期管理 `AutoDataSyncWorker`：启动后在后台线程串行执行全市场未复权日线同步，每次结束后等待配置间隔再检查，关闭时等待当前同步结束；使用单 worker，任务与水位复用 `JobLog`（物理表 `metadata.job_log`）。
+- 独立调度脚本仍基于 APScheduler blocking scheduler；`daily_loop` 编排器按交易日串联 `daily_sync` 与 `factor_pipeline`，sync 失败时不继续执行因子计算。不要与 API 自动同步同时对同一 DuckDB 文件运行独立写库进程；API 自动同步不触发因子或交易。
 
 ## 文档同步触发
 

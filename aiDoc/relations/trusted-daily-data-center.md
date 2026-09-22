@@ -262,3 +262,10 @@ V1 稳定后已经扩展出的能力：
 分层存储架构（DuckDB 单库承载控制面+事务+温层查询、本地 Parquet 温层、本地 FS 冷存；不引入 PostgreSQL/SQLite/MinIO/Redis）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`。`curated/prices_qfq` 已接入 `daily_loop`（`factor_reads_curated` 开关），`fundamentals_pit`、factor release 与完整 Parquet release 发布/校验仍属后续切片。
 
 任何会进入策略、回测、组合和模拟盘的生产数据，仍应以经过质量校验和血缘追踪的 `market` / `factor` 层为准。
+
+API 启动后的日线维护由 `scheduler/auto_data_sync.py` 的后台线程执行，调用
+`services/auto_data_sync.py` 编排参考数据刷新、HiThink dump 幂等导入和可信日线构建。
+首次使用历史包建立处理基线，之后按成功任务水位与近期包实际窗口判断增量或历史回补，
+通过 `JobLog` 留痕；任务失败不推进水位。原始记录已经存在时仍可恢复缺失 market，
+已人工修复的数据不被自动覆盖。自动链仅处理未复权日线，不隐式扩展到因子、研究或交易。
+生命周期任务不阻塞 API 启动，退出时等待当前任务结束；单 worker 部署，避免并行写库脚本。
