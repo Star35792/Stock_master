@@ -2,7 +2,12 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
+
 from app.data_sources.hithink import HithinkFinanceDataSource
+from app.models.market import DailyBar
+from app.repositories.market import DailyBarRepository
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService, _validate_candidate
 
 
@@ -13,6 +18,7 @@ def _raw_bar(**overrides):
         "trade_date": date(2026, 7, 17),
         "adjust_type": "none",
         "source_name": "hithink_finance",
+        "security_type": "stock",
         "open": Decimal("1200.00"),
         "high": Decimal("1250.00"),
         "low": Decimal("1190.00"),
@@ -22,6 +28,12 @@ def _raw_bar(**overrides):
         "pct_change": Decimal("0.199194"),
         "volume": Decimal("1000"),
         "amount": Decimal("1242470"),
+        "turnover_rate": None,
+        "amplitude": None,
+        "limit_up": None,
+        "limit_down": None,
+        "is_suspended": False,
+        "special_treatment_status": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -158,6 +170,49 @@ def test_market_build_promotes_consistent_multi_source_candidate() -> None:
     assert compare_repository.calls[0]["is_conflict"] is False
     assert issue_repository.calls == []
     assert db.committed is True
+
+
+def test_market_repository_does_not_overwrite_manual_fix() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE SCHEMA market"))
+    DailyBar.__table__.create(engine)
+
+    with Session(engine) as db:
+        existing = DailyBar(
+            symbol="600519.SH",
+            security_type="stock",
+            trade_date=date(2026, 7, 17),
+            adjust_type="none",
+            open=Decimal("1200"),
+            high=Decimal("1250"),
+            low=Decimal("1190"),
+            close=Decimal("1243"),
+            volume=Decimal("1000"),
+            amount=Decimal("1243000"),
+            source_name="manual",
+            source_count=1,
+            quality_score=Decimal("100"),
+            quality_status="manual_fixed",
+            is_suspect=False,
+            selected_raw_id=7,
+        )
+        db.add(existing)
+        db.commit()
+
+        DailyBarRepository().upsert_from_raw(
+            db,
+            raw_bar=_raw_bar(id=99, close=Decimal("1242")),  # type: ignore[arg-type]
+            quality_score=Decimal("100"),
+            quality_status="trusted",
+            is_suspect=False,
+        )
+        db.commit()
+        db.refresh(existing)
+
+        assert existing.close == Decimal("1243.0000")
+        assert existing.quality_status == "manual_fixed"
+        assert existing.selected_raw_id == 7
 
 
 def test_market_build_blocks_price_conflict_between_sources() -> None:

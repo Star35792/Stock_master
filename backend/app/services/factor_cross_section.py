@@ -13,11 +13,16 @@ from app.repositories.factor import (
     FactorRunRepository,
     FactorValueRepository,
 )
-from app.repositories.market import DailyBarRepository, SecurityRepository
+from app.repositories.market import (
+    DailyBarRepository,
+    SecurityRepository,
+    TradingCalendarRepository,
+)
 
 VALUE_QUANT = Decimal("0.0000000001")
 PROFILE_VERSION = "v1"
 FORWARD_RETURN_HORIZONS = (1, 5, 20)
+FORWARD_CALENDAR_LOOKAHEAD_DAYS = 90
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,7 @@ class FactorCrossSectionService:
         run_repository: FactorRunRepository | None = None,
         daily_bar_repository: DailyBarRepository | None = None,
         security_repository: SecurityRepository | None = None,
+        trading_calendar_repository: TradingCalendarRepository | None = None,
     ) -> None:
         self.value_repository = value_repository or FactorValueRepository()
         self.profile_repository = profile_repository or FactorProfileRepository()
@@ -57,6 +63,9 @@ class FactorCrossSectionService:
         self.run_repository = run_repository or FactorRunRepository()
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.security_repository = security_repository or SecurityRepository()
+        self.trading_calendar_repository = (
+            trading_calendar_repository or TradingCalendarRepository()
+        )
 
     def run(
         self,
@@ -352,38 +361,82 @@ class FactorCrossSectionService:
         if not values_by_date:
             return {}
         target_dates = set(values_by_date)
+        factor_symbols = {symbol for values in values_by_date.values() for symbol in values}
+        securities = self.security_repository.get_many(db, symbols=factor_symbols)
+        exchange_by_symbol = {
+            security.symbol: security.exchange
+            for security in securities
+            if security.exchange
+        }
+        exchanges = set(exchange_by_symbol.values())
+        open_dates_by_exchange = {
+            exchange: self.trading_calendar_repository.list_open_dates(
+                db,
+                exchange=exchange,
+                start_date=min(target_dates),
+                end_date=end_date + timedelta(days=FORWARD_CALENDAR_LOOKAHEAD_DAYS),
+            )
+            for exchange in exchanges
+        }
+        target_date_by_exchange: dict[str, dict[date, dict[int, date]]] = {}
+        required_bar_dates = set(target_dates)
+        for exchange, open_dates in open_dates_by_exchange.items():
+            open_date_index = {trade_date: index for index, trade_date in enumerate(open_dates)}
+            exchange_targets: dict[date, dict[int, date]] = {}
+            for current_date in target_dates:
+                current_index = open_date_index.get(current_date)
+                if current_index is None:
+                    continue
+                horizon_targets = {}
+                for horizon in FORWARD_RETURN_HORIZONS:
+                    future_index = current_index + horizon
+                    if future_index >= len(open_dates):
+                        continue
+                    future_date = open_dates[future_index]
+                    horizon_targets[horizon] = future_date
+                    required_bar_dates.add(future_date)
+                exchange_targets[current_date] = horizon_targets
+            target_date_by_exchange[exchange] = exchange_targets
+
+        if not target_date_by_exchange:
+            return {
+                horizon: {}
+                for horizon in FORWARD_RETURN_HORIZONS
+            }
         bars = self.daily_bar_repository.list_for_factor_calculation(
             db,
             start_date=start_date,
-            end_date=end_date + timedelta(days=45),
+            end_date=max(required_bar_dates),
             adjust_type=adjust_type,
-            symbols=symbols,
+            symbols=sorted(factor_symbols) if factor_symbols else symbols,
             quality_status="trusted",
         )
-        bars_by_symbol: dict[str, list[Any]] = defaultdict(list)
-        for bar in bars:
-            bars_by_symbol[bar.symbol].append(bar)
+        bars_by_symbol_date = {
+            (bar.symbol, bar.trade_date): bar
+            for bar in bars
+        }
 
         returns_by_horizon: dict[int, dict[date, dict[str, Decimal]]] = {
             horizon: defaultdict(dict) for horizon in FORWARD_RETURN_HORIZONS
         }
-        for symbol, symbol_bars in bars_by_symbol.items():
-            symbol_bars.sort(key=lambda bar: bar.trade_date)
-            for index, current_bar in enumerate(symbol_bars):
-                if current_bar.trade_date not in target_dates:
+        for current_date, symbol_values in values_by_date.items():
+            for symbol in symbol_values:
+                exchange = exchange_by_symbol.get(symbol)
+                if exchange is None:
                     continue
-                for horizon in FORWARD_RETURN_HORIZONS:
-                    future_index = index + horizon
-                    if future_index >= len(symbol_bars):
+                current_bar = bars_by_symbol_date.get((symbol, current_date))
+                if current_bar is None:
+                    continue
+                horizon_targets = target_date_by_exchange.get(exchange, {}).get(
+                    current_date, {}
+                )
+                for horizon, future_date in horizon_targets.items():
+                    future_bar = bars_by_symbol_date.get((symbol, future_date))
+                    if future_bar is None:
                         continue
-                    forward_return = self._ratio_change(
-                        symbol_bars[future_index].close,
-                        current_bar.close,
-                    )
+                    forward_return = self._ratio_change(future_bar.close, current_bar.close)
                     if forward_return is not None:
-                        returns_by_horizon[horizon][current_bar.trade_date][symbol] = (
-                            forward_return
-                        )
+                        returns_by_horizon[horizon][current_date][symbol] = forward_return
         return {
             horizon: dict(returns_by_date)
             for horizon, returns_by_date in returns_by_horizon.items()

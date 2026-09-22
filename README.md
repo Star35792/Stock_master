@@ -4,7 +4,7 @@ Stock Master 是一个面向 A 股、ETF 和后续量化研究场景的个人量
 
 当前项目已经从 **可信日线数据中心** 推进到因子、回测、组合、风控、模拟盘和运维观测的最小闭环。V4 单策略研究合同与可复现回测切片已落地，运行记录可还原完整输入和版本。不依赖某一个单一数据源，而是通过多源导入、原始留痕、质量校验和人工修复，形成可供策略、回测和组合执行使用的本地可信数据底座。
 
-V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交易所开市日生成窗口、基准与跨运行比较。回归漂移诊断只比较研究合同、测试区间和数据版本一致的运行，阈值表示收益率与回撤率的绝对差值；训练和选参仍由调用方完成并负责留痕。
+V4 研究接口支持批量运行、样本外合同、按指定交易所开市日生成滚动窗口规划、基准与跨运行比较。样本外报告只聚合服务端既有运行与绩效事实，保留失败窗口并禁止对重叠窗口直接复利；训练和选参仍由调用方完成，训练产物尚未验证，因此当前不会把窗口规划宣传为自动 walk-forward。
 
 ## 当前状态
 
@@ -24,14 +24,15 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 
 核心 API 面：
 
-- 健康检查：`GET /health`
 - 价格与价值研究：`POST /api/v1/strategy-research/price-value/evaluate`；前端菜单“估值研究”（`/price-value`）。输入三情景 FCFE 总额、稀释股数、时点、费用和安全边际等显式研究假设，服务端读取指定日期可信未复权行情，返回情景价值、含费成本上限、最高报价、复核/阻断原因和输入合同哈希。固定 `research_only=true`、`pit_verified=false`、`execution_eligible=false`，不写入数据库、不生成权重或订单。字段与范围见[策略规范](aiDoc/strategy/20260922-1314-price-value-margin-strategy.md)。
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`；同页新增版本化假设历史模拟。单只沪深主板普通股与现金，收盘生成信号、次日开盘按实际整手数量和费用复核买价，达到基准价值或论点失效触发模拟退出，未成交退出持续重试。不自动加仓，未用预算保留现金。运行写入 `strategy.backtest_*` 研究记录，返回净值、现金、成交、决策日志和合同指纹；当前修订行情与手工假设不构成历史时点认证或样本外验证，不创建 paper 或真实订单。遇公司行为、历史 ST/状态未知或缺失可信行情/涨跌停数据时拒绝运行。
+
+- 健康检查：`GET /health`
 - 行情与参考数据：`GET /api/v1/securities`、`GET /api/v1/securities/{symbol}/lifecycle`、`GET /api/v1/daily-bars/{symbol}`、`GET /api/v1/daily-bars/{symbol}/chart`（最新可消费日线窗口，仅含 `trusted/manual_fixed` 且非可疑记录）、`GET /api/v1/daily-bars/missing`、`GET /api/v1/trading-calendar`
 - 数据质量与修复：`GET /api/v1/data-quality/issues`、`PATCH /api/v1/data-quality/issues/{issue_id}/status`、`GET /api/v1/daily-bar-source-compares`、`GET /api/v1/manual-corrections`
 - 复权与公司行为：`GET /api/v1/corporate-actions`、`GET /api/v1/adjustment-factors`
 - 因子：`GET /api/v1/factors/definitions`、`GET /api/v1/factors/runs`、`GET /api/v1/factors/values`、`GET /api/v1/factors/profiles`
-- 研究与回测：`POST /api/v1/strategy-research/rolling-windows`、`POST /api/v1/strategy-research/factor-selection/backtests`、`POST /api/v1/strategy-research/factor-selection/backtests/batch`、`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`GET /api/v1/backtests/runs/{run_id}/trades`、`GET /api/v1/backtests/runs/{run_id}/equity`、`GET /api/v1/backtests/runs/{run_id}/positions`、`GET /api/v1/backtests/runs/{run_id}/performance`、`POST /api/v1/backtests/runs/{run_id}/performance`、`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`；研究信号可使用复权行情，成交统一使用可信未复权价格，跨公司行为区间在事件会计落地前明确拒绝
+- 研究与回测：`POST /api/v1/strategy-research/rolling-windows`、`POST /api/v1/strategy-research/factor-selection/backtests`、`POST /api/v1/strategy-research/factor-selection/backtests/batch`、`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`GET /api/v1/backtests/runs/{run_id}/trades`、`GET /api/v1/backtests/runs/{run_id}/equity`、`GET /api/v1/backtests/runs/{run_id}/positions`、`GET /api/v1/backtests/runs/{run_id}/performance`、`POST /api/v1/backtests/runs/{run_id}/performance`、`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`；研究信号可使用复权行情，成交统一使用可信未复权价格，跨公司行为区间在事件会计落地前明确拒绝。`out_of_sample` 运行强制训练期早于测试期且只在测试区间取因子并回测；验证报告只读聚合可比运行并保留失败窗口，不对重叠窗口复利；`rolling-windows` 当前只生成带 `window_id` 和 `execution_status=planning_only` 的规划窗口，在训练产物与窗口不可变绑定落地前拒绝 `rolling` 执行
 - 组合草案：`POST /api/v1/portfolio/plans`（必须提供 `Idempotency-Key`）、`GET /api/v1/portfolio/plans/{plan_id}`、`GET /api/v1/portfolio/plans/{plan_id}/risk-readiness?paper_account_id=...`；输入为操作者手工模拟快照，风险前核对也固定标记 `execution_allowed=false`、`risk_evaluated=false`、`orders_created=false`
 - Paper 账户：`GET /api/v1/paper-accounts` 提供本地模拟账户选择；`GET /api/v1/paper-accounts/{account_id}/ledger-audit` 只读核对订单、成交、执行批次、现金与持仓事实并返回差异，不自动修复；`POST /api/v1/paper-accounts/{account_id}/equity-snapshots`（必须提供 `Idempotency-Key`）、`GET /api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}`；净值快照仅使用服务端现金、全量持仓和 exact-date 可信未复权收盘价，回撤口径为“自监控开始以来”
 - 正式风控：`POST /api/v1/portfolio/plans/{plan_id}/risk-evaluations`（必须提供 `Idempotency-Key`）；请求只引用候选 paper 账户和净值快照，服务端绑定 readiness、ADV 和固定风险政策，响应固定 `execution_allowed=false`、`orders_created=false`

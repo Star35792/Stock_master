@@ -21,6 +21,17 @@ V4 单次回测研究合同及其支撑 API 已交付。滚动窗口按指定交
 
 详细执行计划：[V4 单策略研究合同与可复现回测计划](v4-research-contract-plan.md)
 
+## 量化工具演进路线
+
+项目长期目标是演进为支持自动选股、持仓管控与策略自进化的量化工具。该愿景已沉淀为：
+
+- [产品与投资者视角评估](../strategy/product-investment-assessment.md)：当前能力、核心缺口与金融正确性硬门槛
+- [量化工具愿景](../strategy/quantitative-tool-vision.md)：自动选股、持仓管控、策略自进化的分层设计
+- [自动选股、持仓管控与策略自进化路线图](auto-selection-position-roadmap.md)：分 5 阶段、24-36 个月的执行计划
+- [前置硬门槛执行计划](hard-gates-execution-plan.md)：自动选股前必须完成的 4 项金融正确性硬门槛，当前从 A 股真实交易成本与可交易性开始
+
+该路线与现有 V4/V5/V6/V7 路线是补充关系：先完成 V4 研究闭环与 V5 paper-only 公共操作闭环，再按前置硬门槛计划补齐金融正确性，最后才扩展自动选股、策略库和元策略能力。
+
 ## 计划文档同步规则
 
 - 改阶段状态、优先级或交付范围时，更新 `aiDoc/plans/roadmap.md`。

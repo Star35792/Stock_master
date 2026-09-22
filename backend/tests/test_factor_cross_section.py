@@ -69,6 +69,9 @@ class FakeRunRepository:
 
 
 class FakeDailyBarRepository:
+    def __init__(self, rows: list[SimpleNamespace] | None = None) -> None:
+        self.rows = rows
+
     def count_trusted_by_date(self, db: object, **kwargs: object) -> dict[date, int]:
         return {date(2026, 7, 17): 5}
 
@@ -77,6 +80,8 @@ class FakeDailyBarRepository:
         db: object,
         **kwargs: object,
     ) -> list[SimpleNamespace]:
+        if self.rows is not None:
+            return self.rows
         rows = []
         symbols = {"A": 1, "B": 2, "C": 3, "D": 4}
         for offset in range(21):
@@ -87,8 +92,42 @@ class FakeDailyBarRepository:
 
 
 class FakeSecurityRepository:
+    def __init__(self, exchanges: dict[str, str] | None = None) -> None:
+        self.exchanges = exchanges or {}
+
     def get_industries(self, db: object, symbols: set[str]) -> dict[str, str]:
         return {"A": "I1", "B": "I1", "C": "I2", "D": "I2"}
+
+    def get_many(self, db: object, *, symbols: set[str]) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(symbol=symbol, exchange=self.exchanges.get(symbol, "XSHG"))
+            for symbol in symbols
+        ]
+
+
+class FakeTradingCalendarRepository:
+    def __init__(
+        self,
+        open_dates: list[date] | dict[str, list[date]] | None = None,
+    ) -> None:
+        self.open_dates = open_dates
+
+    def list_open_dates(
+        self,
+        db: object,
+        *,
+        exchange: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[date]:
+        if isinstance(self.open_dates, dict):
+            dates = self.open_dates.get(exchange, [])
+        else:
+            dates = self.open_dates or [
+                date.fromordinal(start_date.toordinal() + offset)
+                for offset in range(21)
+            ]
+        return [item for item in dates if start_date <= item <= end_date]
 
 
 def _row(symbol: str, factor_name: str, value: str) -> SimpleNamespace:
@@ -134,6 +173,7 @@ def test_cross_section_service_transforms_and_profiles_factor() -> None:
         run_repository=run_repository,
         daily_bar_repository=FakeDailyBarRepository(),
         security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
     )
 
     result = service.run(
@@ -201,6 +241,7 @@ def test_cross_section_service_validates_size_factor_pair() -> None:
         run_repository=FakeRunRepository(),
         daily_bar_repository=FakeDailyBarRepository(),
         security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
     )
 
     with pytest.raises(ValueError, match="provided together"):
@@ -214,3 +255,103 @@ def test_cross_section_service_validates_size_factor_pair() -> None:
             code_version="abc123",
             size_factor_name="size",
         )
+
+
+def test_cross_section_forward_return_does_not_skip_missing_target_open_day() -> None:
+    source_rows = [
+        _row(symbol, "ret_1d", value)
+        for symbol, value in {
+            "A": "1",
+            "B": "2",
+        }.items()
+    ]
+    value_repository = FakeFactorValueRepository(source_rows, [])
+    profile_repository = FakeProfileRepository()
+    service = FactorCrossSectionService(
+        value_repository=value_repository,
+        profile_repository=profile_repository,
+        definition_repository=FakeDefinitionRepository(),
+        run_repository=FakeRunRepository(),
+        daily_bar_repository=FakeDailyBarRepository(
+            [
+                _bar("A", date(2026, 7, 17), "100"),
+                _bar("A", date(2026, 7, 21), "150"),
+                _bar("B", date(2026, 7, 17), "100"),
+                _bar("B", date(2026, 7, 21), "50"),
+            ]
+        ),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(
+            [date(2026, 7, 17), date(2026, 7, 20), date(2026, 7, 21)]
+        ),
+    )
+
+    service.run(
+        object(),
+        factor_name="ret_1d",
+        factor_version="v1-none",
+        start_date=date(2026, 7, 17),
+        end_date=date(2026, 7, 17),
+        adjust_type="none",
+        code_version="abc123",
+    )
+
+    profile = profile_repository.profiles[0]
+    assert profile["ic_1d"] is None
+    assert profile["rank_ic_1d"] is None
+    assert profile["top_quantile_forward_return_1d"] is None
+    assert profile["bottom_quantile_forward_return_1d"] is None
+
+
+def test_cross_section_forward_return_uses_next_exchange_open_day_across_holiday() -> None:
+    source_rows = [
+        _row("A", "ret_1d", "1"),
+        _row("B", "ret_1d", "2"),
+        _row("C", "ret_1d", "3"),
+        _row("D", "ret_1d", "4"),
+    ]
+    profile_repository = FakeProfileRepository()
+    service = FactorCrossSectionService(
+        value_repository=FakeFactorValueRepository(source_rows, []),
+        profile_repository=profile_repository,
+        definition_repository=FakeDefinitionRepository(),
+        run_repository=FakeRunRepository(),
+        daily_bar_repository=FakeDailyBarRepository(
+            [
+                *[_bar(symbol, date(2026, 7, 17), "100") for symbol in "ABCD"],
+                *[
+                    _bar(symbol, target_date, str(100 + slope))
+                    for symbol, target_date, slope in (
+                        ("A", date(2026, 7, 21), 1),
+                        ("B", date(2026, 7, 21), 2),
+                        ("C", date(2026, 7, 20), 3),
+                        ("D", date(2026, 7, 20), 4),
+                    )
+                ],
+            ]
+        ),
+        security_repository=FakeSecurityRepository(
+            {"A": "XSHG", "B": "XSHG", "C": "XSHE", "D": "XSHE"}
+        ),
+        trading_calendar_repository=FakeTradingCalendarRepository(
+            {
+                "XSHG": [date(2026, 7, 17), date(2026, 7, 21)],
+                "XSHE": [date(2026, 7, 17), date(2026, 7, 20)],
+            }
+        ),
+    )
+
+    service.run(
+        object(),
+        factor_name="ret_1d",
+        factor_version="v1-none",
+        start_date=date(2026, 7, 17),
+        end_date=date(2026, 7, 17),
+        adjust_type="none",
+        code_version="abc123",
+    )
+
+    profile = profile_repository.profiles[0]
+    assert profile["rank_ic_1d"] == Decimal("1.0000000000")
+    assert profile["top_quantile_forward_return_1d"] == Decimal("0.0400000000")
+    assert profile["bottom_quantile_forward_return_1d"] == Decimal("0.0100000000")

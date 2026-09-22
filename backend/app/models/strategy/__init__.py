@@ -4,6 +4,7 @@ from app.models.strategy.backtest import (
     BacktestPosition,
     BacktestRun,
     BacktestTradeRecord,
+    TrainingArtifact,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "BacktestPerformance",
     "BacktestRun",
     "BacktestTradeRecord",
+    "TrainingArtifact",
 ]

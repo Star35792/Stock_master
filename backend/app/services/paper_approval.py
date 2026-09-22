@@ -4,6 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.backtest import A_SHARE_COST_V1, build_fee_model
 from app.config.settings import settings
 from app.database.transaction import idempotent_write
 from app.repositories.trade import (
@@ -21,15 +22,36 @@ from app.services.snapshot_hashes import hash_payload
 from app.trade import BrokerOrderRequest, PaperBrokerAdapter
 
 APPROVAL_TTL = timedelta(minutes=5)
+
+
+def _default_paper_broker() -> PaperBrokerAdapter:
+    return PaperBrokerAdapter(
+        fee_model=build_fee_model(
+            fee_model_version=A_SHARE_COST_V1,
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            min_commission=Decimal("5"),
+            sell_stamp_duty_rate=Decimal("0.0005"),
+            transfer_fee_rate=Decimal("0.00001"),
+            exchange_fee_rate=Decimal("0.0000487"),
+        ),
+    )
+
+
 CONFIRMATION_POLICY = {
     "name": "paper_execution_confirmation",
-    "version": "v1",
+    "version": "v2",
     "ttl_seconds": 300,
     "execution_mode": "paper",
     "actor_type": "local_single_user",
     "code_version": settings.app_code_version,
     "execution_order": "risk_reducing_sells_then_risk_increasing_buys",
+    "fee_model_version": "a_share_cost_v1",
     "commission_rate": "0.0003",
+    "min_commission": "5",
+    "sell_stamp_duty_rate": "0.0005",
+    "transfer_fee_rate": "0.00001",
+    "exchange_fee_rate": "0.0000487",
     "slippage_bps": "2",
 }
 
@@ -164,7 +186,7 @@ class PaperExecutionApprovalService:
         self.repository = repository or PaperExecutionApprovalRepository()
         self.risk_service = risk_service or BoundRiskEvaluationService()
         self.paper_repository = paper_repository or PaperTradingRepository()
-        self.broker = broker or PaperBrokerAdapter()
+        self.broker = broker or _default_paper_broker()
 
     def create(
         self,

@@ -5,6 +5,13 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from app.backtest.fees import (
+    LINEAR_COMMISSION_V1,
+    FeeModel,
+    build_fee_model,
+)
+from app.backtest.tradability import AShareTradabilityPolicy
+
 ENGINE_VERSION = "daily_event_v2"
 
 
@@ -63,19 +70,28 @@ class DailyEventBacktestEngine:
         commission_rate: Decimal = Decimal("0.0003"),
         slippage_bps: Decimal = Decimal("2"),
         lot_size: int = 100,
+        fee_model: FeeModel | None = None,
+        tradability_policy: AShareTradabilityPolicy | None = None,
     ) -> None:
         if initial_cash <= 0:
             raise ValueError("initial_cash must be positive")
-        if commission_rate < 0:
-            raise ValueError("commission_rate must be non-negative")
-        if slippage_bps < 0:
-            raise ValueError("slippage_bps must be non-negative")
         if lot_size <= 0:
             raise ValueError("lot_size must be positive")
         self.initial_cash = initial_cash
-        self.commission_rate = commission_rate
-        self.slippage_bps = slippage_bps
         self.lot_size = lot_size
+        if fee_model is not None:
+            self.fee_model = fee_model
+        else:
+            if commission_rate < 0:
+                raise ValueError("commission_rate must be non-negative")
+            if slippage_bps < 0:
+                raise ValueError("slippage_bps must be non-negative")
+            self.fee_model = build_fee_model(
+                fee_model_version=LINEAR_COMMISSION_V1,
+                commission_rate=commission_rate,
+                slippage_bps=slippage_bps,
+            )
+        self.tradability_policy = tradability_policy or AShareTradabilityPolicy()
 
     def run(
         self,
@@ -182,28 +198,42 @@ class DailyEventBacktestEngine:
             orders.sort(key=lambda order: (order[0], order[1], order[2]))
 
             for is_buy, symbol, signal_date, quantity_delta in orders:
-                reference_price = daily_bars[symbol].open
+                bar = daily_bars[symbol]
+                reference_price = bar.open
+                side = "buy" if is_buy else "sell"
+                tradability = self.tradability_policy.check(bar)
+                if is_buy and not tradability.can_buy:
+                    pending_targets.pop(symbol, None)
+                    continue
+                if not is_buy and not tradability.can_sell:
+                    pending_targets.pop(symbol, None)
+                    continue
                 if is_buy:
-                    fill_price = self._apply_slippage(reference_price, side="buy")
                     quantity = self._affordable_quantity(
                         desired_quantity=quantity_delta,
-                        fill_price=fill_price,
+                        reference_price=reference_price,
                         cash=cash,
                     )
                     if quantity == 0:
                         pending_targets.pop(symbol, None)
                         continue
-                    commission = Decimal(quantity) * fill_price * self.commission_rate
-                    cash -= Decimal(quantity) * fill_price + commission
-                    quantities[symbol] += quantity
-                    side = "buy"
                 else:
                     quantity = min(abs(quantity_delta), quantities[symbol])
-                    fill_price = self._apply_slippage(reference_price, side="sell")
-                    commission = Decimal(quantity) * fill_price * self.commission_rate
-                    cash += Decimal(quantity) * fill_price - commission
+
+                fee_result = self.fee_model.apply(
+                    reference_price=reference_price,
+                    quantity=quantity,
+                    side=side,
+                )
+                fill_price = fee_result.fill_price
+                commission = fee_result.total_fee
+                amount = Decimal(quantity) * fill_price
+                if is_buy:
+                    cash -= amount + commission
+                    quantities[symbol] += quantity
+                else:
+                    cash += amount - commission
                     quantities[symbol] -= quantity
-                    side = "sell"
                 trades.append(
                     BacktestTrade(
                         signal_date=signal_date,
@@ -273,20 +303,27 @@ class DailyEventBacktestEngine:
             equity_curve=equity_curve,
         )
 
-    def _apply_slippage(self, price: Decimal, *, side: str) -> Decimal:
-        rate = self.slippage_bps / Decimal(10000)
-        return price * (Decimal(1) + rate if side == "buy" else Decimal(1) - rate)
-
     def _affordable_quantity(
         self,
         *,
         desired_quantity: int,
-        fill_price: Decimal,
+        reference_price: Decimal,
         cash: Decimal,
     ) -> int:
-        unit_cost = fill_price * (Decimal(1) + self.commission_rate)
-        affordable = self._round_lot(cash / unit_cost)
-        return min(desired_quantity, affordable)
+        # Supported fee models have monotonic order costs. Search whole lots
+        # using the actual fill cost so minimum commissions are charged once.
+        low, high = 0, desired_quantity // self.lot_size
+        while low < high:
+            candidate = (low + high + 1) // 2
+            quantity = candidate * self.lot_size
+            fee = self.fee_model.apply(
+                reference_price=reference_price, quantity=quantity, side="buy",
+            )
+            if Decimal(quantity) * fee.fill_price + fee.total_fee <= cash:
+                low = candidate
+            else:
+                high = candidate - 1
+        return low * self.lot_size
 
     def _round_lot(self, quantity: Decimal) -> int:
         return int(quantity) // self.lot_size * self.lot_size

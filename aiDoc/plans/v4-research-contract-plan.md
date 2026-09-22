@@ -162,3 +162,13 @@
 4. 批量参数运行和结果漂移检查。
 
 这些能力不因本切片测试通过而自动纳入当前实现。
+
+后续切片现状（2026-09-18）：最小 `out_of_sample` 守卫已落地，service 层强制训练期早于测试期，因子读取和回测都只覆盖测试期，研究合同记录显式测试边界、`holdout_v1` 和确定性窗口标识；由于训练/选参产物尚无不可变存储与窗口绑定，合同明确标记训练产物未验证、绑定仅为记录。滚动窗口接口当前只提供 `planning_only` 规划结果，`rolling` 单次与批量执行均 fail-closed，不得表述为已实现 walk-forward。
+
+同一后续切片新增只读验证报告：调用方显式提供既有 run IDs，服务端校验研究合同、代码版本和数据版本可比性，逐窗保留失败或缺绩效事实，并只对成功窗口聚合统计。测试窗口可能重叠，因此报告只标记重叠而不提供跨窗复合收益。该报告不创建实验、不选参、不写训练产物，也不改变任何运行状态。
+
+后续研究正确性加固（2026-09-18）：横截面策略和指数择时模板统一消费不可变 `StrategyFactorFrame`。全区间因子行只用于编排，策略决策入口每次只能获得 `as_of_date == signal_date` 的单日 frame；future row、重复 `(factor, symbol, trade_date)` 和跨日 decision frame 均 fail-closed。研究合同新增 `strategy_input_snapshot`，记录 `strategy_factor_frame_v1`、区间截至日、行数、`factor_run_ids` 和规范化内容 SHA-256。该能力只能证明已进入可信因子层后的 observation-date 边界，不能替代公告首次可得时间、财务修订版本、历史成分和幸存者偏差治理。
+
+同一加固把事件引擎版本化为 `daily_event_v2`：服务按证券交易所读取可信交易日历，当前明确识别 `SH/SZ/BJ/HK` 后缀，未知交易所、缺失或空交易日历均 fail-closed；D 日信号固定安排到下一开市日，执行日缺可信未复权 bar 时拒绝运行，不再等待该证券之后恢复行情。同侧订单及输出使用稳定证券代码顺序，重复 bar/信号直接拒绝。运行参数保存 `trusted_market_slice_v1` 内容摘要，覆盖实际消费的未复权行情、公司行为和执行日历；计算完成后使用独立 SQLAlchemy session 重读并比较，摘要变化以 `backtest_data_changed` 失败，不写成功结果。该摘要补充而不替代 lake release/checksum；未绑定不可变 release 仍是后续血缘工作。
+
+研究 API 与回测服务默认保留显式简化的 `linear_commission_v1`，支持双边线性佣金和滑点；调用方可以显式选择 `a_share_cost_v1`，增加最低佣金、卖出印花税、过户费和交易所规费，并将全部费用假设写入合同。费率是研究假设，不代表逐历史交易日或逐证券的真实适用费率；规费与佣金不得重复计入。合同仍用 `unquantized_decimal_until_persistence_v1` 标记金额精度政策。公共 paper 确认与执行采用固定 `a_share_cost_v1` 参数，但仍为参考价 full-fill 模拟，尚未接入执行日涨跌停和停牌检查。金样本只冻结当前已经裁决的研究语义，不放行实盘，也不把旧 `Trade_agent` 的双库、CLI、Web 或单 lot 限制引入当前系统。

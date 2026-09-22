@@ -1,0 +1,96 @@
+{
+  "role": "量化投研产品经理",
+  "businessGoal": "在现有数据底座和框架上，以最高 ROI 将 Stock Master 推至量化行业从业者满意的状态：系统能每日自动运行、全市场 5500+ 标的的因子覆盖可查、可信回测可复现、模拟盘闭环可体验，且所有核心用户旅程均不依赖前端即可完成。",
+  "currentAssessment": "当前已经具备：\n\n=== 数据底座 ===\n- 三层数据架构（raw/market/system）已实现并在 DuckDB 单库上运行，1014 万日线、5512 标的、5.68 万复权事件已导入。\n- 多源导入（HiThink Dump 全量+日级、东方财富补充、CSV）和原始留痕已完成。\n- 数据质量校验、来源对账、人工修复审计表已就绪，质量问题查询 API 可用。\n- 交易日历（SH/SZ/BJ）和证券生命周期查询已实现。\n- 复权因子（qfq/hfq）和公司行为数据底座已就绪，AdjustmentBuildService 支持按版本幂等重建。\n- 缺失日线检测（基于 security + calendar + daily_bar 左连接）已实现。\n\n=== 因子工厂 ===\n- 10 个因子族（基础价量、财务、估值、行业、情绪、宏观、政策、盈利预期、资金结构、拥挤度）已注册，共 11 个决策域分类。\n- 因子定义目录、运行批次、因子值、横截面 profile（含 IC/Rank IC/forward diagnostics/top quantile turnover）均已持久化且可查询。\n- 横截面处理（winsorize/standardize/rank/industry neutralize）已就绪。\n- 因子幂等 upsert 写入，支持重复计算不产生重复行。\n- 11 个因子服务均已实现，可通过 CLI 和 factor_pipeline 批量运行。\n\n=== 研究回测 ===\n- 因子选股回测：多因子权重、证券类型过滤、复权口径、成本和滑点参数均可配置，信号次日开盘执行。\n- 回测结果持久化（交易、净值、持仓、绩效），完整研究合同固化在 parameters。\n- 批量运行、跨运行比较、基准比较、回归漂移诊断、交易日滚动窗口生成 API 已交付。\n- 4 个策略模板（StockPool/EtfRotation/MultiFactor/IndexTiming）已实现。\n- 绩效归因（总收益/年化/最大回撤/夏普/卡玛/日胜率/盈亏比/换手/佣金/个股贡献/行业暴露/风格暴露）已就绪。\n\n=== 组合风控模拟盘 ===\n- 组合构建：目标权重、单标的上限、行业预算、现金保留、证券类型预算、lot rounding 均已实现，调整原因可解释。\n- 风控：单标的权重上限、行业上限、回撤止损、成交额容量约束（ADV 20/15）、订单级规则结果持久化。\n- 模拟盘：订单、成交、现金、持仓闭环，卖先买后、全批原子语义、T+1 保守可卖量检查。\n- 幂等创建（Idempotency-Key + 请求哈希）贯穿组合草案、风险评估、确认、撤销和执行。\n- 代码版本强制绑定，评估/确认/执行消费均拒绝代码版本漂移。\n- 5 分钟有效确认、一次性消费、全批预演、恢复查询均已实现。\n\n=== 运维调度 ===\n- daily_loop 编排器串联 daily_sync -> curated build -> factor_pipeline，按交易日运行，写入 system.job_log。\n- 运维概览、告警候选、按分类限量的失败定位摘要、单项详情、只读重跑计划 API 已交付。\n- 独立调度器（daily_sync/recent_data_completion/factor_pipeline）均支持 cron 定时。\n\n=== API 契约 ===\n- 16 个路由模块，覆盖健康检查、行情、参考数据、质量、因子、回测、策略研究、组合、风控、模拟盘、运维。\n- 全部 Pydantic schema 精确定义请求/响应格式，参数校验、状态码、错误处理标准化。\n- 前端后端 API 契约已通过 Vue3 工作台与真实数据验证。\n\n=== 已知问题 ===\n- raw_landing.py 未跟踪，引用缺失的 settings.raw_landing_root。\n- factor_reads_curated 默认关闭，curated Parquet 路径未成为默认消费路径。\n- dump CLI 在 DuckDB 下因 rowcount 不可靠显示 market_rows=0。\n- factor_reads_curated + factor_adjust_type=qfq 要求 sync_adjust_type=none，存在约束限制。\n- Alembic 迁移未接入 DuckDB 单库（表在启动时 create_all 创建）。\n- 数据源配置表（system.data_source）尚未实际接入使用。\n- 财务因子仍使用报告期口径，未升级为公告日/首次可得时间口径。",
+  "priorities": [
+    {
+      "rank": 1,
+      "initiative": "P0: 日线数据链路生产化加固",
+      "whyNow": "当前最核心的数据链路仍存在多处缝隙：factor_reads_curated 默认关闭导致因子走 ORM 慢路径；raw_landing.py 缺失配置导致原始留痕落地页不可用；dump CLI 显示 market_rows=0 的表象问题影响诊断信心。在推进任何上层功能前，必须先确保每日数据链路可稳定运行、可观测、可对账。",
+      "deliverable": "1) 修复 raw_landing.py 中 settings.raw_landing_root 缺失并完成接线 2) 修复 dump CLI 在 DuckDB 下的 rowcount 显示问题 3) 将 factor_reads_curated 默认值改为 True 并验证 daily_loop 完整链路 4) 接入 system.data_source 配置表到导入流程 5) 在 daily_loop 的 job_log metadata 中增加数据对账信息（raw 入 vs market 入 vs 因子入的逐级行数对比）。",
+      "acceptanceCriteria": [
+        "raw_landing.py 的 RawLandingStore 可正常实例化，写入 JSONL 文件成功",
+        "dump CLI 脚本输出 market_rows 数值与 SELECT count(*) 一致",
+        "factor_reads_curated=True 环境下 daily_loop 从 sync -> curated build -> factor_pipeline 完整通过 267 测试",
+        "system.data_source 表有种子数据，且导入服务可查询来源优先级",
+        "daily_loop 运行后 job_log metadata 包含 raw_rows/market_rows/factor_rows 三级对账数据"
+      ]
+    },
+    {
+      "rank": 2,
+      "initiative": "P0: 因子覆盖真实数据验证与默认启用",
+      "whyNow": "10 个因子族已注册但未在实际数据上验证覆盖率。用户（量化从业者）无法确认因子是否在全市场 5500+ 标的上稳定产出。当前默认不启用 curated 路径，因子计算效率低。必须先验证因子在真实数据上的产出稳定性，确保日级调度可产出完整因子值，才能让因子选股回测具有实际意义。",
+      "deliverable": "1) 在 5500+ 标的上运行全部因子服务，统计覆盖率、缺失率、IC 分布 2) 修复覆盖率低于 80% 的因子（如财务因子因数据源缺失导致大批量空白） 3) 确保 daily_loop 的 factor_pipeline 默认启用 curated 读取路径 4) 在运维概览中增加因子覆盖率指标 5) 产出因子覆盖率报告，标记需要补充数据源的因子族。",
+      "acceptanceCriteria": [
+        "全市场 5500+ 标的在最近交易日的基础价量因子覆盖率 > 95%",
+        "财务/估值因子覆盖率 > 60%（受限于数据源范围）",
+        "因子 profile 表有近 20 个交易日的完整 IC/Rank IC 记录",
+        "运维概览 API 返回因子覆盖率统计",
+        "daily_loop 默认以 factor_reads_curated=True 运行，267 测试通过"
+      ]
+    },
+    {
+      "rank": 3,
+      "initiative": "P1: 因子选股回测端到端验证与 CLI 默认值固化",
+      "whyNow": "因子选股回测是核心用户旅程。当前 API 契约已就绪但未在真实数据上运行过端到端验证。需要确保从因子定义 -> 因子值计算 -> 因子评分 -> 信号生成 -> 回测执行 -> 绩效归因 -> 结果查询的完整链路可在真实数据上跑通，且所有参数默认值对量化从业者合理。",
+      "deliverable": "1) 编写并运行端到端回测脚本（使用真实因子值和真实行情） 2) 验证 FactorSelectionBacktestRequest 各参数默认值合理性（signal_lag=1, holding_period=1,  commission_rate=0.0003, slippage_bps=2, lot_size=100, adjust_type=qfq） 3) 确保回测结果可完整还原研究合同 4) 验证基准比较和批量运行的稳定性 5) 在 CLI 中固化默认参数，使 --help 输出即体现最佳实践。",
+      "acceptanceCriteria": [
+        "端到端脚本从因子注册 -> 因子运行 -> 回测创建 -> 绩效查询一次性成功",
+        "回测结果 parameters 字段可完整还原 FactorSelectionBacktestRequest 全部字段",
+        "基准比较和批量运行在真实数据上返回合理数值",
+        "CLI 默认参数与产品契约一致且文档化",
+        "重复运行相同输入产生相同结果（确定性验证）"
+      ]
+    },
+    {
+      "rank": 4,
+      "initiative": "P1: 模拟盘完整用户旅程验证",
+      "whyNow": "V5 模拟盘公共操作闭环已有 API 和 Vue3 前端支持，但未在真实数据上完成端到端验证。从组合草案 -> 风险前核对 -> 净值快照 -> 正式风控 -> 人工确认 -> 模拟执行 -> 结果查询的完整链路需要保证在真实数据上可走通，且幂等性、T+1 约束、现金阻断、失败恢复等边界正确。",
+      "deliverable": "1) 编写端到端模拟盘脚本 2) 验证幂等性（Idempotency-Key 重放不产生重复行） 3) 验证 T+1 可卖量约束 4) 验证现金不足时全批拒绝 5) 验证确认过期/撤销/消费的状态流转 6) 验证 approval 恢复查询。",
+      "acceptanceCriteria": [
+        "端到端脚本从组合草案创建到模拟执行完成一次成功",
+        "同幂等键重放创建请求返回相同结果（HTTP 201 或 409）",
+        "确认过期后执行返回 422",
+        "撤销后执行返回 409",
+        "现金不足时 execution 返回 rejected 且账户未变化",
+        "按 approval_id 可恢复执行结果"
+      ]
+    },
+    {
+      "rank": 5,
+      "initiative": "P2: 运维可观测性增强",
+      "whyNow": "系统进入日级运行后，运维人员需要快速定位问题。当前运维概览、告警和失败定位已提供基础能力，但缺少细粒度重跑执行入口、数据对账面板和调度健康度可视性。",
+      "deliverable": "1) 实现后端重跑执行入口（幂等、审计、人工确认） 2) 增加 daily_loop 调度健康度指标（最近连续成功次数、失败率、平均耗时） 3) 在运维概览中增加数据对账面板（raw vs market vs factor 三级行数对比） 4) 增加数据源健康度指标（最近成功采集时间、失败次数）。",
+      "acceptanceCriteria": [
+        "重跑 API 可安全重新执行失败任务并记录审计",
+        "运维概览返回 daily_loop 连续成功/失败次数和平均耗时",
+        "数据对账面板显示三级行数及其差异百分比",
+        "数据源健康度在运维告警中可查询"
+      ]
+    }
+  ],
+  "antiPriorities": [
+    "V7 实盘接入与券商适配器：当前无真实账户、无券商对账、无 kill switch，实盘写操作前置条件均未满足，不得提前启动",
+    "分钟线/Tick/高频数据：当前数据链路和因子框架均以日线为基准，引入更高频数据会大幅增加存储、质量和调度复杂度，且当前无使用场景",
+    "自动化训练/选参编排：训练、选参及其产物血缘目前由用户自行管理，产品化需研究合同绑定、窗口到运行的不可变绑定和参数敏感性分析，属 V4 后续切片，不构成当前 P0 阻塞",
+    "大规模多页面前端重构：Vue3 工作台已提供基础路由导航和主要页面，当前瓶颈在后端数据完备性和研究深度，不在前端交互复杂度",
+    "财务因子公告日/首次可得时间升级：当前财务因子使用报告期口径，存在未来函数风险，但已有显式风险说明，且所涉及数据源改造和回填工作量较大，应作为独立专项而非当前轮次必做"
+  ],
+  "successMetrics": [
+    "daily_loop 连续 10 个交易日无故障运行，job_log 全部为 success 或 partial",
+    "全市场 5500+ 标的基础价量因子日覆盖率 > 95%",
+    "因子 profile 在最近 20 个交易日均有 IC/Rank IC 记录",
+    "端到端回测脚本可在真实数据上 5 分钟内完成从因子定义到绩效归因的全流程",
+    "模拟盘端到端脚本可在真实数据上完整走通幂等、T+1、现金阻断、过期/撤销边界",
+    "运维告警能在 daily_loop 失败后 5 分钟内定位到失败环节和原因",
+    "267 测试持续通过，ruff 零告警"
+  ],
+  "risks": [
+    "HiThink 数据源稳定性：当前核心数据源为 HiThink，存在无法获取部分 ETF（如 562820.SH）的记录，补充源东方财富的 cookie-free 接入尚未验证。如果 HiThink 服务中断或数据质量下降，日级调度将不可用。",
+    "DuckDB 并发限制：DuckDB 为单连接写入数据库，daily_loop 中 engine.dispose() 后重新连接可能导致竞态。现有测试覆盖了单线程场景，但生产环境多进程或多线程调度可能存在隐藏问题。",
+    "因子覆盖率与数据源的矛盾：财务因子、估值因子、盈利预期因子依赖 HiThink 财务数据，如果 HiThink 的财务覆盖面不足（如新上市公司、中小板覆盖率低），因子覆盖率将永久低于 80%。",
+    "factor_reads_curated 与 sync_adjust_type 的耦合：当前要求 factor_reads_curated=True 时 sync_adjust_type 必须为 none，否则 daily_loop 直接失败。这个约束不够直观，新手配置时容易踩坑。",
+    "Alembic 未接入：DuckDB 单库下表在 startup 时 create_all 创建，不产生迁移版本。后续 schema 变更需要手动管理兼容性，缺乏回滚和版本控制能力。",
+    "raw_landing.py 引用缺失的配置项：如果 raw_landing_root 从未在 .env 中定义，RawLandingStore 实例化时可能抛出 AttributeError，影响数据导入流程的原始留痕环节。"
+  ]
+}

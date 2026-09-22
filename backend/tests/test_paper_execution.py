@@ -7,11 +7,11 @@ import pytest
 from app.config.settings import settings
 from app.services.paper_approval import (
     CONFIRMATION_POLICY,
+    _default_paper_broker,
     build_approval_hash,
     build_paper_order_batch,
 )
 from app.services.paper_execution import PaperExecutionConflict, PaperExecutionService
-from app.trade import PaperBrokerAdapter
 
 NOW = datetime.now(UTC)
 
@@ -166,7 +166,7 @@ def _setup(*, orders=None, cash=Decimal("100"), positions=None, **paper_kwargs):
         targets=targets,
         equity=equity,
         account=account,
-        broker=PaperBrokerAdapter(),
+        broker=_default_paper_broker(),
     )
     approved_at = NOW
     expires_at = approved_at + timedelta(minutes=5)
@@ -233,7 +233,7 @@ def test_paper_execution_is_atomic_sell_first_full_fill() -> None:
 
     assert result.status == "completed"
     assert [order.side for order in result.orders] == ["sell", "buy"]
-    assert result.cash_after == Decimal("99.50000")
+    assert result.cash_after == Decimal("89.4913")
     assert paper.positions["AAA"].quantity == 50
     assert paper.positions["BBB"].quantity == 50
     assert result.real_broker_submitted is False

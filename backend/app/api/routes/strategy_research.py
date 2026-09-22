@@ -89,17 +89,13 @@ def run_factor_selection_backtests_batch(
 ) -> list[BatchFactorSelectionBacktestItem]:
     rolling_runs = [item for item in payload.runs if item.validation_mode == "rolling"]
     if rolling_runs:
-        if len(rolling_runs) != len(payload.runs):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="rolling batches cannot mix validation modes",
-            )
-        test_starts = [item.start_date for item in payload.runs]
-        if test_starts != sorted(test_starts) or len(set(test_starts)) != len(test_starts):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="rolling windows must have strictly increasing test start dates",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "rolling execution requires immutable training artifacts; "
+                "the rolling-windows endpoint is planning-only"
+            ),
+        )
     results: list[BatchFactorSelectionBacktestItem] = []
     for index, item in enumerate(payload.runs):
         try:
@@ -174,6 +170,11 @@ def run_factor_selection_backtest(
             commission_rate=payload.commission_rate,
             slippage_bps=payload.slippage_bps,
             lot_size=payload.lot_size,
+            fee_model_version=payload.fee_model_version,
+            min_commission=payload.min_commission,
+            sell_stamp_duty_rate=payload.sell_stamp_duty_rate,
+            transfer_fee_rate=payload.transfer_fee_rate,
+            exchange_fee_rate=payload.exchange_fee_rate,
             code_version=payload.code_version,
             data_version=payload.data_version,
             validation_mode=payload.validation_mode,

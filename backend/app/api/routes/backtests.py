@@ -5,6 +5,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
 from app.schemas import Page
+from app.schemas.research_validation import (
+    ResearchValidationReportRead,
+    ResearchValidationReportRequest,
+)
 from app.schemas.strategy import (
     BacktestBenchmarkRead,
     BacktestComparisonItem,
@@ -19,9 +23,28 @@ from app.schemas.strategy import (
     BacktestTradeRead,
 )
 from app.services import BacktestQueryService
+from app.services.research_validation import ResearchValidationReportService
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 service = BacktestQueryService()
+validation_report_service = ResearchValidationReportService()
+
+
+@router.post(
+    "/runs/validation-report",
+    response_model=ResearchValidationReportRead,
+)
+def build_research_validation_report(
+    db: DatabaseSession,
+    payload: ResearchValidationReportRequest,
+) -> ResearchValidationReportRead:
+    try:
+        return validation_report_service.build_report(db, run_ids=payload.run_ids)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post("/runs/drift", response_model=BacktestDriftRead)

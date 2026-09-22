@@ -28,7 +28,7 @@
 - `market`：证券、交易日历、可信日线、复权因子、公司行为、另类数据、估值快照。
 - `fundamental`：财务报表和指标。
 - `factor`：因子定义、运行、值、profile。
-- `strategy`：回测运行、成交、净值、持仓、绩效。
+- `strategy`：回测运行、成交、净值、持仓、绩效，以及训练产物关联；被回测引用的训练产物由外键阻止删除，不静默置空血缘。
 - `portfolio`：组合计划和目标。
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
 - `trade`：模拟盘账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。

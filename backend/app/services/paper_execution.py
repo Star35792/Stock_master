@@ -5,6 +5,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.backtest import A_SHARE_COST_V1, build_fee_model
 from app.config.settings import settings
 from app.database.transaction import idempotent_write, retry_on_conflict
 from app.repositories.trade import (
@@ -29,15 +30,21 @@ from app.trade import BrokerFill, BrokerOrderRequest, PaperBrokerAdapter
 
 EXECUTION_POLICY = {
     "name": "deterministic_full_fill_paper_execution",
-    "version": "v1",
+    "version": "v2",
     "code_version": settings.app_code_version,
     "execution_mode": "paper",
     "execution_order": "risk_reducing_sells_then_risk_increasing_buys",
     "atomicity": "all_orders",
+    "fee_model_version": "a_share_cost_v1",
     "commission_rate": "0.0003",
+    "min_commission": "5",
+    "sell_stamp_duty_rate": "0.0005",
+    "transfer_fee_rate": "0.00001",
+    "exchange_fee_rate": "0.0000487",
     "slippage_bps": "2",
     "average_cost_basis": "fill_price_including_buy_commission",
     "sellability_policy": "same_day_buys_not_sellable_for_all_securities",
+    "tradability_policy": "not_enforced_reference_price_simulation",
 }
 
 
@@ -82,8 +89,17 @@ class PaperExecutionService:
         self.paper_repository = paper_repository or PaperTradingRepository()
         self.risk_service = risk_service or BoundRiskEvaluationService()
         self.broker = PaperBrokerAdapter(
-            commission_rate=Decimal(EXECUTION_POLICY["commission_rate"]),
-            slippage_bps=Decimal(EXECUTION_POLICY["slippage_bps"]),
+            fee_model=build_fee_model(
+                fee_model_version=A_SHARE_COST_V1,
+                commission_rate=Decimal(EXECUTION_POLICY["commission_rate"]),
+                slippage_bps=Decimal(EXECUTION_POLICY["slippage_bps"]),
+                min_commission=Decimal(EXECUTION_POLICY["min_commission"]),
+                sell_stamp_duty_rate=Decimal(
+                    EXECUTION_POLICY["sell_stamp_duty_rate"]
+                ),
+                transfer_fee_rate=Decimal(EXECUTION_POLICY["transfer_fee_rate"]),
+                exchange_fee_rate=Decimal(EXECUTION_POLICY["exchange_fee_rate"]),
+            ),
         )
 
     def execute(

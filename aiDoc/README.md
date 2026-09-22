@@ -26,7 +26,9 @@
 | schema、表、迁移 | `aiDoc/modules/module-index.md` | `aiDoc/modules/schema-plan.md`、相关 Alembic |
 | 数据导入、质量、修复 | `aiDoc/relations/system-map.md` | `aiDoc/data/*.md` |
 | 因子、研究、回测 | `aiDoc/modules/module-index.md` | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/roadmap.md` |
+| 产品定位、投资者评估、量化工具愿景 | `aiDoc/strategy/product-investment-assessment.md` | `aiDoc/strategy/quantitative-tool-vision.md` |
 | 价格与价值匹配、安全边际研究及假设历史回测 | [策略定义](strategy/20260922-1314-price-value-margin-strategy.md) | `aiDoc/research/decision-factor-framework.md` |
+| 自动选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
 | 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | `aiDoc/plans/decision-review-protocol.md`、本文件长期协作机制小节 |
 
@@ -42,7 +44,11 @@
 8. [数据库 Schema 规划](modules/schema-plan.md)
 9. [路线图](plans/roadmap.md)
 10. [决策因子体系设计](research/decision-factor-framework.md)
-11. [决策与提交评审协议](plans/decision-review-protocol.md)
+11. [产品与投资者视角评估](strategy/product-investment-assessment.md)
+12. [量化工具愿景](strategy/quantitative-tool-vision.md)
+13. [自动选股与持仓管控路线图](plans/auto-selection-position-roadmap.md)
+14. [前置硬门槛执行计划](plans/hard-gates-execution-plan.md)
+15. [决策与提交评审协议](plans/decision-review-protocol.md)
 
 ## 更新原则
 

@@ -29,12 +29,12 @@ from app.repositories.trade import (
 )
 from app.services.paper_approval import (
     CONFIRMATION_POLICY,
+    _default_paper_broker,
     build_approval_hash,
     build_paper_order_batch,
 )
 from app.services.paper_execution import PaperExecutionService
 from app.services.snapshot_hashes import hash_payload
-from app.trade import PaperBrokerAdapter
 
 
 @pytest.fixture(scope="module")
@@ -265,7 +265,7 @@ def _seed(session_factory):
             targets=targets,
             equity=equity,
             account=account,
-            broker=PaperBrokerAdapter(),
+            broker=_default_paper_broker(),
         )
         approved_at = datetime.now(UTC)
         expires_at = approved_at + timedelta(minutes=5)

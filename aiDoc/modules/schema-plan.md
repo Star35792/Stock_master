@@ -471,7 +471,7 @@ V1 暂不引入以下设计：
 以下表域已经不再是“暂不创建”，而是当前代码的一部分：
 
 - `factor.*`：因子定义、运行批次、因子值、横截面 profile。`factor.factor_definition` 新增非空 `category` 字段（11 个决策域分类，见 `aiDoc/research/decision-factor-framework.md`）与 `ix_factor_definition_category` 索引；派生因子（`xxx__transform`）继承基础因子分类，由 Alembic `20260722_0024` 回填。
-- `strategy.*`：回测运行、成交、净值、持仓和绩效。
+- `strategy.*`：回测运行、成交、净值、持仓和绩效。新库训练产物关联 `backtest_run.training_artifact_id -> training_artifact.id` 使用默认外键删除限制，禁止删除被回测引用的产物，允许空引用；DuckDB 不支持 `ON DELETE SET NULL`，不能依赖它静默断开血缘。启动兼容桥为旧库幂等添加 nullable 的 `training_artifact_id` 和索引，保留已有回测记录；旧表追加列不追补外键，启用训练产物绑定前仍需正式约束迁移。当前滚动执行关闭，训练产物验证尚未完成；实际用户数据库未在本次开发中直接升级。
   - 价格价值假设回测复用上述表，无新增 schema 或迁移。`backtest_run.parameters` 保存 `price_value_assumption_v1` 合同、显式假设、市场快照、引擎版本、输入哈希及完整 `price_value_report`（含决策日志）；`validation_mode=none`、`pit_verified=false`。标准成交/净值/持仓保持原定点精度，JSON 报告保留 Decimal 字符串精度；写入仅是研究存储，不创建 `trade.*` 事实。
 - `raw.daily_bar / market.daily_bar`：估值研究依赖 `limit_up / limit_down / is_suspended / special_treatment_status`，从选定 raw 记录复制至可信日线。沿用当前 DuckDB 初始化兼容桥幂等补列，旧行限价和特殊处理状态保留 NULL，停牌字段沿用 false 默认值；默认值不证明历史可交易，研究仍要求明确普通状态和有效限价。既有值不覆盖，实际用户数据库未由本次开发直接升级。
 - `portfolio.*`：组合计划和目标持仓。`portfolio.portfolio_plan` 以 nullable 的 `idempotency_key`、`request_hash` 和 `input_snapshot` 兼容历史记录；新公共草案 API 要求幂等键，保存规范化手工输入快照，并通过唯一索引防止重试生成重复草案。

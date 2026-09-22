@@ -86,6 +86,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/backtests/runs/{run_id}/performance" in paths
     assert "/api/v1/backtests/runs/{run_id}/benchmark" in paths
     assert "/api/v1/backtests/runs/compare" in paths
+    assert "/api/v1/backtests/runs/validation-report" in paths
     assert "/api/v1/strategy-research/factor-selection/backtests" in paths
     assert "/api/v1/strategy-research/factor-selection/backtests/batch" in paths
     assert "/api/v1/strategy-research/rolling-windows" in paths
@@ -959,6 +960,7 @@ def test_rolling_window_generation(monkeypatch) -> None:
         return [
             {
                 "index": 0,
+                "window_id": "rolling:SH:2026-01-02:2026-01-08:2026-01-09:2026-01-13",
                 "training_start_date": date(2026, 1, 2),
                 "training_end_date": date(2026, 1, 8),
                 "test_start_date": date(2026, 1, 9),
@@ -984,6 +986,7 @@ def test_rolling_window_generation(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json()[0]["training_start_date"] == "2026-01-02"
+    assert response.json()[0]["execution_status"] == "planning_only"
     assert captured["exchange"] == "SH"
 
 
@@ -1017,6 +1020,28 @@ def test_backtest_drift_forwards_baseline_contract(monkeypatch) -> None:
     assert response.json()["drift_detected"] is True
     assert captured["baseline_run_id"] == 1
     assert captured["candidate_run_ids"] == [2]
+
+
+def test_validation_report_maps_incompatible_runs_to_422(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_build(db, **kwargs):
+        captured.update(kwargs)
+        raise ValueError("validation runs have incompatible contract fields: top_n")
+
+    monkeypatch.setattr(
+        backtests_module.validation_report_service,
+        "build_report",
+        fake_build,
+    )
+    response = client.post(
+        "/api/v1/backtests/runs/validation-report",
+        json={"run_ids": [1, 2]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"].endswith("top_n")
+    assert captured["run_ids"] == [1, 2]
 
 
 def test_backtest_drift_maps_incomparable_runs_to_422(monkeypatch) -> None:
@@ -1252,3 +1277,70 @@ def test_validation_backtest_requires_training_period_before_test_period() -> No
 
     assert response.status_code == 422
     assert response.json()["detail"] == "training period must end before the backtest period"
+
+
+def test_rolling_batch_rejects_pseudo_walk_forward_execution() -> None:
+    base_run = {
+        "factor_specs": [{"factor_name": "momentum_20", "factor_version": "v1-qfq"}],
+        "top_n": 1,
+        "initial_cash": "100000",
+        "code_version": "abc123",
+        "data_version": "market-qfq-20260720",
+        "validation_mode": "rolling",
+    }
+    response = client.post(
+        "/api/v1/strategy-research/factor-selection/backtests/batch",
+        json={
+            "runs": [
+                {
+                    **base_run,
+                    "name": "rolling-0",
+                    "training_start_date": "2026-01-02",
+                    "training_end_date": "2026-06-30",
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-07-10",
+                },
+                {
+                    **base_run,
+                    "name": "rolling-1",
+                    "training_start_date": "2026-01-12",
+                    "training_end_date": "2026-07-10",
+                    "start_date": "2026-07-13",
+                    "end_date": "2026-07-22",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "rolling execution requires immutable training artifacts; "
+        "the rolling-windows endpoint is planning-only"
+    )
+
+
+def test_single_rolling_run_rejects_pseudo_walk_forward_execution() -> None:
+    response = client.post(
+        "/api/v1/strategy-research/factor-selection/backtests",
+        json={
+            "name": "pseudo-rolling",
+            "factor_specs": [
+                {"factor_name": "momentum_20", "factor_version": "v1-qfq"}
+            ],
+            "top_n": 1,
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-10",
+            "initial_cash": "100000",
+            "code_version": "abc123",
+            "data_version": "market-qfq-20260720",
+            "validation_mode": "rolling",
+            "training_start_date": "2026-01-02",
+            "training_end_date": "2026-06-30",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "rolling execution requires immutable training artifacts; "
+        "the rolling-windows endpoint is planning-only"
+    )

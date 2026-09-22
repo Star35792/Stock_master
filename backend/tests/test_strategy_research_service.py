@@ -111,31 +111,39 @@ def test_strategy_research_service_generates_rolling_windows() -> None:
     assert [window.model_dump() for window in windows] == [
         {
             "index": 0,
+            "window_id": "rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08",
             "training_start_date": date(2026, 1, 2),
             "training_end_date": date(2026, 1, 6),
             "test_start_date": date(2026, 1, 7),
             "test_end_date": date(2026, 1, 8),
+            "execution_status": "planning_only",
         },
         {
             "index": 1,
+            "window_id": "rolling:SH:2026-01-06:2026-01-08:2026-01-09:2026-01-12",
             "training_start_date": date(2026, 1, 6),
             "training_end_date": date(2026, 1, 8),
             "test_start_date": date(2026, 1, 9),
             "test_end_date": date(2026, 1, 12),
+            "execution_status": "planning_only",
         },
         {
             "index": 2,
+            "window_id": "rolling:SH:2026-01-08:2026-01-12:2026-01-13:2026-01-14",
             "training_start_date": date(2026, 1, 8),
             "training_end_date": date(2026, 1, 12),
             "test_start_date": date(2026, 1, 13),
             "test_end_date": date(2026, 1, 14),
+            "execution_status": "planning_only",
         },
         {
             "index": 3,
+            "window_id": "rolling:SH:2026-01-12:2026-01-14:2026-01-15:2026-01-16",
             "training_start_date": date(2026, 1, 12),
             "training_end_date": date(2026, 1, 14),
             "test_start_date": date(2026, 1, 15),
             "test_end_date": date(2026, 1, 16),
+            "execution_status": "planning_only",
         },
     ]
 
@@ -237,6 +245,114 @@ def test_strategy_research_service_runs_factor_selection_backtest() -> None:
             "higher_is_better": True,
         },
     ]
+
+
+def test_strategy_research_service_runs_traceable_out_of_sample_window() -> None:
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="oos-window",
+        factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+        top_n=1,
+        allowed_security_types={"stock"},
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 1),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+        validation_mode="out_of_sample",
+        training_start_date=date(2026, 1, 2),
+        training_end_date=date(2026, 6, 30),
+    )
+
+    assert factor_value_repository.requests == [
+        {
+            "factor_name": "momentum_20",
+            "factor_version": "v1-qfq",
+            "start_date": date(2026, 7, 1),
+            "end_date": date(2026, 7, 1),
+        }
+    ]
+    assert backtest_service.kwargs is not None
+    assert backtest_service.kwargs["start_date"] == date(2026, 7, 1)
+    assert backtest_service.kwargs["end_date"] == date(2026, 7, 1)
+    contract = backtest_service.kwargs["research_contract"]
+    assert contract["test_start_date"] == "2026-07-01"
+    assert contract["test_end_date"] == "2026-07-01"
+    assert contract["validation_window_id"] == (
+        "out_of_sample:2026-01-02:2026-06-30:2026-07-01:2026-07-01"
+    )
+    assert contract["training_artifact_verified"] is False
+    assert contract["window_binding_status"] == "recorded_only"
+
+
+def test_strategy_research_service_rejects_overlapping_validation_window() -> None:
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        backtest_service=FakeBacktestService(),
+    )
+
+    with pytest.raises(ValueError, match="training period must end before the test period"):
+        service.run_factor_selection(
+            object(),
+            name="overlapping-oos",
+            factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+            top_n=1,
+            allowed_security_types={"stock"},
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 2),
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc123",
+            data_version="market-qfq-20260720",
+            validation_mode="out_of_sample",
+            training_start_date=date(2026, 6, 1),
+            training_end_date=date(2026, 7, 1),
+        )
+
+
+def test_strategy_research_service_rejects_unbound_rolling_execution() -> None:
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        backtest_service=FakeBacktestService(),
+    )
+
+    with pytest.raises(ValueError, match="rolling execution requires immutable training artifacts"):
+        service.run_factor_selection(
+            object(),
+            name="pseudo-rolling",
+            factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+            top_n=1,
+            allowed_security_types={"stock"},
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 2),
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc123",
+            data_version="market-qfq-20260720",
+            validation_mode="rolling",
+            training_start_date=date(2026, 6, 1),
+            training_end_date=date(2026, 6, 30),
+        )
 
 
 def test_strategy_research_service_rejects_missing_factor_values() -> None:

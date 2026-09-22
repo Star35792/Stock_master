@@ -90,6 +90,26 @@ def apply_schema_compatibility(bind: Engine) -> None:
             with bind.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))
 
+    # Existing pre-artifact databases need an additive upgrade: create_all does
+    # not add columns or indexes to tables that are already present. Keep the
+    # nullable column and its index in separate commits for DuckDB compatibility.
+    with bind.connect() as conn:
+        has_backtest_run = bool(conn.scalar(text(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema = 'strategy' AND table_name = 'backtest_run'"
+        )))
+    if has_backtest_run:
+        with bind.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE strategy.backtest_run "
+                "ADD COLUMN IF NOT EXISTS training_artifact_id BIGINT"
+            ))
+        with bind.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_backtest_run_training_artifact "
+                "ON strategy.backtest_run (training_artifact_id)"
+            ))
+
 
 def initialize_database(bind: Engine | None = None) -> None:
     """Create missing schemas/tables and upgrade supported legacy layouts."""

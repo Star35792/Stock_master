@@ -237,6 +237,8 @@ ADJUSTMENT_MISMATCH
 - `created_at`。
 - `applied_at`。
 
+`manual_fixed` 是自动导入和自动 market 构建的保护边界。后续 API、CSV 或 dump 批次可以继续把新候选写入 `raw` 并形成审计记录，但不得通过 upsert 静默覆盖已有 `manual_fixed` 行。若来源修订表明人工值需要再次调整，必须重新走人工修复流程并留下新的 correction 记录。
+
 ## 8. 回滚和版本
 
 V1 可以先采用“当前表 + 修复审计”的轻量方案：

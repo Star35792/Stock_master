@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SecurityRead(BaseModel):
@@ -70,6 +70,10 @@ class DailyBarRead(BaseModel):
     amount: Decimal | None
     turnover_rate: Decimal | None
     amplitude: Decimal | None
+    limit_up: Decimal | None = Field(default=None)
+    limit_down: Decimal | None = Field(default=None)
+    is_suspended: bool = Field(default=False)
+    special_treatment_status: str | None = Field(default=None)
     source_name: str
     source_count: int
     quality_score: Decimal

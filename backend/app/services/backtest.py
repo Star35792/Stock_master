@@ -10,10 +10,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.backtest import (
+    A_SHARE_COST_V1,
     ENGINE_VERSION,
+    LINEAR_COMMISSION_V1,
     BacktestResult,
     DailyEventBacktestEngine,
     TargetWeightSignal,
+    build_fee_model,
 )
 from app.repositories.market import (
     CorporateActionRepository,
@@ -37,7 +40,11 @@ from app.services.performance import BacktestPerformanceService
 _EXECUTION_ADJUST_TYPE = "none"
 _CORPORATE_ACTION_POLICY = "reject"
 _DATA_SNAPSHOT_VERSION = "trusted_market_slice_v1"
-_FEE_MODEL_VERSION = "linear_commission_v1"
+_DEFAULT_FEE_MODEL_VERSION = LINEAR_COMMISSION_V1
+_A_SHARE_DEFAULT_MIN_COMMISSION = Decimal("5")
+_A_SHARE_DEFAULT_STAMP_DUTY_RATE = Decimal("0.0005")
+_A_SHARE_DEFAULT_TRANSFER_FEE_RATE = Decimal("0.00001")
+_A_SHARE_DEFAULT_EXCHANGE_FEE_RATE = Decimal("0.0000487")
 _BAR_SNAPSHOT_FIELDS = (
     "symbol",
     "trade_date",
@@ -51,6 +58,10 @@ _BAR_SNAPSHOT_FIELDS = (
     "volume",
     "amount",
     "turnover_rate",
+    "limit_up",
+    "limit_down",
+    "is_suspended",
+    "special_treatment_status",
     "source_name",
     "source_count",
     "quality_score",
@@ -73,6 +84,75 @@ _ACTION_SNAPSHOT_FIELDS = (
     "source_name",
     "source_event_id",
 )
+
+
+def _fee_model_limitations(fee_model_version: str) -> list[str]:
+    if fee_model_version == A_SHARE_COST_V1:
+        return [
+            "realistic_a_share_costs",
+            "no_margin_trading_costs",
+            "no_block_trading_costs",
+        ]
+    return [
+        "no_minimum_commission",
+        "no_sell_stamp_duty",
+        "no_exchange_fees",
+    ]
+
+
+def _build_fee_contract(
+    *,
+    fee_model_version: str,
+    commission_rate: Decimal,
+    slippage_bps: Decimal,
+    min_commission: Decimal | None,
+    sell_stamp_duty_rate: Decimal | None,
+    transfer_fee_rate: Decimal | None,
+    exchange_fee_rate: Decimal | None,
+) -> dict[str, str]:
+    if fee_model_version == A_SHARE_COST_V1:
+        return {
+            "fee_model_version": A_SHARE_COST_V1,
+            "fee_model_name": "a_share_cost",
+            "commission_rate": str(commission_rate),
+            "min_commission": str(
+                min_commission if min_commission is not None else _A_SHARE_DEFAULT_MIN_COMMISSION
+            ),
+            "sell_stamp_duty_rate": str(
+                sell_stamp_duty_rate
+                if sell_stamp_duty_rate is not None
+                else _A_SHARE_DEFAULT_STAMP_DUTY_RATE
+            ),
+            "transfer_fee_rate": str(
+                transfer_fee_rate
+                if transfer_fee_rate is not None
+                else _A_SHARE_DEFAULT_TRANSFER_FEE_RATE
+            ),
+            "exchange_fee_rate": str(
+                exchange_fee_rate
+                if exchange_fee_rate is not None
+                else _A_SHARE_DEFAULT_EXCHANGE_FEE_RATE
+            ),
+            "slippage_bps": str(slippage_bps),
+        }
+    if fee_model_version == LINEAR_COMMISSION_V1:
+        return {
+            "fee_model_version": LINEAR_COMMISSION_V1,
+            "fee_model_name": "linear_commission",
+            "commission_rate": str(commission_rate),
+            "min_commission": str(min_commission if min_commission is not None else Decimal("0")),
+            "sell_stamp_duty_rate": str(
+                sell_stamp_duty_rate if sell_stamp_duty_rate is not None else Decimal("0")
+            ),
+            "transfer_fee_rate": str(
+                transfer_fee_rate if transfer_fee_rate is not None else Decimal("0")
+            ),
+            "exchange_fee_rate": str(
+                exchange_fee_rate if exchange_fee_rate is not None else Decimal("0")
+            ),
+            "slippage_bps": str(slippage_bps),
+        }
+    raise ValueError(f"unsupported fee_model_version: {fee_model_version}")
 
 
 class BacktestDataChangedError(RuntimeError):
@@ -125,6 +205,11 @@ class DailyBacktestService:
         code_version: str,
         data_version: str,
         research_contract: dict[str, Any] | None = None,
+        fee_model_version: str | None = None,
+        min_commission: Decimal | None = None,
+        sell_stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+        exchange_fee_rate: Decimal | None = None,
     ) -> PersistedBacktestResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -162,20 +247,33 @@ class DailyBacktestService:
                 ),
             )
         ]
+        resolved_fee_model_version = fee_model_version or _DEFAULT_FEE_MODEL_VERSION
+        fee_contract = _build_fee_contract(
+            fee_model_version=resolved_fee_model_version,
+            commission_rate=commission_rate,
+            slippage_bps=slippage_bps,
+            min_commission=min_commission,
+            sell_stamp_duty_rate=sell_stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate,
+            exchange_fee_rate=exchange_fee_rate,
+        )
+        fee_model = build_fee_model(
+            fee_model_version=resolved_fee_model_version,
+            commission_rate=commission_rate,
+            slippage_bps=slippage_bps,
+            min_commission=Decimal(fee_contract["min_commission"]),
+            sell_stamp_duty_rate=Decimal(fee_contract["sell_stamp_duty_rate"]),
+            transfer_fee_rate=Decimal(fee_contract["transfer_fee_rate"]),
+            exchange_fee_rate=Decimal(fee_contract["exchange_fee_rate"]),
+        )
         parameters = {
             "adjust_type": adjust_type,
             "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
             "corporate_action_policy": _CORPORATE_ACTION_POLICY,
             "engine_version": ENGINE_VERSION,
-            "fee_model_version": _FEE_MODEL_VERSION,
-            "minimum_commission": "0",
-            "sell_stamp_duty_rate": "0",
+            **fee_contract,
             "calculation_precision_policy": "unquantized_decimal_until_persistence_v1",
-            "fee_model_limitations": [
-                "no_minimum_commission",
-                "no_sell_stamp_duty",
-                "no_exchange_fees",
-            ],
+            "fee_model_limitations": _fee_model_limitations(resolved_fee_model_version),
             "commission_rate": str(commission_rate),
             "slippage_bps": str(slippage_bps),
             "lot_size": lot_size,
@@ -189,17 +287,13 @@ class DailyBacktestService:
                 "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
                 "corporate_action_policy": _CORPORATE_ACTION_POLICY,
                 "engine_version": ENGINE_VERSION,
-                "fee_model_version": _FEE_MODEL_VERSION,
-                "minimum_commission": "0",
-                "sell_stamp_duty_rate": "0",
+                **fee_contract,
                 "calculation_precision_policy": (
                     "unquantized_decimal_until_persistence_v1"
                 ),
-                "fee_model_limitations": [
-                    "no_minimum_commission",
-                    "no_sell_stamp_duty",
-                    "no_exchange_fees",
-                ],
+                "fee_model_limitations": _fee_model_limitations(
+                    resolved_fee_model_version
+                ),
                 "symbols": symbols,
                 "signals": serialized_signals,
             }
@@ -261,9 +355,8 @@ class DailyBacktestService:
             )
             result = DailyEventBacktestEngine(
                 initial_cash=initial_cash,
-                commission_rate=commission_rate,
-                slippage_bps=slippage_bps,
                 lot_size=lot_size,
+                fee_model=fee_model,
             ).run(
                 bars=execution_bars,
                 signals=normalized_signals,

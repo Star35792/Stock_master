@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.backtest import DailyEventBacktestEngine, TargetWeightSignal
+from app.backtest import AShareCostFeeModel, DailyEventBacktestEngine, TargetWeightSignal
 
 
 def _bar(trade_date: date, symbol: str, open_: str, close: str) -> SimpleNamespace:
@@ -21,6 +21,26 @@ def _calendar(*symbols: str) -> dict[str, list[date]]:
         symbol: [date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)]
         for symbol in symbols
     }
+
+
+@pytest.mark.parametrize("cash,expected_quantity", [
+    ("10000", 900), ("10005", 1000), ("1004", 0), ("1005", 100),
+])
+def test_affordable_quantity_charges_minimum_commission_once_per_order(
+    cash, expected_quantity,
+) -> None:
+    fee_model = AShareCostFeeModel(
+        commission_rate=Decimal("0"), min_commission=Decimal("5"),
+        stamp_duty_rate=Decimal("0"), transfer_fee_rate=Decimal("0"),
+        exchange_fee_rate=Decimal("0"), slippage_bps=Decimal("0"),
+    )
+    result = DailyEventBacktestEngine(initial_cash=Decimal(cash), fee_model=fee_model).run(
+        bars=[_bar(day, "AAA", "10", "10") for day in _calendar("AAA")["AAA"]],
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("1"))],
+        execution_calendar=_calendar("AAA"),
+    )
+    assert sum(trade.quantity for trade in result.trades) == expected_quantity
+    assert all(snapshot.cash >= 0 for snapshot in result.equity_curve)
 
 
 def test_backtest_executes_signal_on_next_available_open() -> None:
@@ -219,3 +239,131 @@ def test_backtest_requires_a_calendar_for_every_signal_symbol() -> None:
             signals=[TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("1"))],
             execution_calendar={},
         )
+
+
+def test_backtest_a_share_cost_model_charges_stamp_duty_on_sell() -> None:
+    from app.backtest import AShareCostFeeModel
+
+    bars = [
+        _bar(date(2026, 7, 1), "AAA", "10", "10"),
+        _bar(date(2026, 7, 2), "AAA", "10", "10"),
+        _bar(date(2026, 7, 3), "AAA", "10", "10"),
+    ]
+    engine = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"),
+        lot_size=100,
+        fee_model=AShareCostFeeModel(
+            commission_rate=Decimal("0"),
+            min_commission=Decimal("0"),
+            stamp_duty_rate=Decimal("0.0005"),
+            transfer_fee_rate=Decimal("0"),
+            exchange_fee_rate=Decimal("0"),
+            slippage_bps=Decimal("0"),
+        ),
+    )
+
+    result = engine.run(
+        bars=bars,
+        signals=[
+            TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("1")),
+            TargetWeightSignal(date(2026, 7, 2), "AAA", Decimal("0")),
+        ],
+        execution_calendar=_calendar("AAA"),
+    )
+
+    buy_trade = [t for t in result.trades if t.side == "buy"][0]
+    sell_trade = [t for t in result.trades if t.side == "sell"][0]
+    assert buy_trade.commission == 0
+    assert sell_trade.commission == sell_trade.quantity * sell_trade.fill_price * Decimal("0.0005")
+
+
+def _tradable_bar(
+    trade_date: date,
+    symbol: str,
+    open_: str,
+    close: str,
+    limit_up: str | None = None,
+    limit_down: str | None = None,
+    is_suspended: bool = False,
+) -> SimpleNamespace:
+    bar = _bar(trade_date, symbol, open_, close)
+    bar.limit_up = Decimal(limit_up) if limit_up is not None else None
+    bar.limit_down = Decimal(limit_down) if limit_down is not None else None
+    bar.is_suspended = is_suspended
+    return bar
+
+
+def test_backtest_blocks_buy_at_limit_up() -> None:
+    bars = [
+        _tradable_bar(date(2026, 7, 1), "AAA", "10", "10"),
+        _tradable_bar(date(2026, 7, 2), "AAA", "11", "11", limit_up="11"),
+    ]
+    engine = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        lot_size=100,
+    )
+
+    result = engine.run(
+        bars=bars,
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("1"))],
+        execution_calendar=_calendar("AAA"),
+    )
+
+    assert all(trade.side == "sell" for trade in result.trades) or not result.trades
+    buy_trades = [trade for trade in result.trades if trade.side == "buy"]
+    assert buy_trades == []
+
+
+def test_backtest_blocks_sell_at_limit_down() -> None:
+    bars = [
+        _tradable_bar(date(2026, 7, 1), "AAA", "10", "10"),
+        _tradable_bar(date(2026, 7, 2), "AAA", "11", "11"),
+        _tradable_bar(date(2026, 7, 3), "AAA", "9", "9", limit_down="9"),
+    ]
+    engine = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        lot_size=100,
+    )
+
+    result = engine.run(
+        bars=bars,
+        signals=[
+            TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("1")),
+            TargetWeightSignal(date(2026, 7, 2), "AAA", Decimal("0")),
+        ],
+        execution_calendar=_calendar("AAA"),
+    )
+
+    sell_trades = [trade for trade in result.trades if trade.side == "sell"]
+    assert sell_trades == []
+
+
+def test_backtest_blocks_all_trades_when_suspended() -> None:
+    bars = [
+        _tradable_bar(date(2026, 7, 1), "AAA", "10", "10"),
+        _tradable_bar(
+            date(2026, 7, 2), "AAA", "10", "10", is_suspended=True
+        ),
+        _tradable_bar(date(2026, 7, 3), "AAA", "10", "10"),
+    ]
+    engine = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        lot_size=100,
+    )
+
+    result = engine.run(
+        bars=bars,
+        signals=[
+            TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("1")),
+            TargetWeightSignal(date(2026, 7, 2), "AAA", Decimal("0")),
+        ],
+        execution_calendar=_calendar("AAA"),
+    )
+
+    assert not any(trade.trade_date == date(2026, 7, 2) for trade in result.trades)

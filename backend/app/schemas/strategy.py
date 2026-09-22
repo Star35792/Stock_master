@@ -156,6 +156,13 @@ class FactorSelectionBacktestRequest(BaseModel):
     commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
     slippage_bps: Decimal = Field(default=Decimal("2"), ge=0)
     lot_size: int = Field(default=100, gt=0)
+    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = (
+        "linear_commission_v1"
+    )
+    min_commission: Decimal | None = Field(default=None, ge=0)
+    sell_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
+    transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
+    exchange_fee_rate: Decimal | None = Field(default=None, ge=0)
     code_version: str = Field(min_length=1)
     data_version: str = Field(min_length=1)
     validation_mode: Literal["none", "out_of_sample", "rolling"] = "none"
@@ -205,10 +212,12 @@ class RollingWindowRequest(BaseModel):
 
 class RollingWindowRead(BaseModel):
     index: int
+    window_id: str
     training_start_date: date
     training_end_date: date
     test_start_date: date
     test_end_date: date
+    execution_status: Literal["planning_only"] = "planning_only"
 
 
 class BacktestDriftRequest(BaseModel):

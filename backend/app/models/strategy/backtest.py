@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     Numeric,
@@ -24,6 +25,38 @@ from app.database.base import Base
 from app.models.common import CreatedAtMixin
 
 
+class TrainingArtifact(CreatedAtMixin, Base):
+    """Immutable record of the training inputs used for one walk-forward window.
+
+    The artifact captures the factor specification and a content hash of the
+    training-period factor observations.  It is created once per window and
+    referenced by every backtest run that depends on it, giving the validation
+    report a stable provenance anchor even before full artifact verification is
+    implemented.
+    """
+
+    __tablename__ = "training_artifact"
+    __table_args__ = (
+        UniqueConstraint("window_id"),
+        Index("ix_training_artifact_window_id", "window_id"),
+        {"schema": "strategy"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, Sequence("strategy_training_artifact_id_seq"), primary_key=True
+    )
+    window_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    strategy_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    factor_specs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    training_start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    training_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    test_start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    test_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    training_input_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    code_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    data_version: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
 class BacktestRun(CreatedAtMixin, Base):
     __tablename__ = "backtest_run"
     __table_args__ = (
@@ -34,6 +67,7 @@ class BacktestRun(CreatedAtMixin, Base):
         CheckConstraint("initial_cash > 0", name="ck_backtest_run_initial_cash"),
         CheckConstraint("start_date <= end_date", name="ck_backtest_run_date_order"),
         Index("ix_backtest_run_strategy_started", "strategy_name", "started_at"),
+        Index("ix_backtest_run_training_artifact", "training_artifact_id"),
         {"schema": "strategy"},
     )
 
@@ -52,6 +86,11 @@ class BacktestRun(CreatedAtMixin, Base):
     total_return: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'running'")
+    )
+    training_artifact_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("strategy.training_artifact.id"),
+        nullable=True,
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
