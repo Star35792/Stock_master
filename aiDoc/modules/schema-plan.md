@@ -472,6 +472,8 @@ V1 暂不引入以下设计：
 
 - `factor.*`：因子定义、运行批次、因子值、横截面 profile。`factor.factor_definition` 新增非空 `category` 字段（11 个决策域分类，见 `aiDoc/research/decision-factor-framework.md`）与 `ix_factor_definition_category` 索引；派生因子（`xxx__transform`）继承基础因子分类，由 Alembic `20260722_0024` 回填。
 - `strategy.*`：回测运行、成交、净值、持仓和绩效。
+  - 价格价值假设回测复用上述表，无新增 schema 或迁移。`backtest_run.parameters` 保存 `price_value_assumption_v1` 合同、显式假设、市场快照、引擎版本、输入哈希及完整 `price_value_report`（含决策日志）；`validation_mode=none`、`pit_verified=false`。标准成交/净值/持仓保持原定点精度，JSON 报告保留 Decimal 字符串精度；写入仅是研究存储，不创建 `trade.*` 事实。
+- `raw.daily_bar / market.daily_bar`：估值研究依赖 `limit_up / limit_down / is_suspended / special_treatment_status`，从选定 raw 记录复制至可信日线。沿用当前 DuckDB 初始化兼容桥幂等补列，旧行限价和特殊处理状态保留 NULL，停牌字段沿用 false 默认值；默认值不证明历史可交易，研究仍要求明确普通状态和有效限价。既有值不覆盖，实际用户数据库未由本次开发直接升级。
 - `portfolio.*`：组合计划和目标持仓。`portfolio.portfolio_plan` 以 nullable 的 `idempotency_key`、`request_hash` 和 `input_snapshot` 兼容历史记录；新公共草案 API 要求幂等键，保存规范化手工输入快照，并通过唯一索引防止重试生成重复草案。
 - `trade.*`：模拟盘账户、订单、成交和持仓；`paper_account_equity_snapshot` 按账户/估值日 append-only 保存现金、市值、总权益、观测高水位、回撤、历史连续状态和三类哈希，`paper_account_equity_component` 复制逐持仓数量、成本、未复权价格及行情质量血缘。旧历史不回填，首条固定为 `bootstrap`。`paper_execution_approval` 一对一绑定通过的正式风险评估，保存代码版本、评估、账户、净值、readiness、ADV、政策和规范化订单批次哈希；状态限定为 `pending -> consumed | expired | revoked`，创建和撤销分别使用唯一幂等键。`paper_execution_batch` 以 approval 和执行幂等键双唯一约束保存代码版本、前后账户状态、执行政策、输入/结果快照和稳定失败码，并以 check constraint 约束 completed/rejected 的计数、现金、hash 和时间不变量；新 `paper_order` 通过 nullable 的 batch、risk order 和 execution index 兼容旧记录，`paper_fill` 限定每个同步 full-fill 订单一条成交。
 - `risk.*`：`risk_check` 保留旧行 nullable 兼容，并为新正式评估绑定 account、equity snapshot、plan/readiness/ADV/policy/evaluation 哈希及幂等键；`risk_check_order` 复制参考价、投影权重、服务端 ADV 20/15 输入和逐规则结果。风险记录不等于交易订单。

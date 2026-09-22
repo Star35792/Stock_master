@@ -25,6 +25,8 @@ V4 研究接口支持批量运行、样本外/滚动验证合同、按指定交�
 核心 API 面：
 
 - 健康检查：`GET /health`
+- 价格与价值研究：`POST /api/v1/strategy-research/price-value/evaluate`；前端菜单“估值研究”（`/price-value`）。输入三情景 FCFE 总额、稀释股数、时点、费用和安全边际等显式研究假设，服务端读取指定日期可信未复权行情，返回情景价值、含费成本上限、最高报价、复核/阻断原因和输入合同哈希。固定 `research_only=true`、`pit_verified=false`、`execution_eligible=false`，不写入数据库、不生成权重或订单。字段与范围见[策略规范](aiDoc/strategy/20260922-1314-price-value-margin-strategy.md)。
+- 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`；同页新增版本化假设历史模拟。单只沪深主板普通股与现金，收盘生成信号、次日开盘按实际整手数量和费用复核买价，达到基准价值或论点失效触发模拟退出，未成交退出持续重试。不自动加仓，未用预算保留现金。运行写入 `strategy.backtest_*` 研究记录，返回净值、现金、成交、决策日志和合同指纹；当前修订行情与手工假设不构成历史时点认证或样本外验证，不创建 paper 或真实订单。遇公司行为、历史 ST/状态未知或缺失可信行情/涨跌停数据时拒绝运行。
 - 行情与参考数据：`GET /api/v1/securities`、`GET /api/v1/securities/{symbol}/lifecycle`、`GET /api/v1/daily-bars/{symbol}`、`GET /api/v1/daily-bars/{symbol}/chart`（最新可消费日线窗口，仅含 `trusted/manual_fixed` 且非可疑记录）、`GET /api/v1/daily-bars/missing`、`GET /api/v1/trading-calendar`
 - 数据质量与修复：`GET /api/v1/data-quality/issues`、`PATCH /api/v1/data-quality/issues/{issue_id}/status`、`GET /api/v1/daily-bar-source-compares`、`GET /api/v1/manual-corrections`
 - 复权与公司行为：`GET /api/v1/corporate-actions`、`GET /api/v1/adjustment-factors`

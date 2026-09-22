@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     Index,
@@ -87,6 +88,12 @@ class DailyBar(TimestampMixin, Base):
     amount: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     amplitude: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    limit_up: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    limit_down: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    is_suspended: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    special_treatment_status: Mapped[str | None] = mapped_column(String(20))
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     quality_score: Mapped[Decimal] = mapped_column(

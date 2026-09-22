@@ -51,7 +51,7 @@ const detailErrorMessage = ref<string | null>(null);
 const limit = ref(5);
 const route = useRoute();
 const activePage = computed(() => String(route.name ?? "overview"));
-const usesOwnPageHeader = computed(() => ["market", "factors", "paper"].includes(activePage.value));
+const usesOwnPageHeader = computed(() => ["market", "factors", "paper", "price-value"].includes(activePage.value));
 
 let activeController: AbortController | null = null;
 let detailController: AbortController | null = null;
@@ -120,6 +120,7 @@ const navItems = [
   { id: "market", label: "行情", icon: LineChart },
   { id: "quality", label: "质量", icon: ShieldCheck },
   { id: "factors", label: "因子", icon: BarChart3 },
+  { id: "price-value", label: "估值研究", icon: LineChart },
   { id: "backtests", label: "回测", icon: LineChart },
   { id: "portfolio", label: "组合草案", icon: ClipboardList },
   { id: "paper", label: "模拟盘", icon: BriefcaseBusiness },

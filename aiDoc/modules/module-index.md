@@ -14,6 +14,8 @@
 | `lake` | Parquet/DuckDB 离线数据湖 |
 | `backtest` | 日频事件回测内核 |
 | `strategies` | 策略研究模板 |
+| `strategies.price_value` / `services.price_value_research` | 纯 Decimal FCFE 情景计算及只读研究编排；消费可信行情与显式用户假设，不认证历史财务、不生成交易信号 |
+| `backtest.price_value` / `services.price_value_backtest` | 单股加现金的版本化假设历史模拟；复用 FCFE 与费用计算，可信未复权行情及交易日历驱动收盘信号、次日开盘成交和持续退出；仅保存 `strategy.backtest_*` 研究事实与合同，不创建 paper/真实订单、不认证历史时点 |
 | `portfolio` | 组合构建内核 |
 | `risk` | 下单前风控内核 |
 | `trade` | BrokerAdapter 和模拟盘执行 |

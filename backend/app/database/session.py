@@ -58,12 +58,37 @@ def apply_schema_compatibility(bind: Engine) -> None:
     """
     statements = (
         "ALTER TABLE factor.factor_run ADD COLUMN IF NOT EXISTS release_id VARCHAR",
-        "ALTER TABLE market.adjustment_factor "
-        "ADD COLUMN IF NOT EXISTS release_id VARCHAR",
+        "ALTER TABLE market.adjustment_factor ADD COLUMN IF NOT EXISTS release_id VARCHAR",
     )
     with bind.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
+    # DuckDB requires separate commits for these additive ALTERs on populated
+    # tables. Every step is idempotent, so an interrupted upgrade can resume.
+    for table in ("raw.daily_bar", "market.daily_bar"):
+        with bind.connect() as conn:
+            schema, name = table.split(".")
+            existing_columns = set(
+                conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = :schema AND table_name = :name"
+                    ),
+                    {"schema": schema, "name": name},
+                ).scalars()
+            )
+        if not existing_columns:
+            continue
+        for column in (
+            "limit_up DECIMAL(18, 4)",
+            "limit_down DECIMAL(18, 4)",
+            "is_suspended BOOLEAN DEFAULT false",
+            "special_treatment_status VARCHAR(20)",
+        ):
+            if column.split()[0] in existing_columns:
+                continue
+            with bind.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))
 
 
 def initialize_database(bind: Engine | None = None) -> None:

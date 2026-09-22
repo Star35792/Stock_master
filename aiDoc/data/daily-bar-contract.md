@@ -2,6 +2,8 @@
 
 本文定义 Stock Master V1 的标准日线数据契约。后续 SQLAlchemy 模型、Alembic 迁移、CSV 导入、质量校验、API 返回结构都应以本文为基础。
 
+估值研究补充交易状态字段：`limit_up / limit_down` 为同币种、同日期未复权限价；`is_suspended` 为停牌标志；`special_treatment_status` 为历史特殊处理状态，普通状态用 `normal` 或 `none`。字段随选定 raw 行保留至 market，不从低价或涨跌幅推断。旧行限价与特殊处理状态为 NULL，停牌标志沿用 false 默认值；默认值不构成历史可交易认证，价格价值回测缺少限价或明确普通状态时拒绝运行。DuckDB 初始化兼容桥幂等补列且不覆盖已有值；来源适配器的自动补采仍需后续接入。
+
 ## 1. 适用范围
 
 首批覆盖：

@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.dependencies import DatabaseSession
+from app.schemas.price_value import PriceValueRequest
+from app.schemas.price_value_backtest import PriceValueBacktestRequest, PriceValueBacktestResponse
+from app.schemas.price_value_result import PriceValueResult
 from app.schemas.strategy import (
     BatchFactorSelectionBacktestItem,
     BatchFactorSelectionBacktestRequest,
@@ -10,10 +13,51 @@ from app.schemas.strategy import (
     RollingWindowRequest,
 )
 from app.services import StrategyResearchService
+from app.services.backtest import BacktestDataChangedError
+from app.services.price_value_backtest import PriceValueBacktestService
+from app.services.price_value_research import PriceValueResearchService
 from app.strategies import FactorScoreSpec
 
 router = APIRouter(prefix="/strategy-research", tags=["strategy-research"])
 service = StrategyResearchService()
+price_value_service = PriceValueResearchService()
+price_value_backtest_service = PriceValueBacktestService()
+
+
+@router.post("/price-value/backtests", response_model=PriceValueBacktestResponse)
+def run_price_value_backtest(
+    payload: PriceValueBacktestRequest, db: DatabaseSession
+) -> PriceValueBacktestResponse:
+    try:
+        result = price_value_backtest_service.run(db, payload)
+        db.commit()
+        return result
+    except BacktestDataChangedError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.get("/price-value/backtests/{run_id}", response_model=PriceValueBacktestResponse)
+def get_price_value_backtest(run_id: int, db: DatabaseSession) -> PriceValueBacktestResponse:
+    try:
+        return price_value_backtest_service.get(db, run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/price-value/evaluate", response_model=PriceValueResult)
+def evaluate_price_value(payload: PriceValueRequest, db: DatabaseSession) -> PriceValueResult:
+    """Evaluate explicit research assumptions without writing data or trading."""
+    try:
+        return price_value_service.evaluate(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/rolling-windows", response_model=list[RollingWindowRead])

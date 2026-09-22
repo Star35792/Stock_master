@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -72,6 +73,12 @@ class RawDailyBar(Base):
     amount: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     amplitude: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    limit_up: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    limit_down: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    is_suspended: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    special_treatment_status: Mapped[str | None] = mapped_column(String(20))
     raw_payload: Mapped[dict | None] = mapped_column(JSON)
     row_hash: Mapped[str | None] = mapped_column(String(64))
     imported_at: Mapped[datetime] = mapped_column(
