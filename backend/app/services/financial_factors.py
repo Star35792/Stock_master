@@ -185,8 +185,11 @@ FINANCIAL_FACTOR_SPECS = (
     FinancialFactorSpec(
         name="roe_ttm",
         category=FactorCategory.FUNDAMENTAL_QUALITY,
-        display_name="ROE TTM",
-        description="latest reported net profit / latest reported shareholders equity",
+        display_name="ROE single-period proxy (legacy roe_ttm key)",
+        description=(
+            "latest reported single-period net profit / ending shareholders "
+            "equity; not TTM"
+        ),
         inputs=(
             "fundamental.financial_statement.income.metrics",
             "fundamental.financial_statement.balance.metrics",

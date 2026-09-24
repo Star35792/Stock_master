@@ -26,6 +26,8 @@ V4 研究接口支持批量运行、样本外合同、按指定交易所开市�
 
 - 价格与价值研究：`POST /api/v1/strategy-research/price-value/evaluate`；前端菜单“估值研究”（`/price-value`）。输入三情景 FCFE 总额、稀释股数、时点、费用和安全边际等显式研究假设，服务端读取指定日期可信未复权行情，返回情景价值、含费成本上限、最高报价、复核/阻断原因和输入合同哈希。固定 `research_only=true`、`pit_verified=false`、`execution_eligible=false`，不写入数据库、不生成权重或订单。字段与范围见[策略规范](aiDoc/strategy/20260922-1314-price-value-margin-strategy.md)。
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`；同页新增版本化假设历史模拟。单只沪深主板普通股与现金，收盘生成信号、次日开盘按实际整手数量和费用复核买价，达到基准价值或论点失效触发模拟退出，未成交退出持续重试。不自动加仓，未用预算保留现金。运行写入 `strategy.backtest_*` 研究记录，返回净值、现金、成交、决策日志和合同指纹；当前修订行情与手工假设不构成历史时点认证或样本外验证，不创建 paper 或真实订单。遇公司行为、历史 ST/状态未知或缺失可信行情/涨跌停数据时拒绝运行。
+- 全市场相对估值研究：`GET /api/v1/strategy-research/price-value/screen/latest` 返回上一已完成交易日的 PE/PB/披露 ROE 人工初筛、沪深北逐项覆盖、自动同步状态、逐股缺失原因及原始批次指纹。ROE 只使用当晚核对的财报加权平均值，按沪深北各所至少 80% 覆盖选最新可比主报告期；已有更新财报时同时展示最新 ROE，页面阈值只比较主报告期。`GET /api/v1/strategy-research/price-value/profit-status` 分别读取价值研究回测的假设盈亏及模拟账户净值状态。没有回测记录或可核验投入基线时返回不可计算，不将缺失解释成零收益。页面 `/price-value` 可自行设置筛选阈值、查看覆盖原因和导出报告。9 月 23 日首轮实际晚间采集成功，但行业与 ST 状态未核实使通过名单仍为零；页面默认展示带逐股缺口的原始指标供人工查看；名单仅供人工复核，无默认买入阈值、FCFE 安全边际、订单或历史全市场盈利认证。
+- 估值研究页使用顺序：先看每日全市场只读初筛及数据状态，再填入自己的三情景 FCFE 预测研究单股价格，最后在核对假设历史可得时间后运行单股假设回测。页面将收益记录与初筛名单分开展示；数据未备齐时说明原因，不把空名单或缺失利润解释为零收益。
 
 - 健康检查：`GET /health`
 - 行情与参考数据：`GET /api/v1/securities`、`GET /api/v1/securities/{symbol}/lifecycle`、`GET /api/v1/daily-bars/{symbol}`、`GET /api/v1/daily-bars/{symbol}/chart`（最新可消费日线窗口，仅含 `trusted/manual_fixed` 且非可疑记录）、`GET /api/v1/daily-bars/missing`、`GET /api/v1/trading-calendar`
@@ -91,6 +93,8 @@ uv run python scripts/scheduler/run_daily_loop.py
 首次下载和入库可能较久，API 可继续提供已有数据；同步结束后重新查询行情即可看到更新。
 上海时间 18:00 前不发布当天日线，实际更新以供应商已发布且通过现有校验的数据为准。
 自动任务更新未复权日线，不自动重建前复权、因子、回测或交易。
+
+价值初筛另有同一 API 进程内的晚间任务：上海交易日 21:00 后采集当前东方财富估值及财报 ROE 的原始响应分页到 `raw.import_batch` / `raw.vendor_snapshot`，按沪深北分别核对证券、供应商市场码、可信日线、0.01 元收盘价差及有效 PE/PB、披露 ROE 覆盖，再发布可追溯的当晚研究观察值。跨午夜采集不得发布为前日观察。研究估值行带 `_research_batch_id`，通用估值因子和市值读取默认排除；晚间任务不写通用 `roe_ttm/v1` 因子。供应商 f9 只称周期未核验的 PE，不写作 PE(TTM)。只有当日自动日线同步成功才尝试发布；同日晚间失败每 30 分钟重试。00:00 生成上一交易日全市场只读报告，启动及白天每小时补查变化。停机跨日后不能将新的当前报价倒填旧日；缺失时报告阻断。东方财富接口不提供可证明的供应商 as-of 时点，报告固定 `pit_verified=false`，不得用于历史全市场回测收益或自动交易。`PRICE_VALUE_INPUT_PREP_ENABLED` 和 `PRICE_VALUE_SCREEN_ENABLED` 可分别关闭任务。
 
 `AUTO_DATA_SYNC_ENABLED=false` 可关闭；`AUTO_DATA_SYNC_INTERVAL_SECONDS` 可调整间隔
 （默认 3600 秒，最小 60 秒）。缺少 API key 时记录警告并跳过，失败记录到现有作业日志

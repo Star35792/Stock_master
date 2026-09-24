@@ -14,6 +14,7 @@ from app.data_sources.base import DailyBarRecord
 QUOTE_HOST = "https://push2delay.eastmoney.com"
 KLINE_HOST = "https://push2his.eastmoney.com"
 KLINE_FALLBACK_HOST = "https://push2.eastmoney.com"
+VALUATION_HISTORY_HOST = "https://datacenter-web.eastmoney.com"
 _HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Referer": "https://data.eastmoney.com/",
@@ -229,7 +230,172 @@ class EastmoneyDataSource:
             pn += 1
         return rows
 
+    def iter_valuation_snapshot_pages(self, *, limit: int = 10000):
+        """Yield complete current clist pages with the vendor's reported total.
+
+        These quotes contain no vendor as-of timestamp. Callers must record
+        collection time and validate against same-day trusted closes.
+        """
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        page_size = 100
+        page = 1
+        expected_total = None
+        received = 0
+        while expected_total is None or received < expected_total:
+            params = {
+                "pn": page,
+                "pz": page_size,
+                "po": 1,
+                "np": 1,
+                "fltt": 2,
+                "invt": 2,
+                "fid": "f12",
+                "fs": (
+                    "m:0+t:6,m:0+t:13,m:0+t:80,"
+                    "m:1+t:2,m:1+t:23,m:1+t:8,m:0+t:81+s:2048"
+                ),
+                "fields": "f12,f13,f2,f9,f23,f20,f21",
+            }
+            try:
+                response, raw_text = self._get_json_with_raw(
+                    QUOTE_HOST, "/api/qt/clist/get", params
+                )
+            except EastmoneyDataError:
+                response, raw_text = self._get_json_with_raw(
+                    "https://push2.eastmoney.com", "/api/qt/clist/get", params
+                )
+            data = response.get("data") or {}
+            total = data.get("total")
+            items = data.get("diff") or []
+            if not isinstance(total, int) or total < 1 or total > limit:
+                raise EastmoneyDataError("invalid or oversized valuation page total")
+            if expected_total is not None and total != expected_total:
+                raise EastmoneyDataError("valuation total changed during pagination")
+            expected_total = total
+            if not isinstance(items, list) or not items:
+                raise EastmoneyDataError("incomplete valuation pagination")
+            if len(items) > min(page_size, total - received):
+                raise EastmoneyDataError("valuation page exceeds reported total")
+            yield page, total, items, raw_text
+            received += len(items)
+            if received < total and len(items) != page_size:
+                raise EastmoneyDataError("short valuation page before reported total")
+            page += 1
+
+    def fetch_historical_valuation_page(
+        self, *, trade_date: date, page: int, page_size: int = 500
+    ) -> tuple[dict, str]:
+        """Fetch one supplier dated valuation page and its unmodified JSON text.
+
+        The requested trade date is a supplier label, not proof of when a
+        historical value first became available.
+        """
+        if page < 1 or not 1 <= page_size <= 500:
+            raise ValueError("invalid historical valuation page")
+        return self._get_json_with_raw(
+            VALUATION_HISTORY_HOST,
+            "/api/data/v1/get",
+            {
+                "reportName": "RPT_VALUEANALYSIS_DET",
+                "columns": "ALL",
+                "source": "WEB",
+                "client": "WEB",
+                "filter": f"(TRADE_DATE='{trade_date.isoformat()}')",
+                "pageNumber": page,
+                "pageSize": page_size,
+                "sortColumns": "SECURITY_CODE",
+                "sortTypes": 1,
+            },
+        )
+
+    def iter_same_day_dated_valuation_pages(self, *, trade_date: date):
+        """Use the supplier's dated valuation table as a same-evening fallback.
+
+        A caller must independently check that capture is on trade_date after
+        close and that every price matches a trusted unadjusted daily bar.
+        """
+        received = 0
+        total = None
+        page = 1
+        while total is None or received < total:
+            response, raw_text = self.fetch_historical_valuation_page(
+                trade_date=trade_date, page=page, page_size=500
+            )
+            result = response.get("result")
+            if response.get("success") is not True or not isinstance(result, dict):
+                raise EastmoneyDataError("supplier rejected same-day dated valuation page")
+            count = result.get("count")
+            items = result.get("data")
+            if (
+                not isinstance(count, int) or isinstance(count, bool)
+                or not 1 <= count <= 10000 or not isinstance(items, list)
+                or not items or (total is not None and count != total)
+                or len(items) != min(500, count - received)
+            ):
+                raise EastmoneyDataError("same-day dated valuation pagination is incomplete")
+            total = count
+            normalized = []
+            for item in items:
+                if not isinstance(item, dict):
+                    raise EastmoneyDataError("invalid same-day dated valuation row")
+                try:
+                    item_date = date.fromisoformat(str(item.get("TRADE_DATE"))[:10])
+                except ValueError as exc:
+                    raise EastmoneyDataError("invalid supplier valuation date") from exc
+                if item_date != trade_date:
+                    raise EastmoneyDataError("supplier valuation has wrong trade date")
+                code = item.get("SECURITY_CODE")
+                symbol = item.get("SECUCODE")
+                if not isinstance(code, str) or symbol != normalize_symbol(code):
+                    raise EastmoneyDataError("invalid supplier security code")
+                normalized.append({
+                    "f12": code,
+                    "f13": 1 if symbol.endswith(".SH") else 0,
+                    "f2": item.get("CLOSE_PRICE"),
+                    "f9": item.get("PE_TTM"),
+                    "f23": item.get("PB_MRQ"),
+                    "f20": item.get("TOTAL_MARKET_CAP"),
+                    "f21": item.get("NOTLIMITED_MARKETCAP_A"),
+                    "_supplier_endpoint": "RPT_VALUEANALYSIS_DET",
+                    "_supplier_payload": item,
+                })
+            yield page, total, normalized, raw_text
+            received += len(items)
+            page += 1
+
+    def fetch_reported_roe_page(
+        self, *, report_date: date, page: int, page_size: int = 500
+    ) -> tuple[dict, str]:
+        """Fetch a page of issuer reported, weighted-average ROE evidence.
+
+        REPORTDATE is the fiscal period, not a first-available timestamp. The
+        caller must retain NOTICE_DATE, EITIME and the actual capture time.
+        """
+        if page < 1 or not 1 <= page_size <= 500:
+            raise ValueError("invalid reported ROE page")
+        return self._get_json_with_raw(
+            VALUATION_HISTORY_HOST,
+            "/api/data/v1/get",
+            {
+                "reportName": "RPT_LICO_FN_CPD",
+                "columns": "ALL",
+                "source": "WEB",
+                "client": "WEB",
+                "filter": f"(REPORTDATE='{report_date.isoformat()}')",
+                "pageNumber": page,
+                "pageSize": page_size,
+                "sortColumns": "SECURITY_CODE",
+                "sortTypes": 1,
+            },
+        )
+
     def _get_json(self, host: str, path: str, params: dict[str, object]) -> dict:
+        return self._get_json_with_raw(host, path, params)[0]
+
+    def _get_json_with_raw(
+        self, host: str, path: str, params: dict[str, object]
+    ) -> tuple[dict, str]:
         url = f"{host}{path}?{urlencode(params)}"
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
@@ -240,7 +406,7 @@ class EastmoneyDataSource:
                 result = loads(payload)
                 if not isinstance(result, dict):
                     raise EastmoneyDataError(f"unexpected response from {path}")
-                return result
+                return result, payload
             except (
                 HTTPError,
                 URLError,
@@ -270,6 +436,6 @@ def market_prefix(code: str) -> str:
 
 def normalize_symbol(code: str) -> str:
     suffix = ".SH" if market_prefix(code) == "1" else ".SZ"
-    if code.startswith(("8", "4")):
+    if code.startswith(("8", "4", "92")):
         suffix = ".BJ"
     return f"{code}{suffix}"

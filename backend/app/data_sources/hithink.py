@@ -177,14 +177,14 @@ class HithinkFinanceDataSource:
     ) -> list[TradingDayRecord]:
         data = self._get("/api/a-share/calendar/trading-days", {})
         days = [
-            datetime.fromtimestamp(item["date_ms"] / 1000, tz=_SHANGHAI).date()
+            (datetime.fromtimestamp(item["date_ms"] / 1000, tz=_SHANGHAI).date(), item)
             for item in data.get("item", [])
             if item.get("date_ms") is not None
         ]
         return [
-            TradingDayRecord(exchange=exchange, trade_date=trade_date)
+            TradingDayRecord(exchange=exchange, trade_date=trade_date, raw_payload=item)
             for exchange in exchanges
-            for trade_date in days
+            for trade_date, item in days
         ]
 
     def fetch_financial_statements(
@@ -449,6 +449,8 @@ class HithinkFinanceDataSource:
     def _to_security(item: dict[str, Any]) -> SecurityRecord:
         symbol = str(item["thscode"]).upper()
         asset_type = str(item.get("asset_type") or "")
+        raw_list_date = item.get("list_date")
+        list_date = date.fromisoformat(str(raw_list_date)) if raw_list_date else None
         return SecurityRecord(
             symbol=symbol,
             raw_symbol=item.get("ticker"),
@@ -456,6 +458,8 @@ class HithinkFinanceDataSource:
             security_type=_to_security_type(asset_type),
             exchange=item.get("exchange") or _exchange_from_symbol(symbol),
             currency=item.get("currency") or "CNY",
+            list_date=list_date,
+            raw_payload=item,
         )
 
 

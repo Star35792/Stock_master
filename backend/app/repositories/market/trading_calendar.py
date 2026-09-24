@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.data_sources import TradingDayRecord
 from app.models.market import TradingCalendar
+from app.repositories.market.sequence_ids import reserve_sequence_ids
 
 
 class TradingCalendarRepository:
@@ -19,24 +20,44 @@ class TradingCalendarRepository:
         if not records:
             return 0
 
-        rows = [
-            {
-                "exchange": record.exchange,
-                "trade_date": record.trade_date,
-                "is_open": record.is_open,
-                "is_half_day": False,
-                "source_name": source_name,
-            }
-            for record in records
-        ]
+        # Old bulk-loaded databases can have ids ahead of the DuckDB sequence.
+        # A normal INSERT consumes nextval even for natural-key duplicates and
+        # eventually collides with an existing primary key. Allocate ids only
+        # for genuinely new calendar dates under the single-writer deployment.
+        existing = set(db.execute(select(TradingCalendar.exchange, TradingCalendar.trade_date)))
+        max_id = db.scalar(select(func.max(TradingCalendar.id))) or 0
+        rows = []
+        seen = set(existing)
+        for record in records:
+            key = (record.exchange, record.trade_date)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "exchange": record.exchange,
+                    "trade_date": record.trade_date,
+                    "is_open": record.is_open,
+                    "is_half_day": False,
+                    "source_name": source_name,
+                }
+            )
+        ids = reserve_sequence_ids(
+            db, sequence_name="market_trading_calendar_id_seq",
+            max_existing_id=max_id, count=len(rows),
+        )
+        for row, row_id in zip(rows, ids, strict=True):
+            row["id"] = row_id
+        if not rows:
+            return 0
         statement = insert(TradingCalendar).values(rows)
         # Trading days are immutable facts; DuckDB's ON CONFLICT DO UPDATE can
         # hit index-corruption bugs on this table, so we simply ignore duplicates.
         statement = statement.on_conflict_do_nothing(
             index_elements=[TradingCalendar.exchange, TradingCalendar.trade_date],
         )
-        result = db.execute(statement)
-        return max(result.rowcount or 0, 0)
+        db.execute(statement)
+        return len(rows)
 
     def get_open_dates(self, db: Session, *, exchange: str, dates: set) -> set:
         if not dates:

@@ -121,6 +121,7 @@ def test_api_persists_actual_cash_trades_and_retrievable_hypothetical_report(cli
     assert result["trades"][0]["trade_date"] == "2026-01-06"
     assert Decimal(result["final_cash"]) == Decimal("15584.8")
     assert Decimal(result["final_equity"]) == Decimal("15584.8")
+    assert Decimal(result["net_profit"]) == Decimal("5584.8")
     assert Decimal(result["total_return"]) == Decimal("0.55848")
     assert len(result["contract_hash"]) == 64
     read = client.get(f"/api/v1/strategy-research/price-value/backtests/{result['run_id']}")

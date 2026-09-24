@@ -28,6 +28,8 @@ class SecurityRecord:
     security_type: str
     exchange: str
     currency: str = "CNY"
+    list_date: date | None = None
+    raw_payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -35,3 +37,4 @@ class TradingDayRecord:
     exchange: str
     trade_date: date
     is_open: bool = True
+    raw_payload: dict[str, Any] | None = None

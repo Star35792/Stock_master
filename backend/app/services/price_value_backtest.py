@@ -234,6 +234,7 @@ class PriceValueBacktestService:
             "contract_hash": contract_hash,
             "initial_cash": result.initial_cash,
             "final_equity": result.final_equity,
+            "net_profit": result.final_equity - result.initial_cash,
             "total_return": result.total_return,
             "maximum_drawdown": maximum_drawdown,
             "final_cash": result.equity_curve[-1].cash,
@@ -274,4 +275,8 @@ class PriceValueBacktestService:
         run = self.runs.get_run(db, run_id=run_id)
         if run is None or run.strategy_name != STRATEGY_NAME:
             raise LookupError("price-value backtest not found")
-        return PriceValueBacktestResponse(run_id=run.id, **run.parameters["price_value_report"])
+        report = dict(run.parameters["price_value_report"])
+        report.setdefault(
+            "net_profit", str(Decimal(report["final_equity"]) - Decimal(report["initial_cash"]))
+        )
+        return PriceValueBacktestResponse(run_id=run.id, **report)

@@ -16,12 +16,27 @@ from app.services import StrategyResearchService
 from app.services.backtest import BacktestDataChangedError
 from app.services.price_value_backtest import PriceValueBacktestService
 from app.services.price_value_research import PriceValueResearchService
+from app.services.price_value_screen import PriceValueScreenService
 from app.strategies import FactorScoreSpec
 
 router = APIRouter(prefix="/strategy-research", tags=["strategy-research"])
 service = StrategyResearchService()
 price_value_service = PriceValueResearchService()
 price_value_backtest_service = PriceValueBacktestService()
+price_value_screen_service = PriceValueScreenService()
+
+
+@router.get("/price-value/screen/latest")
+def latest_price_value_screen(db: DatabaseSession) -> dict:
+    result = price_value_screen_service.latest(db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="price/value screen has not run")
+    return result
+
+
+@router.get("/price-value/profit-status")
+def price_value_profit_status(db: DatabaseSession) -> dict:
+    return price_value_screen_service.profit_status(db)
 
 
 @router.post("/price-value/backtests", response_model=PriceValueBacktestResponse)

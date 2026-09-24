@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -28,6 +28,7 @@ def logged_job(
     batch_id: int | None = None,
     metadata: dict[str, Any] | None = None,
     repository: JobLogRepository | None = None,
+    on_failure: Callable[[Session, JobLog, Exception], None] | None = None,
 ) -> Generator[JobLog]:
     """在 ``system.job_log`` 中记录一次任务的生命周期。
 
@@ -62,6 +63,9 @@ def logged_job(
         db.commit()
         logger.info("Job %s: %s id=%s", status, job_name, job.id)
     except Exception as exc:  # noqa: BLE001 - log and re-raise
+        db.rollback()
+        if on_failure is not None:
+            on_failure(db, job, exc)
         error_message = f"{type(exc).__name__}: {exc}"
         repo.finish(
             db,

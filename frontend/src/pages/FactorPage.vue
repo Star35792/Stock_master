@@ -62,7 +62,7 @@ const factorCopy: Record<string, { name: string; description: string }> = {
   net_profit_growth_yoy: { name: "净利润同比增长", description: "衡量公司净利润相对上年同期的增长幅度。" },
   ocf_to_net_income_ttm: { name: "经营现金流净利润比", description: "最近报告期经营活动现金流相对净利润的比例，用于观察盈利的现金含量。" },
   revenue_growth_yoy: { name: "营业收入同比增长", description: "最近报告期营业收入相对上年同期的变化，用于衡量企业成长速度。" },
-  roe_ttm: { name: "滚动净资产收益率", description: "最近十二个月净利润相对股东权益的比例，用于衡量权益资本回报。" },
+  roe_ttm: { name: "单期 ROE 代理", description: "最近报告单期净利润除以期末股东权益；字段名沿用 roe_ttm，不代表滚动十二个月。" },
   turnover_rate: { name: "换手率", description: "成交量相对可交易流通规模的比例，用于观察交易活跃度。" },
   volatility_5: { name: "5 日波动率", description: "最近 5 个日收益率的总体标准差，用于衡量短期价格波动。" },
   volume_chg_1d: { name: "1 日成交量变化", description: "当前成交量相对上一可信交易日成交量的变化。" },

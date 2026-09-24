@@ -84,6 +84,24 @@ def test_schema_compatibility_adds_release_lineage_columns(tmp_path) -> None:
     engine.dispose()
 
 
+def test_schema_compatibility_removes_legacy_security_name_index(tmp_path) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'legacy-security.duckdb'}")
+    initialize_database(engine)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE INDEX ix_security_name ON market.security(name)"))
+
+    apply_schema_compatibility(engine)
+    apply_schema_compatibility(engine)
+
+    with engine.connect() as connection:
+        assert connection.scalar(text("""
+            SELECT count(*) FROM duckdb_indexes()
+            WHERE schema_name='market' AND table_name='security'
+              AND index_name='ix_security_name'
+        """)) == 0
+    engine.dispose()
+
+
 def test_existing_backtest_database_gets_nullable_artifact_column_and_index(tmp_path):
     engine = create_engine(f"duckdb:///{tmp_path / 'old-backtest.duckdb'}")
     with engine.begin() as connection:

@@ -30,7 +30,6 @@ class Security(TimestampMixin, Base):
         ),
         Index("ix_security_type", "security_type"),
         Index("ix_security_exchange", "exchange"),
-        Index("ix_security_name", "name"),
         {"schema": "market"},
     )
 

@@ -103,6 +103,7 @@ class PriceValueBacktestResponse(ResearchInput):
     contract_hash: str
     initial_cash: Decimal
     final_equity: Decimal
+    net_profit: Decimal
     total_return: Decimal
     maximum_drawdown: Decimal
     final_cash: Decimal

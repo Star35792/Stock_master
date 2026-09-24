@@ -2,14 +2,14 @@
 
 import asyncio
 import logging
-from threading import Lock
 
 from app.config.settings import Settings
 from app.database.session import SessionLocal
+from app.scheduler.database_job_lock import database_job_lock
 from app.services.auto_data_sync import AutoDataSyncService
 
 logger = logging.getLogger(__name__)
-_sync_lock = Lock()
+_sync_lock = database_job_lock  # Preserve the worker's existing test/operator hook.
 
 
 def run_auto_data_sync() -> None:

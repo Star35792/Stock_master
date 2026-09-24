@@ -139,12 +139,7 @@ def _decimal(value: object) -> Decimal | None:
 
 
 class EastmoneyValuationCollectionService:
-    """Cookie-free bulk valuation snapshot collection via Eastmoney clist.
-
-    Fetches current total/float market cap, PE and PB for the whole market in
-    one paginated call. Run daily (after close) to accumulate historical
-    valuation snapshots; factor values upsert idempotently.
-    """
+    """Legacy entry point retained only to reject unverified market writes."""
 
     def __init__(
         self,
@@ -162,10 +157,8 @@ class EastmoneyValuationCollectionService:
         market: str = "all",
         limit: int = 10000,
     ) -> ValuationCollectionResult:
-        items = self.data_source.fetch_valuation_snapshots(market=market, limit=limit)
-        normalized_rows = self.repository.upsert_many(db, rows=items)
-        return ValuationCollectionResult(
-            input_rows=len(items),
-            normalized_rows=normalized_rows,
+        raise RuntimeError(
+            "Direct Eastmoney valuation writes are disabled. Use the same-evening "
+            "PriceValueInputPrepService after 21:00 Shanghai, with raw capture "
+            "and trusted daily close validation."
         )
-

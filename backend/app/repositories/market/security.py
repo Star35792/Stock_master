@@ -1,9 +1,9 @@
-from sqlalchemy import func, or_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import func, insert, or_, select
 from sqlalchemy.orm import Session
 
 from app.data_sources import SecurityRecord
 from app.models.market import Security
+from app.repositories.market.sequence_ids import reserve_sequence_ids
 
 
 class SecurityRepository:
@@ -16,35 +16,71 @@ class SecurityRepository:
     ) -> int:
         if not records:
             return 0
-
-        rows = [
-            {
-                "symbol": record.symbol,
+        # DuckDB may fail while replacing the indexes for a bulk ON CONFLICT
+        # UPDATE of thousands of unchanged securities. Read current values and
+        # only write real changes. Explicit ids also avoid a legacy sequence
+        # lagging behind previously bulk-loaded rows.
+        existing = {row.symbol: row for row in db.scalars(select(Security))}
+        max_id = db.scalar(select(func.max(Security.id))) or 0
+        new_rows: list[dict] = []
+        changed = 0
+        seen: set[str] = set()
+        for record in records:
+            if record.symbol in seen:
+                raise ValueError(f"duplicate security in reference response: {record.symbol}")
+            seen.add(record.symbol)
+            row = existing.get(record.symbol)
+            if (
+                row is not None
+                and row.list_date is not None
+                and record.list_date is not None
+                and row.list_date != record.list_date
+            ):
+                raise ValueError(f"conflicting existing listing date: {record.symbol}")
+            # Some HiThink ticker names contain the Unicode replacement
+            # character. Such a response cannot replace a known good name.
+            name = (
+                record.name if "\ufffd" not in record.name
+                else (row.name if row else record.symbol)
+            )
+            values = {
                 "raw_symbol": record.raw_symbol,
-                "name": record.name,
+                "name": name,
                 "security_type": record.security_type,
                 "exchange": record.exchange,
                 "currency": record.currency,
                 "is_active": True,
-                "source_name": source_name,
             }
-            for record in records
-        ]
-        statement = insert(Security).values(rows)
-        statement = statement.on_conflict_do_update(
-            index_elements=[Security.symbol],
-            set_={
-                "raw_symbol": statement.excluded.raw_symbol,
-                "name": statement.excluded.name,
-                "security_type": statement.excluded.security_type,
-                "exchange": statement.excluded.exchange,
-                "currency": statement.excluded.currency,
-                "is_active": True,
-                "source_name": statement.excluded.source_name,
-            },
+            if record.list_date is not None:
+                values["list_date"] = record.list_date
+            if row is None:
+                new_rows.append(
+                    {"symbol": record.symbol, **values,
+                     "source_name": source_name}
+                )
+                continue
+            row_changed = False
+            for field, value in values.items():
+                if getattr(row, field) != value:
+                    setattr(row, field, value)
+                    changed += 1
+                    row_changed = True
+            if row_changed and row.source_name != source_name:
+                row.source_name = source_name
+            if changed >= 100:
+                db.flush()
+                changed = 0
+        if changed:
+            db.flush()
+        ids = reserve_sequence_ids(
+            db, sequence_name="market_security_id_seq",
+            max_existing_id=max_id, count=len(new_rows),
         )
-        db.execute(statement)
-        return len(rows)
+        for row, row_id in zip(new_rows, ids, strict=True):
+            row["id"] = row_id
+        for start in range(0, len(new_rows), 200):
+            db.execute(insert(Security), new_rows[start : start + 200])
+        return len(records)
 
     def get_symbols(self, db: Session, symbols: set[str]) -> set[str]:
         if not symbols:

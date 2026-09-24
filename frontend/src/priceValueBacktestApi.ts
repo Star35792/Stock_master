@@ -12,7 +12,7 @@ export interface PriceValueBacktestRequest {
 }
 export interface PriceValueBacktestResponse {
   run_id: number; strategy_name: string; research_only: true; pit_verified: false; execution_eligible: false;
-  evaluated_at: string; contract_hash: string; initial_cash: string; final_equity: string; total_return: string;
+  evaluated_at: string; contract_hash: string; initial_cash: string; final_equity: string; net_profit: string; total_return: string;
   maximum_drawdown: string; final_cash: string; trade_count: number; assumptions: PriceValueBacktestRequest;
   limitations: string[];
   trades: Array<{ signal_date: string; trade_date: string; symbol: string; side: string; quantity: number; reference_price: string; fill_price: string; commission: string; cash_after: string }>;

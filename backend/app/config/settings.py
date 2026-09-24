@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     auto_data_sync_interval_seconds: int = Field(default=3600, ge=60)
     data_lake_root: str = "data/warm"
     raw_landing_root: str = "data/raw_landing"
+    price_value_screen_enabled: bool = True
+    price_value_screen_dir: str = "data/price_value_screens"
+    price_value_input_prep_enabled: bool = True
     # When true, price-based factor services read forward-adjusted bars from the
     # materialized curated/prices_qfq Parquet instead of the ORM daily_bar table.
     # Only qfq is served by the curated reader; other adjust types still use the

@@ -188,8 +188,9 @@ unique(source_name, symbol, trade_date, adjust_type, row_hash)
 unique(symbol)
 index(security_type)
 index(exchange)
-index(name)
 ```
+
+证券名称搜索使用包含匹配；约 5,000 只证券的主数据表无需单列名称索引。旧库的 DuckDB `ix_security_name` 在更新名称时可触发索引删除错误并使连接失效，启动兼容升级会幂等移除此索引，新库也不创建。`symbol` 唯一约束及证券类型、交易所索引保留。
 
 ## 7. market.trading_calendar
 

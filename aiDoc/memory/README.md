@@ -21,4 +21,4 @@
 - 行业/政策类因子目前仍可能依赖当前行业标签；生产评分前需要历史行业映射。
 - 财务因子仍需从报告期/报告日期进一步升级到公告日或首次可得时间口径。
 - 估值因子点在时：valuation_snapshot 是收盘后市值（close×股本），属于 end-of-day 行情数据，因子查找用 <=（同日可用，策略次日开盘执行无前视）；financial_statement 仍用严格 <（公告次日才用）。两者口径不同是有意为之。
-- 估值数据：Eastmoney clist 接口可免 cookie 批量取全市场当前总市值/流通市值/PE/PB（f20/f21/f9/f23），适合日级累积历史；Xueqiu kline 带历史 pe/pb/market_capital 但需 cookie，当前未配置。历史估值回填（回测用）仍缺 cookie 或付费源，是已知缺口。
+- 估值数据：Eastmoney clist 接口可免 cookie 批量取当前总市值/流通市值/PE/PB（f20/f21/f9/f23），但不支持指定历史日期；东方财富估值分析日期接口可返回指定交易日的 PE_TTM/PB_MRQ 等供应商记录，现仅采集到独立 raw 批次。历史接口不提供可认证的首次可得时间或修订版本，故回填尚不能用于历史全市场收益回测。Xueqiu kline 带历史 pe/pb/market_capital 但需 cookie，当前未配置。

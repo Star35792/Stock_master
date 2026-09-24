@@ -63,6 +63,10 @@ def apply_schema_compatibility(bind: Engine) -> None:
     with bind.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
+        # DuckDB can invalidate the database when updating a security name
+        # while this legacy ART index is present. Name searches use contains
+        # matching over a small reference table, so remove the index.
+        conn.execute(text("DROP INDEX IF EXISTS market.ix_security_name"))
     # DuckDB requires separate commits for these additive ALTERs on populated
     # tables. Every step is idempotent, so an interrupted upgrade can resume.
     for table in ("raw.daily_bar", "market.daily_bar"):
