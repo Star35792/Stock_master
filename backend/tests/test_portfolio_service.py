@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.portfolio import PortfolioAsset, PortfolioConstraints
+from app.portfolio import (
+    ConstraintEnforcementMode,
+    PortfolioAsset,
+    PortfolioConstraints,
+)
 from app.services.portfolio import (
     PortfolioConstructionService,
     PortfolioIdempotencyConflict,
@@ -125,3 +129,108 @@ def test_portfolio_service_rejects_reused_key_for_different_request() -> None:
 
     with pytest.raises(PortfolioIdempotencyConflict, match="different request"):
         _build(service, _snapshot("0.10"))
+
+
+def test_score_ranked_trim_is_recorded_in_the_persisted_parameters() -> None:
+    repository = FakePortfolioRepository()
+    service = PortfolioConstructionService(repository=repository)
+    fake_db = FakeSession()
+
+    service.build(
+        fake_db,
+        name="trim draft",
+        as_of_date=date(2026, 7, 21),
+        assets=[
+            PortfolioAsset(
+                "600519.SH", "stock", "食品饮料", Decimal("200"), 0,
+                Decimal("0.30"), score=Decimal("0.9"),
+            ),
+            PortfolioAsset(
+                "000858.SZ", "stock", "食品饮料", Decimal("150"), 0,
+                Decimal("0.30"), score=Decimal("0.1"),
+            ),
+        ],
+        cash=Decimal("100000"),
+        constraints=PortfolioConstraints(
+            cash_reserve_rate=Decimal("0"),
+            max_symbol_weight=Decimal("1"),
+            max_industry_weight=Decimal("0.40"),
+            enforcement_mode=ConstraintEnforcementMode.SCORE_RANKED_TRIM,
+            extra_symbol_caps={"000858.SZ": Decimal("0.05")},
+        ),
+        code_version="test",
+        idempotency_key="trim-1",
+        input_snapshot={"assets": []},
+    )
+
+    parameters = next(iter(repository.records.values())).parameters
+    assert parameters["enforcement_mode"] == "score_ranked_trim"
+    assert parameters["extra_symbol_caps"] == {"000858.SZ": "0.05"}
+
+
+def test_trim_mode_rejects_assets_without_scores() -> None:
+    service = PortfolioConstructionService(repository=FakePortfolioRepository())
+
+    with pytest.raises(ValueError, match="requires a score"):
+        service.build(
+            FakeSession(),
+            name="invalid",
+            as_of_date=date(2026, 7, 21),
+            assets=[
+                PortfolioAsset("600519.SH", "stock", "食品饮料", Decimal("200"), 0, Decimal("0.3")),
+            ],
+            cash=Decimal("100000"),
+            constraints=PortfolioConstraints(
+                enforcement_mode=ConstraintEnforcementMode.SCORE_RANKED_TRIM,
+            ),
+            code_version="test",
+            idempotency_key="invalid-1",
+            input_snapshot={"assets": []},
+        )
+
+
+def test_score_roundtrips_through_persisted_target() -> None:
+    repository = FakePortfolioRepository()
+    service = PortfolioConstructionService(repository=repository)
+
+    result = service.build(
+        FakeSession(),
+        name="scored draft",
+        as_of_date=date(2026, 7, 21),
+        assets=[
+            PortfolioAsset(
+                "600519.SH", "stock", "食品饮料", Decimal("200"), 0,
+                Decimal("0.20"), score=Decimal("0.85"),
+            ),
+        ],
+        cash=Decimal("100000"),
+        constraints=PortfolioConstraints(),
+        code_version="test",
+        idempotency_key="score-1",
+        input_snapshot={"assets": []},
+    )
+
+    assert result.targets[0].score == Decimal("0.85")
+    saved_target = repository.targets[result.plan_id][0]
+    assert saved_target.score == Decimal("0.85")
+
+
+def test_enforcement_mode_roundtrips_through_persisted_parameters() -> None:
+    from app.schemas.portfolio import PortfolioConstraintsRequest
+
+    constraints = PortfolioConstraintsRequest(
+        enforcement_mode="score_ranked_trim",
+        extra_symbol_caps={"600519.SH": Decimal("0.10")},
+    )
+    persisted = {
+        "cash_reserve_rate": "0.05",
+        "max_symbol_weight": "0.20",
+        "max_industry_weight": "0.40",
+        "security_type_budgets": {},
+        "enforcement_mode": "score_ranked_trim",
+        "extra_symbol_caps": {"600519.SH": "0.10"},
+    }
+    restored = PortfolioConstraintsRequest.model_validate(persisted)
+    assert restored.enforcement_mode is constraints.enforcement_mode
+    assert restored.enforcement_mode.value == "score_ranked_trim"
+    assert restored.extra_symbol_caps == {"600519.SH": Decimal("0.10")}

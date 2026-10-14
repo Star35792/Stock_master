@@ -5,8 +5,10 @@ from app.portfolio.builder import (
     PortfolioPlan,
     PortfolioTarget,
 )
+from app.portfolio.enums import ConstraintEnforcementMode
 
 __all__ = [
+    "ConstraintEnforcementMode",
     "PortfolioAsset",
     "PortfolioBuilder",
     "PortfolioConstraints",

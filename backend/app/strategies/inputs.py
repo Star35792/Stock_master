@@ -64,6 +64,11 @@ class StrategyFactorFrame:
                     raise StrategyInputError(
                         "strategy factor row value must be a Decimal"
                     )
+                if not row.value.is_finite():
+                    raise StrategyInputError(
+                        f"strategy factor row value must be finite; "
+                        f"{symbol} {trade_date.isoformat()} got {row.value}"
+                    )
                 key = (factor_spec, symbol, trade_date)
                 if key in seen:
                     raise StrategyInputError(

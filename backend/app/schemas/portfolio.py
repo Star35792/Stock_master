@@ -2,7 +2,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.portfolio.enums import ConstraintEnforcementMode
 
 
 class PortfolioAssetRequest(BaseModel):
@@ -13,6 +15,7 @@ class PortfolioAssetRequest(BaseModel):
     current_quantity: int = Field(ge=0)
     requested_weight: Decimal = Field(ge=0, le=1)
     lot_size: int = Field(default=100, gt=0)
+    score: Decimal | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -36,6 +39,8 @@ class PortfolioConstraintsRequest(BaseModel):
     max_symbol_weight: Decimal = Field(default=Decimal("0.20"), gt=0, le=1)
     max_industry_weight: Decimal = Field(default=Decimal("0.40"), gt=0, le=1)
     security_type_budgets: dict[str, Decimal] = Field(default_factory=dict)
+    enforcement_mode: ConstraintEnforcementMode = ConstraintEnforcementMode.PROPORTIONAL_SCALE
+    extra_symbol_caps: dict[str, Decimal] = Field(default_factory=dict)
 
     @field_validator("security_type_budgets")
     @classmethod
@@ -45,6 +50,16 @@ class PortfolioConstraintsRequest(BaseModel):
     ) -> dict[str, Decimal]:
         if any(budget < 0 or budget > 1 for budget in value.values()):
             raise ValueError("security type budgets must be between 0 and 1")
+        return value
+
+    @field_validator("extra_symbol_caps")
+    @classmethod
+    def validate_extra_symbol_caps(
+        cls,
+        value: dict[str, Decimal],
+    ) -> dict[str, Decimal]:
+        if any(cap <= 0 or cap > 1 for cap in value.values()):
+            raise ValueError("extra symbol caps must be within (0, 1]")
         return value
 
 
@@ -63,6 +78,21 @@ class PortfolioPlanCreateRequest(BaseModel):
             raise ValueError("name must not be blank")
         return normalized
 
+    @model_validator(mode="after")
+    def validate_trim_mode_requires_scores(self) -> "PortfolioPlanCreateRequest":
+        if (
+            self.constraints.enforcement_mode
+            is not ConstraintEnforcementMode.SCORE_RANKED_TRIM
+        ):
+            return self
+        missing = sorted(asset.symbol for asset in self.assets if asset.score is None)
+        if missing:
+            raise ValueError(
+                "enforcement_mode score_ranked_trim requires a score on every asset; "
+                "missing: " + ", ".join(missing)
+            )
+        return self
+
 
 class PortfolioTargetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -78,6 +108,7 @@ class PortfolioTargetRead(BaseModel):
     order_quantity: int
     price: Decimal
     lot_size: int
+    score: Decimal | None = None
     reasons: list[str]
 
 

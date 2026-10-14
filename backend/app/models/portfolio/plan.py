@@ -69,4 +69,5 @@ class PortfolioTargetRecord(CreatedAtMixin, Base):
     target_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), nullable=True)
     reasons: Mapped[list[str]] = mapped_column(JSON, nullable=False)

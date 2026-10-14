@@ -79,6 +79,7 @@ class PortfolioPlanRepository:
                     target_quantity=target.target_quantity,
                     order_quantity=target.order_quantity,
                     price=target.price,
+                    score=target.score,
                     reasons=list(target.reasons),
                 )
                 for target in plan.targets

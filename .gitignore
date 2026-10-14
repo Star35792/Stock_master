@@ -44,3 +44,7 @@ backend/*.SH
 # OS
 .DS_Store
 Thumbs.db
+
+# WorkBuddy workspace/session memory
+.workbuddy/
+

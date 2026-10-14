@@ -8,6 +8,8 @@
 - 项目文档采用 `AGENT.MD` 作为 AI 协作规则唯一真源，`aiDoc/` 作为唯一项目文档目录，同时承载正式设计和轻量 reference。
 - 当前项目已经进入较大体量阶段，默认应通过 reference 精确读取相关文档，避免每次全量读取。
 - 日级数据→因子闭环由 `app/scheduler/daily_loop.py` 编排：`daily_sync` 构建 `market` 后，若 `factor_reads_curated=true` 且 `factor_adjust_type='qfq'`，则从 `market.daily_bar` 和 `raw.corporate_action` 重建 `curated/prices_qfq` 温层，再运行 `factor_pipeline` 滚动重算因子；`system.job_log` 记录每次运行状态，sync 或 curated 重建失败时都不继续执行因子计算。
+- **存储约定：不要长期堆放全量数据库副本。** `backend/data/stock_master.duckdb` 是唯一事实库，2026-10-13 已清理 6 个历史全量副本（累计 31.6 GiB，`backend/data` 从 40G 降至 8.3G）。需要灾备时按需临时导出或建立滚动保留策略，不要在仓库目录内保留多个完整 `.duckdb`。诊断与方案见 `aiDoc/relations/20261013-2207-storage-diagnosis-and-plan.md`。
+- `market.daily_bar` 的 `qfq` 行是 `none × adjustment_factor` 的确定性产物（1036 万行中 99.99% 可精确复现），属于可派生的存储冗余；但 `app/lake/curated.py` 与 `app/services/adjustment_build.py` 直接读这些行，移除前必须同步改造读取路径。
 
 ## 工作偏好
 

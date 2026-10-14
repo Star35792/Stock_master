@@ -2,7 +2,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.strategies import MinimumScorePolicy, WeightingMode
 
 
 class BacktestRunRead(BaseModel):
@@ -149,6 +151,11 @@ class FactorSelectionBacktestRequest(BaseModel):
     allowed_security_types: set[Literal["stock", "etf", "index"]] = Field(
         default_factory=lambda: {"stock"}
     )
+    coverage_ratio: Decimal | None = Field(default=None, gt=0, le=1)
+    weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+    minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED
+    minimum_score: Decimal | None = Field(default=None, ge=0, le=1)
+    invested_weight: Decimal = Field(default=Decimal("1"), gt=0, le=1)
     start_date: date
     end_date: date
     adjust_type: Literal["none", "qfq", "hfq"] = "qfq"
@@ -168,6 +175,19 @@ class FactorSelectionBacktestRequest(BaseModel):
     validation_mode: Literal["none", "out_of_sample", "rolling"] = "none"
     training_start_date: date | None = None
     training_end_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_weighting_mode_and_invested_weight(self) -> "FactorSelectionBacktestRequest":
+        if (
+            self.weighting_mode is WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+            and self.minimum_score_policy is MinimumScorePolicy.HOLD_CASH_WHEN_NO_CANDIDATE
+            and self.invested_weight != Decimal("1")
+        ):
+            raise ValueError(
+                "equal_weight_fully_invested with hold_cash_when_no_candidate "
+                "always invests 100%; choose another weighting mode to leave cash"
+            )
+        return self
 
 
 class FactorSelectionBacktestResult(BaseModel):

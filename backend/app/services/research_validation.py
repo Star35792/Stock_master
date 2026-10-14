@@ -37,6 +37,11 @@ _COMPARABLE_PARAMETER_KEYS = (
     "exchange_fee_rate",
     "slippage_bps",
     "lot_size",
+    "coverage_ratio",
+    "weighting_mode",
+    "minimum_score_policy",
+    "minimum_score",
+    "invested_weight",
 )
 
 

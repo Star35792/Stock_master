@@ -22,10 +22,12 @@
 | 重大决策、AI 提交前评审 | `aiDoc/plans/decision-review-protocol.md` | 按受影响边界读取下方对应文档 |
 | 阶段计划、路线、MVP | `aiDoc/plans/README.md` | `aiDoc/plans/roadmap.md` |
 | 架构、数据流、存储边界 | `aiDoc/relations/system-map.md` | `aiDoc/relations/trusted-daily-data-center.md` |
+| 存储体积、冗余副本与 qfq 物化优化 | [存储诊断与优化方案](relations/20261013-2207-storage-diagnosis-and-plan.md) | `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`、`aiDoc/data/daily-bar-contract.md` |
 | 后端分层、代码规则 | `aiDoc/modules/backend-layer-rules.md` | 相关 `backend/app/**` 文件 |
 | schema、表、迁移 | `aiDoc/modules/module-index.md` | `aiDoc/modules/schema-plan.md`、相关 Alembic |
 | 数据导入、质量、修复 | `aiDoc/relations/system-map.md` | `aiDoc/data/*.md` |
 | 因子、研究、回测 | `aiDoc/modules/module-index.md` | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/roadmap.md` |
+| 外部因子池选型、策略层代码级优化 | [策略优化评审](research/20261013-2021-strategy-optimization-review.md) | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/hard-gates-execution-plan.md` |
 | 产品定位、投资者评估、量化工具愿景 | `aiDoc/strategy/product-investment-assessment.md` | `aiDoc/strategy/quantitative-tool-vision.md` |
 | 价格与价值匹配、安全边际研究及假设历史回测 | [策略定义](strategy/20260922-1314-price-value-margin-strategy.md) | `aiDoc/research/decision-factor-framework.md` |
 | 自动选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |

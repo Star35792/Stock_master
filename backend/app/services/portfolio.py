@@ -81,6 +81,11 @@ class PortfolioConstructionService:
                             key: str(value)
                             for key, value in (constraints.security_type_budgets or {}).items()
                         },
+                        "enforcement_mode": str(constraints.enforcement_mode),
+                        "extra_symbol_caps": {
+                            key: str(value)
+                            for key, value in constraints.extra_symbol_caps.items()
+                        },
                     },
                     plan=plan,
                     code_version=code_version,
@@ -139,6 +144,7 @@ class PortfolioConstructionService:
                 order_quantity=target.order_quantity,
                 price=target.price,
                 lot_size=lot_sizes.get(target.symbol, 100),
+                score=target.score,
                 reasons=target.reasons,
             )
             for target in targets

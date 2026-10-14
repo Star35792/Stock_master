@@ -9,7 +9,13 @@ from app.repositories.factor import FactorValueRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.schemas.strategy import RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
-from app.strategies import FactorScoreSpec, MultiFactorStrategy, StrategyFactorFrame
+from app.strategies import (
+    FactorScoreSpec,
+    MinimumScorePolicy,
+    MultiFactorStrategy,
+    StrategyFactorFrame,
+    WeightingMode,
+)
 
 
 class StrategyResearchService:
@@ -90,6 +96,11 @@ class StrategyResearchService:
         holding_period: int = 1,
         benchmark: str | None = None,
         allowed_security_types: set[str],
+        coverage_ratio: Decimal | None = None,
+        weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED,
+        minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED,
+        minimum_score: Decimal | None = None,
+        invested_weight: Decimal = Decimal("1"),
         start_date: date,
         end_date: date,
         adjust_type: str,
@@ -166,6 +177,11 @@ class StrategyResearchService:
         signals = MultiFactorStrategy(
             top_n=top_n,
             allowed_security_types=allowed_security_types,
+            coverage_ratio=coverage_ratio,
+            weighting_mode=weighting_mode,
+            minimum_score_policy=minimum_score_policy,
+            minimum_score=minimum_score,
+            invested_weight=invested_weight,
         ).generate_history(
             frame=strategy_frame,
             security_types=normalized_security_types,
@@ -179,6 +195,11 @@ class StrategyResearchService:
             holding_period=holding_period,
             benchmark=benchmark,
             allowed_security_types=allowed_security_types,
+            coverage_ratio=coverage_ratio,
+            weighting_mode=weighting_mode,
+            minimum_score_policy=minimum_score_policy,
+            minimum_score=minimum_score,
+            invested_weight=invested_weight,
             start_date=start_date,
             end_date=end_date,
             adjust_type=adjust_type,
@@ -247,6 +268,11 @@ class StrategyResearchService:
         holding_period: int,
         benchmark: str | None,
         allowed_security_types: set[str],
+        coverage_ratio: Decimal | None,
+        weighting_mode: WeightingMode,
+        minimum_score_policy: MinimumScorePolicy,
+        minimum_score: Decimal | None,
+        invested_weight: Decimal,
         start_date: date,
         end_date: date,
         adjust_type: str,
@@ -296,6 +322,11 @@ class StrategyResearchService:
             "holding_period": holding_period,
             "benchmark": benchmark,
             "allowed_security_types": sorted(allowed_security_types),
+            "coverage_ratio": StrategyResearchService._optional_decimal_str(coverage_ratio),
+            "weighting_mode": str(weighting_mode),
+            "minimum_score_policy": str(minimum_score_policy),
+            "minimum_score": StrategyResearchService._optional_decimal_str(minimum_score),
+            "invested_weight": str(invested_weight),
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "test_start_date": start_date.isoformat(),
