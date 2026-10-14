@@ -8,6 +8,7 @@ from app.portfolio import (
     ConstraintEnforcementMode,
     PortfolioAsset,
     PortfolioConstraints,
+    PortfolioRiskBudget,
 )
 from app.services.portfolio import (
     PortfolioConstructionService,
@@ -213,6 +214,41 @@ def test_score_roundtrips_through_persisted_target() -> None:
     assert result.targets[0].score == Decimal("0.85")
     saved_target = repository.targets[result.plan_id][0]
     assert saved_target.score == Decimal("0.85")
+
+
+def test_risk_budget_roundtrips_through_persisted_parameters() -> None:
+    repository = FakePortfolioRepository()
+    service = PortfolioConstructionService(repository=repository)
+
+    result = service.build(
+        FakeSession(),
+        name="risk-budget draft",
+        as_of_date=date(2026, 7, 21),
+        assets=[
+            PortfolioAsset(
+                "600519.SH", "stock", "食品饮料", Decimal("200"), 0, Decimal("0.20")
+            ),
+        ],
+        cash=Decimal("100000"),
+        constraints=PortfolioConstraints(
+            risk_budget=PortfolioRiskBudget(
+                max_industry_weight=Decimal("0.25"),
+                max_style_exposure=Decimal("0.10"),
+                benchmark="000300.SH",
+            ),
+        ),
+        code_version="test",
+        idempotency_key="risk-budget-1",
+        input_snapshot={"assets": []},
+    )
+
+    parameters = repository.records[result.plan_id].parameters
+    assert parameters["risk_budget"]["max_industry_weight"] == "0.25"
+    assert parameters["risk_budget"]["max_style_exposure"] == "0.10"
+    assert parameters["risk_budget"]["benchmark"] == "000300.SH"
+    assert result.risk_budget is not None
+    assert result.risk_budget.max_industry_weight == Decimal("0.25")
+    assert result.risk_budget.benchmark == "000300.SH"
 
 
 def test_enforcement_mode_roundtrips_through_persisted_parameters() -> None:

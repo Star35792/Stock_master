@@ -38,3 +38,4 @@
 - 数据导入和质量规则变化：更新 `aiDoc/data/`。
 - 调度、回填、数据湖边界变化：更新本文件，并按需更新深入架构文档。
 - 模拟盘确认/执行接入执行日可交易性、`execution_day_bar_hash` 绑定或 `PaperExecutionService` 政策变化：更新 `aiDoc/plans/hard-gates-execution-plan.md` 与 `aiDoc/plans/roadmap.md` 的 V5.3 小节。
+- 组合风险预算（`PortfolioRiskBudget`）、约束与事前风控同源或风险预算违反原因记录变化：更新 `aiDoc/plans/hard-gates-execution-plan.md` 第 4 节与 `aiDoc/plans/roadmap.md` 的 V5.1 小节。

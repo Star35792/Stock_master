@@ -9,13 +9,45 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database.transaction import idempotent_write
-from app.portfolio import PortfolioAsset, PortfolioBuilder, PortfolioConstraints
+from app.portfolio import (
+    PortfolioAsset,
+    PortfolioBuilder,
+    PortfolioConstraints,
+)
 from app.repositories.portfolio import PortfolioPlanRepository
 from app.schemas.portfolio import (
     PortfolioConstraintsRequest,
     PortfolioPlanRead,
+    PortfolioRiskBudgetRequest,
     PortfolioTargetRead,
 )
+
+
+def _risk_budget_from_parameters(
+    parameters: dict[str, Any],
+) -> PortfolioRiskBudgetRequest | None:
+    raw = parameters.get("risk_budget")
+    if raw is None:
+        return None
+    return PortfolioRiskBudgetRequest(
+        max_industry_weight=Decimal(raw["max_industry_weight"]),
+        max_style_exposure=(
+            Decimal(raw["max_style_exposure"])
+            if raw.get("max_style_exposure") is not None
+            else None
+        ),
+        max_tracking_error=(
+            Decimal(raw["max_tracking_error"])
+            if raw.get("max_tracking_error") is not None
+            else None
+        ),
+        max_portfolio_volatility=(
+            Decimal(raw["max_portfolio_volatility"])
+            if raw.get("max_portfolio_volatility") is not None
+            else None
+        ),
+        benchmark=raw.get("benchmark"),
+    )
 
 
 def hash_portfolio_snapshot(input_snapshot: dict[str, Any]) -> str:
@@ -86,6 +118,31 @@ class PortfolioConstructionService:
                             key: str(value)
                             for key, value in constraints.extra_symbol_caps.items()
                         },
+                        "risk_budget": (
+                            {
+                                "max_industry_weight": str(
+                                    constraints.risk_budget.max_industry_weight
+                                ),
+                                "max_style_exposure": (
+                                    str(constraints.risk_budget.max_style_exposure)
+                                    if constraints.risk_budget.max_style_exposure is not None
+                                    else None
+                                ),
+                                "max_tracking_error": (
+                                    str(constraints.risk_budget.max_tracking_error)
+                                    if constraints.risk_budget.max_tracking_error is not None
+                                    else None
+                                ),
+                                "max_portfolio_volatility": (
+                                    str(constraints.risk_budget.max_portfolio_volatility)
+                                    if constraints.risk_budget.max_portfolio_volatility is not None
+                                    else None
+                                ),
+                                "benchmark": constraints.risk_budget.benchmark,
+                            }
+                            if constraints.risk_budget is not None
+                            else None
+                        ),
                     },
                     plan=plan,
                     code_version=code_version,
@@ -161,4 +218,5 @@ class PortfolioConstructionService:
             code_version=record.code_version,
             created_at=record.created_at,
             targets=target_reads,
+            risk_budget=_risk_budget_from_parameters(record.parameters),
         )

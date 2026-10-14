@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -29,6 +30,27 @@ RISK_LIMITS = RiskLimits(
     max_drawdown=Decimal("0.10"),
     max_amount_participation=Decimal("0.10"),
 )
+
+
+def _risk_limits_from_plan(plan: Any) -> RiskLimits:
+    """Build RiskLimits from the portfolio plan's persisted constraints.
+
+    This keeps pre-trade risk checks aligned with the constraints that were
+    actually used during portfolio construction. Style, tracking error and
+    volatility budgets are not yet enforced by the engine, but their presence
+    is recorded in the policy hash.
+    """
+    parameters: dict[str, Any] = getattr(plan, "parameters", None) or {}
+    return RiskLimits(
+        max_symbol_weight=Decimal(
+            parameters.get("max_symbol_weight", RISK_LIMITS.max_symbol_weight)
+        ),
+        max_industry_weight=Decimal(
+            parameters.get("max_industry_weight", RISK_LIMITS.max_industry_weight)
+        ),
+        max_drawdown=RISK_LIMITS.max_drawdown,
+        max_amount_participation=RISK_LIMITS.max_amount_participation,
+    )
 MINIMUM_EQUITY_OBSERVATIONS = 15
 RISK_POLICY = {
     "name": "paper_pretrade_risk",
@@ -212,6 +234,7 @@ class BoundRiskEvaluationService:
                 projected_industry_weights.get(target.industry, Decimal()) + target.final_weight
             )
 
+        risk_limits = _risk_limits_from_plan(plan)
         decisions: list[OrderRiskDecision] = []
         order_values = []
         for target in order_targets:
@@ -232,7 +255,7 @@ class BoundRiskEvaluationService:
                     average_daily_amount=adv.average_daily_amount,
                     current_drawdown=equity.drawdown,
                 ),
-                limits=RISK_LIMITS,
+                limits=risk_limits,
             )
             history_rule = RiskRuleResult(
                 rule_name="equity_history_continuous",
@@ -320,10 +343,10 @@ class BoundRiskEvaluationService:
             "plan_id": plan.id,
             "current_drawdown": equity.drawdown,
             "limits": {
-                "max_symbol_weight": str(RISK_LIMITS.max_symbol_weight),
-                "max_industry_weight": str(RISK_LIMITS.max_industry_weight),
-                "max_drawdown": str(RISK_LIMITS.max_drawdown),
-                "max_amount_participation": str(RISK_LIMITS.max_amount_participation),
+                "max_symbol_weight": str(risk_limits.max_symbol_weight),
+                "max_industry_weight": str(risk_limits.max_industry_weight),
+                "max_drawdown": str(risk_limits.max_drawdown),
+                "max_amount_participation": str(risk_limits.max_amount_participation),
             },
             "passed": passed,
             "code_version": settings.app_code_version,

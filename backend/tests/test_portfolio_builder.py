@@ -7,6 +7,7 @@ from app.portfolio import (
     PortfolioAsset,
     PortfolioBuilder,
     PortfolioConstraints,
+    PortfolioRiskBudget,
 )
 
 
@@ -259,6 +260,29 @@ def test_score_ranked_trim_rejects_non_finite_scores() -> None:
                 enforcement_mode=ConstraintEnforcementMode.SCORE_RANKED_TRIM,
             ),
         )
+
+
+def test_risk_budget_tightens_industry_limit() -> None:
+    """A risk budget with a lower industry cap than PortfolioConstraints wins."""
+
+    plan = PortfolioBuilder().build(
+        assets=[
+            PortfolioAsset("A", "stock", "Tech", Decimal("10"), 0, Decimal("0.30")),
+            PortfolioAsset("B", "stock", "Tech", Decimal("10"), 0, Decimal("0.30")),
+        ],
+        cash=Decimal("100000"),
+        constraints=PortfolioConstraints(
+            cash_reserve_rate=Decimal("0"),
+            max_symbol_weight=Decimal("1"),
+            max_industry_weight=Decimal("0.50"),
+            risk_budget=PortfolioRiskBudget(max_industry_weight=Decimal("0.30")),
+        ),
+    )
+
+    targets = {target.symbol: target for target in plan.targets}
+    assert targets["A"].constrained_weight == Decimal("0.15")
+    assert targets["B"].constrained_weight == Decimal("0.15")
+    assert "industry_budget" in targets["A"].reasons
 
 
 def test_score_is_preserved_on_portfolio_target() -> None:

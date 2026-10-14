@@ -6,6 +6,7 @@ from app.portfolio.builder import (
     PortfolioTarget,
 )
 from app.portfolio.enums import ConstraintEnforcementMode
+from app.portfolio.risk_budget import PortfolioRiskBudget
 
 __all__ = [
     "ConstraintEnforcementMode",
@@ -13,5 +14,6 @@ __all__ = [
     "PortfolioBuilder",
     "PortfolioConstraints",
     "PortfolioPlan",
+    "PortfolioRiskBudget",
     "PortfolioTarget",
 ]

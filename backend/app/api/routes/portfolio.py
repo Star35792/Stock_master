@@ -4,7 +4,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession
 from app.config.settings import settings
-from app.portfolio import PortfolioAsset, PortfolioConstraints
+from app.portfolio import PortfolioAsset, PortfolioConstraints, PortfolioRiskBudget
 from app.schemas.portfolio import (
     PortfolioPlanCreateRequest,
     PortfolioPlanRead,
@@ -58,7 +58,14 @@ def create_portfolio_plan(
             as_of_date=payload.as_of_date,
             assets=[PortfolioAsset(**asset.model_dump()) for asset in payload.assets],
             cash=payload.cash,
-            constraints=PortfolioConstraints(**payload.constraints.model_dump()),
+            constraints=PortfolioConstraints(
+                **payload.constraints.model_dump(exclude={"risk_budget"}),
+                risk_budget=(
+                    PortfolioRiskBudget(**payload.constraints.risk_budget.model_dump())
+                    if payload.constraints.risk_budget is not None
+                    else None
+                ),
+            ),
             code_version=settings.app_code_version,
             idempotency_key=normalized_key,
             input_snapshot=input_snapshot,

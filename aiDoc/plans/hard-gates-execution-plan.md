@@ -162,25 +162,26 @@ A 股特殊交易约束：
 ### 4.2 关键设计
 
 1. **风险预算对象**
-   - `PortfolioRiskBudget`：最大行业权重、最大风格暴露、最大跟踪误差、最大组合波动率。
+   - `PortfolioRiskBudget`：最大行业权重、最大风格暴露、最大跟踪误差、最大组合波动率、benchmark。
+   - 已落地为 `backend/app/portfolio/risk_budget.py` 中的不可变数据类。
 
-2. **风格暴露计算**
-   - 接入 Barra 风格因子或自研风格因子（市值、价值、动量、质量、波动、流动性）。
-   - 计算组合相对基准的主动暴露。
+2. **组合构建升级**
+   - `PortfolioConstraints` 增加 `risk_budget: PortfolioRiskBudget | None`。
+   - `PortfolioBuilder.build` 把 `max_industry_weight` 与 `risk_budget.max_industry_weight` 取较小值作为实际行业上限；权重被削减时 `PortfolioTarget.reasons` 记录 `industry_budget`。
+   - 风格暴露、跟踪误差、组合波动率字段已暴露给 schema 和持久化，但**计算与强制尚未实现**（缺少风格因子和基准收益数据源），当前作为显式研究假设占位。
 
-3. **组合构建升级**
-   - `PortfolioBuilder.build` 接收 `risk_budget`。
-   - 在权重约束后加入风险预算约束。
+3. **事前风控同源**
+   - `BoundRiskEvaluationService.evaluate` 从 `plan.parameters` 读取保存的约束构造 `RiskLimits`，使 `PreTradeRiskEngine` 使用的 `max_symbol_weight` / `max_industry_weight` 与组合构建时实际生效的值一致。
 
 4. **指数增强支持**
-   - 允许指定 benchmark。
-   - 约束跟踪误差 ≤ 目标值。
+   - `PortfolioRiskBudget.benchmark` 已暴露，可在后续接入基准收益后计算主动暴露与跟踪误差。
 
 ### 4.3 阶段门
 
-- [ ] 组合构建支持行业、风格、跟踪误差约束
-- [ ] 风险预算违反时有明确原因记录
-- [ ] 事前风控使用同一套风险预算
+- [x] 组合构建支持行业风险预算约束（`PortfolioBuilder` 已读取 `risk_budget.max_industry_weight`）
+- [x] 风险预算违反时有明确原因记录（`PortfolioTarget.reasons` 包含 `industry_budget`）
+- [x] 事前风控使用同一套风险预算（`_risk_limits_from_plan` 从 `plan.parameters` 构造 `RiskLimits`）
+- [ ] 风格暴露、跟踪误差、组合波动率约束的计算与强制（待风格因子和基准收益数据就绪）
 
 ## 5. 硬门槛四：财务/基本面因子时点正确性
 

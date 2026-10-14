@@ -4,6 +4,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from app.portfolio.enums import ConstraintEnforcementMode
+from app.portfolio.risk_budget import PortfolioRiskBudget
 
 
 class _SymbolCapReason(StrEnum):
@@ -32,6 +33,7 @@ class PortfolioConstraints:
         ConstraintEnforcementMode.PROPORTIONAL_SCALE
     )
     extra_symbol_caps: dict[str, Decimal] = field(default_factory=dict)
+    risk_budget: PortfolioRiskBudget | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +99,10 @@ class PortfolioBuilder:
             reason="security_type_budget",
             mode=constraints.enforcement_mode,
         )
+        risk_budget_industry_limit = self._effective_industry_limit(constraints)
         industry_limits = {
-            asset.industry: constraints.max_industry_weight for asset in assets
+            asset.industry: min(constraints.max_industry_weight, risk_budget_industry_limit)
+            for asset in assets
         }
         self._enforce_group(
             assets=assets,
@@ -161,6 +165,14 @@ class PortfolioBuilder:
             cash_after=cash_after,
             targets=tuple(targets),
         )
+
+    @staticmethod
+    def _effective_industry_limit(constraints: PortfolioConstraints) -> Decimal:
+        """Return the effective industry weight limit, combining legacy and budget limits."""
+        limit = constraints.max_industry_weight
+        if constraints.risk_budget is not None:
+            limit = min(limit, constraints.risk_budget.max_industry_weight)
+        return limit
 
     def _enforce_group(
         self,

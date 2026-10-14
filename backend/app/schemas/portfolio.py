@@ -34,6 +34,14 @@ class PortfolioAssetRequest(BaseModel):
         return normalized
 
 
+class PortfolioRiskBudgetRequest(BaseModel):
+    max_industry_weight: Decimal = Field(default=Decimal("0.40"), gt=0, le=1)
+    max_style_exposure: Decimal | None = Field(default=None, ge=0, le=1)
+    max_tracking_error: Decimal | None = Field(default=None, ge=0, le=1)
+    max_portfolio_volatility: Decimal | None = Field(default=None, ge=0, le=1)
+    benchmark: str | None = Field(default=None, min_length=1, max_length=100)
+
+
 class PortfolioConstraintsRequest(BaseModel):
     cash_reserve_rate: Decimal = Field(default=Decimal("0.05"), ge=0, lt=1)
     max_symbol_weight: Decimal = Field(default=Decimal("0.20"), gt=0, le=1)
@@ -41,6 +49,7 @@ class PortfolioConstraintsRequest(BaseModel):
     security_type_budgets: dict[str, Decimal] = Field(default_factory=dict)
     enforcement_mode: ConstraintEnforcementMode = ConstraintEnforcementMode.PROPORTIONAL_SCALE
     extra_symbol_caps: dict[str, Decimal] = Field(default_factory=dict)
+    risk_budget: PortfolioRiskBudgetRequest | None = Field(default=None)
 
     @field_validator("security_type_budgets")
     @classmethod
@@ -127,6 +136,7 @@ class PortfolioPlanRead(BaseModel):
     code_version: str
     created_at: datetime
     targets: list[PortfolioTargetRead]
+    risk_budget: PortfolioRiskBudgetRequest | None = None
 
 
 class PortfolioReadinessCheck(BaseModel):
