@@ -86,6 +86,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/factors/profiles" in paths
     assert "/api/v1/factors/batch-profiles" in paths
     assert "/api/v1/factors/batch-profiles/summary" in paths
+    assert "/api/v1/factors/pool-classifications" in paths
     assert "/api/v1/backtests/runs" in paths
     assert "/api/v1/backtests/runs/{run_id}" in paths
     assert "/api/v1/backtests/runs/{run_id}/trades" in paths
@@ -1423,6 +1424,7 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
                 FactorProfileSummary(
                     factor_name="ret_1d",
                     factor_version="v1-qfq",
+                    category="price_volume_risk",
                     trade_date_count=10,
                     first_trade_date=date(2026, 7, 1),
                     last_trade_date=date(2026, 7, 17),
@@ -1449,3 +1451,61 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
     assert body["items"][0]["mean_ic_1d"] == "0.03"
     assert captured["factor_name"] == "ret_1d"
     assert captured["limit"] == 5
+
+
+def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
+    from app.services.factor_batch_profiler import FactorProfileSummary
+
+    captured_query: dict = {}
+
+    def fake_summarize(db, **kwargs):
+        captured_query.update(kwargs)
+        return (
+            [
+                FactorProfileSummary(
+                    factor_name="ret_1d",
+                    factor_version="v1-qfq",
+                    category="price_volume_risk",
+                    trade_date_count=250,
+                    first_trade_date=date(2024, 1, 2),
+                    last_trade_date=date(2025, 12, 31),
+                    mean_coverage_rate=Decimal("0.90"),
+                    mean_rank_ic_1d=Decimal("0.02"),
+                    mean_rank_ic_5d=Decimal("0.02"),
+                    mean_rank_ic_20d=Decimal("0.02"),
+                )
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(
+        factors_module.batch_profiler_service, "summarize", fake_summarize
+    )
+
+    response = client.post(
+        "/api/v1/factors/pool-classifications",
+        json={
+            "start_date": "2024-01-02",
+            "end_date": "2025-12-31",
+            "min_trade_dates": 100,
+            "min_coverage_rate": "0.80",
+            "min_rank_ic_1d": "0.015",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["pool"] == "core"
+    assert body[0]["category"] == "price_volume_risk"
+    assert captured_query["start_date"] == date(2024, 1, 2)
+    assert captured_query["end_date"] == date(2025, 12, 31)
+
+
+def test_classify_factor_pool_rejects_reversed_range() -> None:
+    response = client.post(
+        "/api/v1/factors/pool-classifications",
+        json={"start_date": "2025-12-31", "end_date": "2024-01-02"},
+    )
+
+    assert response.status_code == 422

@@ -132,6 +132,7 @@ class FactorBatchProfileRunResponse(BaseModel):
 class FactorProfileSummaryRead(BaseModel):
     factor_name: str
     factor_version: str
+    category: str
     trade_date_count: int
     first_trade_date: date
     last_trade_date: date
@@ -143,3 +144,22 @@ class FactorProfileSummaryRead(BaseModel):
     mean_ic_20d: Decimal | None = None
     mean_rank_ic_20d: Decimal | None = None
     has_ic_evidence: bool = False
+
+
+class FactorPoolClassificationRead(BaseModel):
+    factor_name: str
+    factor_version: str
+    category: str
+    pool: Literal["core", "observation", "frozen"]
+    reasons: list[str]
+    summary: FactorProfileSummaryRead
+
+
+class FactorPoolClassificationRequest(BaseModel):
+    start_date: date | None = None
+    end_date: date | None = None
+    min_trade_dates: int = 200
+    min_coverage_rate: Decimal = Decimal("0.70")
+    min_rank_ic_1d: Decimal = Decimal("0.01")
+    min_rank_ic_5d: Decimal = Decimal("0.01")
+    min_rank_ic_20d: Decimal = Decimal("0.01")

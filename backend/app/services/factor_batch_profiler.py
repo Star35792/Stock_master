@@ -75,6 +75,7 @@ class FactorProfileSummary:
 
     factor_name: str
     factor_version: str
+    category: str
     trade_date_count: int
     first_trade_date: date
     last_trade_date: date
@@ -119,6 +120,7 @@ class FactorBatchProfilerService:
         )
         self.profile_repository = profile_repository or FactorProfileRepository()
         self.job_log_repository = job_log_repository or JobLogRepository()
+        self._summary_db: Session | None = None
 
     def run(
         self,
@@ -291,6 +293,7 @@ class FactorBatchProfilerService:
         offset: int = 0,
     ) -> tuple[list[FactorProfileSummary], int]:
         """聚合已持久化的逐日截面诊断为按因子汇总的 IC 证据。"""
+        self._summary_db = db
         rows, total = self.profile_repository.summarize(
             db,
             factor_name=factor_name,
@@ -302,11 +305,23 @@ class FactorBatchProfilerService:
         )
         return [self._to_summary(row) for row in rows], total
 
-    @staticmethod
-    def _to_summary(row: dict[str, object]) -> FactorProfileSummary:
+    def _to_summary(self, row: dict[str, object]) -> FactorProfileSummary:
+        category = "unknown"
+        if self._summary_db is not None:
+            try:
+                definition = self.definition_repository.get_by_name_version(
+                    self._summary_db,
+                    name=str(row["factor_name"]),
+                    version=str(row["factor_version"]),
+                )
+            except Exception:  # noqa: BLE001 - best-effort category lookup
+                definition = None
+            if definition is not None:
+                category = definition.category
         return FactorProfileSummary(
             factor_name=str(row["factor_name"]),
             factor_version=str(row["factor_version"]),
+            category=category,
             trade_date_count=int(row["trade_date_count"] or 0),
             first_trade_date=row["first_trade_date"],  # type: ignore[arg-type]
             last_trade_date=row["last_trade_date"],  # type: ignore[arg-type]

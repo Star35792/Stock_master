@@ -34,6 +34,12 @@ from app.services.factor_batch_profiler import (
     FactorProfileSummary,
 )
 from app.services.factor_cross_section import CrossSectionRunResult, FactorCrossSectionService
+from app.services.factor_pool_classifier import (
+    FactorPool,
+    FactorPoolClassification,
+    FactorPoolClassifierService,
+    FactorPoolPolicy,
+)
 from app.services.financial_factors import FinancialFactorRunResult, FinancialFactorService
 from app.services.gap_backfill import GapBackfillResult, MissingDailyBarBackfillService
 from app.services.hithink_alternative_collection import (
@@ -119,6 +125,10 @@ __all__ = [
     "FactorBatchProfilerService",
     "FactorProfileResult",
     "FactorProfileSummary",
+    "FactorPool",
+    "FactorPoolClassification",
+    "FactorPoolClassifierService",
+    "FactorPoolPolicy",
     "FinancialFactorRunResult",
     "FinancialFactorService",
     "GapBackfillResult",

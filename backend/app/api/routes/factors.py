@@ -9,6 +9,8 @@ from app.schemas import (
     FactorBatchProfileRunRequest,
     FactorBatchProfileRunResponse,
     FactorDefinitionRead,
+    FactorPoolClassificationRead,
+    FactorPoolClassificationRequest,
     FactorProfileItem,
     FactorProfileRead,
     FactorProfileSummaryRead,
@@ -16,11 +18,28 @@ from app.schemas import (
     FactorValueRead,
     Page,
 )
-from app.services import FactorBatchProfilerService, FactorQueryService
+from app.services import (
+    FactorBatchProfilerService,
+    FactorPoolClassification,
+    FactorPoolClassifierService,
+    FactorPoolPolicy,
+    FactorProfileSummary,
+    FactorQueryService,
+)
 
 router = APIRouter(prefix="/factors", tags=["factors"])
 service = FactorQueryService()
 batch_profiler_service = FactorBatchProfilerService()
+pool_classifier_service = FactorPoolClassifierService()
+
+
+def _summary_to_read(
+    summary: FactorProfileSummary,
+) -> FactorProfileSummaryRead:
+    return FactorProfileSummaryRead(
+        **vars(summary),
+        has_ic_evidence=summary.has_ic_evidence,
+    )
 
 
 @router.get("/definitions", response_model=Page[FactorDefinitionRead])
@@ -128,16 +147,59 @@ def list_factor_profile_summaries(
         offset=offset,
     )
     return Page(
-        items=[
-            FactorProfileSummaryRead(
-                **vars(summary),
-                has_ic_evidence=summary.has_ic_evidence,
-            )
-            for summary in summaries
-        ],
+        items=[_summary_to_read(summary) for summary in summaries],
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post("/pool-classifications", response_model=list[FactorPoolClassificationRead])
+def classify_factor_pool(
+    payload: FactorPoolClassificationRequest,
+    db: DatabaseSession,
+) -> list[FactorPoolClassificationRead]:
+    """Classify all active factors into core/observation/frozen pools.
+
+    The classification reads persisted cross-section summaries and applies
+    explicit IC/coverage thresholds. Frozen factors should not be used in new
+    strategies until their evidence improves.
+    """
+    if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be earlier than or equal to end_date",
+        )
+
+    policy = FactorPoolPolicy(
+        min_trade_dates=payload.min_trade_dates,
+        min_coverage_rate=payload.min_coverage_rate,
+        min_rank_ic_1d=payload.min_rank_ic_1d,
+        min_rank_ic_5d=payload.min_rank_ic_5d,
+        min_rank_ic_20d=payload.min_rank_ic_20d,
+    )
+    classifier = FactorPoolClassifierService(policy=policy)
+    summaries, _ = batch_profiler_service.summarize(
+        db,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        limit=10000,
+        offset=0,
+    )
+    classifications = classifier.classify(summaries)
+    return [_classification_to_read(item) for item in classifications]
+
+
+def _classification_to_read(
+    item: FactorPoolClassification,
+) -> FactorPoolClassificationRead:
+    return FactorPoolClassificationRead(
+        factor_name=item.factor_name,
+        factor_version=item.factor_version,
+        category=item.category,
+        pool=item.pool,
+        reasons=item.reasons,
+        summary=_summary_to_read(item.summary),
     )
 
 
