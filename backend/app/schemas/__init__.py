@@ -1,7 +1,11 @@
 from app.schemas.common import Page
 from app.schemas.factor import (
+    FactorBatchProfileRunRequest,
+    FactorBatchProfileRunResponse,
     FactorDefinitionRead,
+    FactorProfileItem,
     FactorProfileRead,
+    FactorProfileSummaryRead,
     FactorRunRead,
     FactorValueRead,
 )
@@ -86,7 +90,11 @@ __all__ = [
     "DataQualityIssueRead",
     "DataQualityIssueStatusUpdate",
     "FactorDefinitionRead",
+    "FactorBatchProfileRunRequest",
+    "FactorBatchProfileRunResponse",
+    "FactorProfileItem",
     "FactorProfileRead",
+    "FactorProfileSummaryRead",
     "FactorRunRead",
     "FactorScoreSpecRequest",
     "FactorSelectionBacktestRequest",

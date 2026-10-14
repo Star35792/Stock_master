@@ -211,10 +211,11 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 因子覆盖率、缺失率、均值、标准差、分位数、极值数量、IC / Rank IC、1/5/20 日 forward diagnostics 和 top quantile turnover 持久化报告。
 - 横截面派生因子运行批次、定义注册、幂等写入、查询 API 和命令行入口。
 - 已扩展到财务、行业、资金流、拥挤度、情绪、宏观、政策、估值和复合因子等多个研究信号族的复用层。
+- 批量诊断：`FactorBatchProfilerService` 对 `factor.factor_definition` 中全部活跃因子逐个运行截面诊断，单因子失败按因子隔离且不影响同批其他因子，整批运行写入 `system.job_log`（`status=success/partial/failed`）；派生 `__` 变换因子不重复作为源。`POST /api/v1/factors/batch-profiles` 触发批量运行，`GET /api/v1/factors/batch-profiles/summary` 按因子聚合已持久化 IC 证据（跨日期简单平均，缺失 horizon 返回空而非 0），命令行入口 `scripts/factors/run_batch_profiles.py`。
 
 阶段门：
 
-- 任一因子进入策略前必须有覆盖率和稳定性统计。已具备报告底座。
+- 任一因子进入策略前必须有覆盖率和稳定性统计。已具备报告底座，并可通过批量诊断一次性为全部活跃因子生成 IC 证据。
 - 规模中性化在市值或可信规模因子接入后启用真实生产计算。
 
 ## V4 研究、回测和绩效归因

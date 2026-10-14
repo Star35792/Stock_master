@@ -27,6 +27,12 @@ from app.services.eastmoney_collection import (
     EastmoneyFlowCollectionService,
 )
 from app.services.factor import FactorQueryService
+from app.services.factor_batch_profiler import (
+    FactorBatchProfilerRunResult,
+    FactorBatchProfilerService,
+    FactorProfileResult,
+    FactorProfileSummary,
+)
 from app.services.factor_cross_section import CrossSectionRunResult, FactorCrossSectionService
 from app.services.financial_factors import FinancialFactorRunResult, FinancialFactorService
 from app.services.gap_backfill import GapBackfillResult, MissingDailyBarBackfillService
@@ -109,6 +115,10 @@ __all__ = [
     "CsvDailyBarCollectionService",
     "DataQualityQueryService",
     "FactorQueryService",
+    "FactorBatchProfilerRunResult",
+    "FactorBatchProfilerService",
+    "FactorProfileResult",
+    "FactorProfileSummary",
     "FinancialFactorRunResult",
     "FinancialFactorService",
     "GapBackfillResult",

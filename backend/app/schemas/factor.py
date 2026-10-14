@@ -1,8 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FactorDefinitionRead(BaseModel):
@@ -93,3 +93,53 @@ class FactorProfileRead(BaseModel):
     code_version: str
     created_at: datetime
     updated_at: datetime
+
+
+class FactorBatchProfileRunRequest(BaseModel):
+    start_date: date
+    end_date: date
+    adjust_type: Literal["none", "qfq", "hfq"] = "qfq"
+    categories: list[str] | None = None
+    excluded_categories: list[str] | None = None
+    size_factor_name: str | None = "market_cap"
+    size_factor_version: str | None = "v1-qfq"
+    code_version: str = "local"
+    release_id: str | None = None
+
+
+class FactorProfileItem(BaseModel):
+    factor_name: str
+    factor_version: str
+    category: str
+    success: bool
+    profile_rows: int = 0
+    transformed_rows: int = 0
+    run_ids: dict[str, int] = Field(default_factory=dict)
+    error_message: str | None = None
+
+
+class FactorBatchProfileRunResponse(BaseModel):
+    start_date: date
+    end_date: date
+    adjust_type: str
+    success_count: int
+    failed_count: int
+    total_profile_rows: int
+    total_transformed_rows: int
+    results: list[FactorProfileItem]
+
+
+class FactorProfileSummaryRead(BaseModel):
+    factor_name: str
+    factor_version: str
+    trade_date_count: int
+    first_trade_date: date
+    last_trade_date: date
+    mean_coverage_rate: Decimal | None = None
+    mean_ic_1d: Decimal | None = None
+    mean_rank_ic_1d: Decimal | None = None
+    mean_ic_5d: Decimal | None = None
+    mean_rank_ic_5d: Decimal | None = None
+    mean_ic_20d: Decimal | None = None
+    mean_rank_ic_20d: Decimal | None = None
+    has_ic_evidence: bool = False

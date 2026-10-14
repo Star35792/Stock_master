@@ -257,6 +257,41 @@ complete_scores = {
 
 本次只改资金表达和约束执行，以下仍在后续切片：
 
-- 因子有效性证据（IC/Rank IC/分层/换手）仍缺失，`factor_profile` 数据不足以支撑权重调整。
+- 因子有效性证据（IC/Rank IC/分层/换手）仍缺失，`factor_profile` 数据不足以支撑权重调整。→ 见第 8 节批量因子截面诊断（2026-10-14）。
 - 行业与风格暴露、跟踪误差、组合波动率约束仍未实现（硬门槛三）。
 - `SCORE_RANKED_TRIM` 的隐藏换手与往返交易成本需在接入回测后进一步评估；当前未做最小变更阈值或换手约束。
+
+---
+
+## 8. 已实施：批量因子截面诊断（2026-10-14）
+
+落实第 5 节 P0「系统化因子检验：批量算 IC/Rank IC/分层/换手，落 `factor_profile`」的信息侧。范围限定在因子诊断的**运行与聚合入口**，不改变因子口径、截面变换数学、数据契约或策略权重。
+
+### 8.1 服务层
+
+`backend/app/services/factor_batch_profiler.py`、`backend/app/repositories/factor/factor_profile.py`
+
+- 新增 `FactorBatchProfilerService`：从 `factor.factor_definition` 取全部活跃定义，对每个（`name`、`version`、`category`）逐个调用 `FactorCrossSectionService.run`，生成逐日截面的统计分布、IC / Rank IC（1/5/20 日）、分层收益、换手和 winsor/zscore/rank/industry_neutral 派生因子。
+- 派生 `__` 变换因子（横截面输出而非源）在候选筛选阶段跳过，避免对变换结果二次变换。
+- 失败按因子隔离：单个因子抛错只回滚该因子事务并记录 `error_message`，同批其他因子继续；整批运行写入 `system.job_log`（`status=success/partial/failed`、`rows_failed`、`metadata.failed_factors`）。
+- 支持 `categories` 白名单、`excluded_categories` 黑名单，以及 size 因子对（`size_factor_name`/`size_factor_version`）的成对校验；`adjust_type`、日期区间在运行前校验。
+- `FactorProfileRepository.summarize` 新增按（`factor_name`、`factor_version`）聚合的方法，只用跨 DuckDB/PostgreSQL 均可移植的 `count/min/max/avg`，不依赖方言特定标准差；`FactorBatchProfilerService.summarize` 映射为 `FactorProfileSummary`，缺失 horizon 返回 `None` 而非 0，`has_ic_evidence` 显式标注是否已有 IC 证据。
+
+### 8.2 API 与命令行
+
+`backend/app/api/routes/factors.py`、`backend/app/schemas/factor.py`、`backend/scripts/factors/run_batch_profiles.py`
+
+- `POST /api/v1/factors/batch-profiles`：触发批量诊断，返回成功/失败计数、profile/派生行数和逐因子结果；日期区间反向返回 422。
+- `GET /api/v1/factors/batch-profiles/summary`：按因子聚合已持久化 IC 证据，支持 `factor_name`、`factor_version`、`start_date`、`end_date` 过滤与分页。
+- 命令行入口 `scripts/factors/run_batch_profiles.py`：支持 `--categories`、`--excluded-categories`、`--no-size-neutral`，失败因子以非零退出码结束。
+
+### 8.3 验证
+
+- 后端全量测试通过（`pytest -q`），`ruff check app/ tests/ scripts/` 无告警。
+- 新增测试：`test_factor_batch_profiler.py` 覆盖候选筛选与派生跳过、类别过滤、失败隔离与 `partial` 状态、日期区间/ size 对校验、summary 映射与无 IC 证据分支，并含一条 DuckDB 真实聚合校验；`test_api.py` 新增批量运行转发、反向区间 422、summary 转发与 `openapi` 路由断言。
+
+### 8.4 尚未覆盖
+
+- 各活跃因子对的历史 IC 证据需要**实际运行**批量诊断并落库后才有数据；本次只交付运行与聚合入口。
+- 分层回测年化差、因子拥挤度权重调节、因子失效告警阈值仍未实现；需要接入回测或调度后继续。
+- 批量诊断尚未接入 `factor_pipeline` 日级调度；当前由 API 或命令行显式触发。

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -117,3 +120,59 @@ class FactorProfileRepository:
             )
         )
         return items, total
+
+    def summarize(
+        self,
+        db: Session,
+        *,
+        factor_name: str | None = None,
+        factor_version: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """按 (factor_name, factor_version) 聚合 IC 证据。
+
+        只使用跨 DuckDB/PostgreSQL 均可移植的 ``count/min/max/avg`` 聚合，
+        不做方言特定的标准差或百分位计算。
+        """
+        filters = []
+        if factor_name:
+            filters.append(FactorProfile.factor_name == factor_name)
+        if factor_version:
+            filters.append(FactorProfile.factor_version == factor_version)
+        if start_date:
+            filters.append(FactorProfile.trade_date >= start_date)
+        if end_date:
+            filters.append(FactorProfile.trade_date <= end_date)
+
+        grouped = (
+            select(
+                FactorProfile.factor_name,
+                FactorProfile.factor_version,
+                func.count().label("trade_date_count"),
+                func.min(FactorProfile.trade_date).label("first_trade_date"),
+                func.max(FactorProfile.trade_date).label("last_trade_date"),
+                func.avg(FactorProfile.coverage_rate).label("mean_coverage_rate"),
+                func.avg(FactorProfile.ic_1d).label("mean_ic_1d"),
+                func.avg(FactorProfile.rank_ic_1d).label("mean_rank_ic_1d"),
+                func.avg(FactorProfile.ic_5d).label("mean_ic_5d"),
+                func.avg(FactorProfile.rank_ic_5d).label("mean_rank_ic_5d"),
+                func.avg(FactorProfile.ic_20d).label("mean_ic_20d"),
+                func.avg(FactorProfile.rank_ic_20d).label("mean_rank_ic_20d"),
+            )
+            .where(*filters)
+            .group_by(FactorProfile.factor_name, FactorProfile.factor_version)
+        )
+        total = db.scalar(select(func.count()).select_from(grouped.subquery())) or 0
+        rows = (
+            db.execute(
+                grouped.order_by(FactorProfile.factor_name, FactorProfile.factor_version)
+                .limit(limit)
+                .offset(offset)
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows], total

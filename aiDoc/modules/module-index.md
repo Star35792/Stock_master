@@ -5,7 +5,7 @@
 | 模块 | 当前职责 |
 | --- | --- |
 | `api` | HTTP 语义、参数校验、响应模型 |
-| `services` | 导入、构建、因子、回测、组合、风控、模拟盘等业务流程 |
+| `services` | 导入、构建、因子、批量因子截面诊断、回测、组合、风控、模拟盘等业务流程 |
 | `factors` | 因子分类常量与因子定义目录预注册（registry） |
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |
 | `models` | ORM 表结构 |
@@ -33,7 +33,7 @@
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
 - `trade`：模拟盘账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
 - `lake`：内容寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
-- `system`：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
+- `system`：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline`、`factor_batch_profiler` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
 
 ## 同步规则
 

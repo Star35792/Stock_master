@@ -8,6 +8,7 @@ from app.api.routes import (
     approvals as approvals_module,
     backtests as backtests_module,
     daily_bars as daily_bars_module,
+    factors as factors_module,
     health as health_module,
     operations as operations_module,
     paper_accounts as paper_accounts_module,
@@ -15,6 +16,11 @@ from app.api.routes import (
     strategy_research as strategy_research_module,
 )
 from app.main import app
+from app.services import (
+    FactorBatchProfilerRunResult,
+    FactorProfileResult,
+    FactorProfileSummary,
+)
 from app.services.paper_approval import (
     PaperApprovalConflict,
     PaperApprovalNotFound,
@@ -78,6 +84,8 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/factors/runs" in paths
     assert "/api/v1/factors/values" in paths
     assert "/api/v1/factors/profiles" in paths
+    assert "/api/v1/factors/batch-profiles" in paths
+    assert "/api/v1/factors/batch-profiles/summary" in paths
     assert "/api/v1/backtests/runs" in paths
     assert "/api/v1/backtests/runs/{run_id}" in paths
     assert "/api/v1/backtests/runs/{run_id}/trades" in paths
@@ -1344,3 +1352,100 @@ def test_single_rolling_run_rejects_pseudo_walk_forward_execution() -> None:
         "rolling execution must use run_rolling_factor_selection; "
         "single backtest requests cannot bind a validation window"
     )
+
+
+def test_run_batch_factor_profiles_forwards_filters(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_run(db, **kwargs):
+        captured.update(kwargs)
+        return FactorBatchProfilerRunResult(
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 17),
+            adjust_type="qfq",
+            results=[
+                FactorProfileResult(
+                    factor_name="ret_1d",
+                    factor_version="v1-qfq",
+                    category="price_volume_risk",
+                    success=True,
+                    profile_rows=12,
+                    transformed_rows=48,
+                    run_ids={"winsor": 1},
+                )
+            ],
+            total_profile_rows=12,
+            total_transformed_rows=48,
+            success_count=1,
+            failed_count=0,
+        )
+
+    monkeypatch.setattr(factors_module.batch_profiler_service, "run", fake_run)
+
+    response = client.post(
+        "/api/v1/factors/batch-profiles",
+        json={
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-17",
+            "adjust_type": "qfq",
+            "categories": ["price_volume_risk"],
+            "excluded_categories": ["crowding"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success_count"] == 1
+    assert body["total_transformed_rows"] == 48
+    assert body["results"][0]["factor_name"] == "ret_1d"
+    assert captured["categories"] == {"price_volume_risk"}
+    assert captured["excluded_categories"] == {"crowding"}
+    assert captured["adjust_type"] == "qfq"
+
+
+def test_run_batch_factor_profiles_rejects_reversed_range() -> None:
+    response = client.post(
+        "/api/v1/factors/batch-profiles",
+        json={"start_date": "2026-07-17", "end_date": "2026-07-01"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_summarize(db, **kwargs):
+        captured.update(kwargs)
+        return (
+            [
+                FactorProfileSummary(
+                    factor_name="ret_1d",
+                    factor_version="v1-qfq",
+                    trade_date_count=10,
+                    first_trade_date=date(2026, 7, 1),
+                    last_trade_date=date(2026, 7, 17),
+                    mean_ic_1d=Decimal("0.03"),
+                    mean_rank_ic_1d=Decimal("0.04"),
+                )
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(
+        factors_module.batch_profiler_service, "summarize", fake_summarize
+    )
+
+    response = client.get(
+        "/api/v1/factors/batch-profiles/summary",
+        params={"factor_name": "ret_1d", "limit": 5, "offset": 0},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["has_ic_evidence"] is True
+    assert body["items"][0]["mean_ic_1d"] == "0.03"
+    assert captured["factor_name"] == "ret_1d"
+    assert captured["limit"] == 5
