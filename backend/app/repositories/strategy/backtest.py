@@ -159,6 +159,7 @@ class BacktestRepository:
         start_date: date,
         end_date: date,
         initial_cash: Decimal,
+        training_artifact_id: int | None = None,
     ) -> BacktestRun:
         run = BacktestRun(
             name=name,
@@ -169,6 +170,7 @@ class BacktestRepository:
             start_date=start_date,
             end_date=end_date,
             initial_cash=initial_cash,
+            training_artifact_id=training_artifact_id,
             status="running",
         )
         db.add(run)

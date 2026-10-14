@@ -24,6 +24,7 @@ def test_fresh_database_preserves_referenced_training_artifacts(tmp_path) -> Non
             test_start_date=date(2026, 1, 1),
             test_end_date=date(2026, 1, 31),
             training_input_snapshot={},
+            artifact_hash="0" * 64,
             code_version="test",
             data_version="test",
         )

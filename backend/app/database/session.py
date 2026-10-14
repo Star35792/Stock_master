@@ -114,6 +114,26 @@ def apply_schema_compatibility(bind: Engine) -> None:
                 "ON strategy.backtest_run (training_artifact_id)"
             ))
 
+    # TrainingArtifact gained a content hash so that backtest runs can bind to an
+    # exact immutable training snapshot. Add the column idempotently for legacy
+    # databases; new databases receive it from create_all.
+    with bind.connect() as conn:
+        has_training_artifact = bool(conn.scalar(text(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema = 'strategy' AND table_name = 'training_artifact'"
+        )))
+    if has_training_artifact:
+        with bind.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE strategy.training_artifact "
+                "ADD COLUMN IF NOT EXISTS artifact_hash VARCHAR(64)"
+            ))
+        with bind.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_training_artifact_hash "
+                "ON strategy.training_artifact (artifact_hash)"
+            ))
+
 
 def initialize_database(bind: Engine | None = None) -> None:
     """Create missing schemas/tables and upgrade supported legacy layouts."""

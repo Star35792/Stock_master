@@ -1314,8 +1314,8 @@ def test_rolling_batch_rejects_pseudo_walk_forward_execution() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
-        "rolling execution requires immutable training artifacts; "
-        "the rolling-windows endpoint is planning-only"
+        "rolling execution must use POST /strategy-research/rolling-backtests; "
+        "the batch endpoint does not accept validation_mode=rolling"
     )
 
 
@@ -1341,6 +1341,6 @@ def test_single_rolling_run_rejects_pseudo_walk_forward_execution() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
-        "rolling execution requires immutable training artifacts; "
-        "the rolling-windows endpoint is planning-only"
+        "rolling execution must use run_rolling_factor_selection; "
+        "single backtest requests cannot bind a validation window"
     )

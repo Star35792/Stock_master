@@ -9,6 +9,7 @@ from app.schemas.strategy import (
     BatchFactorSelectionBacktestRequest,
     FactorSelectionBacktestRequest,
     FactorSelectionBacktestResult,
+    RollingFactorSelectionBacktestRequest,
     RollingWindowRead,
     RollingWindowRequest,
 )
@@ -107,8 +108,8 @@ def run_factor_selection_backtests_batch(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                "rolling execution requires immutable training artifacts; "
-                "the rolling-windows endpoint is planning-only"
+                "rolling execution must use POST /strategy-research/rolling-backtests; "
+                "the batch endpoint does not accept validation_mode=rolling"
             ),
         )
     results: list[BatchFactorSelectionBacktestItem] = []
@@ -223,3 +224,92 @@ def run_factor_selection_backtest(
         equity_points=len(result.equity_curve),
         position_snapshots=len(result.positions),
     )
+
+
+@router.post(
+    "/rolling-backtests",
+    response_model=list[FactorSelectionBacktestResult],
+)
+def run_rolling_factor_selection_backtests(
+    payload: RollingFactorSelectionBacktestRequest,
+    db: DatabaseSession,
+) -> list[FactorSelectionBacktestResult]:
+    if payload.start_date > payload.end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be earlier than or equal to end_date",
+        )
+    factor_specs = [
+        FactorScoreSpec(
+            factor_name=spec.factor_name,
+            factor_version=spec.factor_version,
+            weight=spec.weight,
+            higher_is_better=spec.higher_is_better,
+        )
+        for spec in payload.factor_specs
+    ]
+    try:
+        persisted_list = service.run_rolling_factor_selection(
+            db,
+            exchange=payload.exchange,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            training_days=payload.training_days,
+            test_days=payload.test_days,
+            step_days=payload.step_days,
+            name=payload.name,
+            strategy_name=payload.strategy_name,
+            factor_specs=factor_specs,
+            top_n=payload.top_n,
+            signal_lag=payload.signal_lag,
+            rebalance_rule=payload.rebalance_rule,
+            holding_period=payload.holding_period,
+            benchmark=payload.benchmark,
+            allowed_security_types=set(payload.allowed_security_types),
+            coverage_ratio=payload.coverage_ratio,
+            weighting_mode=payload.weighting_mode,
+            minimum_score_policy=payload.minimum_score_policy,
+            minimum_score=payload.minimum_score,
+            invested_weight=payload.invested_weight,
+            adjust_type=payload.adjust_type,
+            initial_cash=payload.initial_cash,
+            commission_rate=payload.commission_rate,
+            slippage_bps=payload.slippage_bps,
+            lot_size=payload.lot_size,
+            fee_model_version=payload.fee_model_version,
+            min_commission=payload.min_commission,
+            sell_stamp_duty_rate=payload.sell_stamp_duty_rate,
+            transfer_fee_rate=payload.transfer_fee_rate,
+            exchange_fee_rate=payload.exchange_fee_rate,
+            code_version=payload.code_version,
+            data_version=payload.data_version,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    results: list[FactorSelectionBacktestResult] = []
+    for window_result in persisted_list:
+        window = window_result.window
+        persisted = window_result.persisted
+        result = persisted.result
+        results.append(
+            FactorSelectionBacktestResult(
+                run_id=persisted.run_id,
+                name=f"{payload.name}:{window.index}",
+                strategy_name=payload.strategy_name,
+                start_date=window.test_start_date,
+                end_date=window.test_end_date,
+                initial_cash=result.initial_cash,
+                final_equity=result.final_equity,
+                total_return=result.total_return,
+                trade_count=len(result.trades),
+                equity_points=len(result.equity_curve),
+                position_snapshots=len(result.positions),
+            )
+        )
+    return results

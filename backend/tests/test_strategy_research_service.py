@@ -9,42 +9,66 @@ from app.strategies import FactorScoreSpec
 
 
 class FakeFactorValueRepository:
+    _CALENDAR = [
+        date(2026, 1, 2),
+        date(2026, 1, 5),
+        date(2026, 1, 6),
+        date(2026, 1, 7),
+        date(2026, 1, 8),
+        date(2026, 1, 9),
+        date(2026, 1, 12),
+        date(2026, 1, 13),
+        date(2026, 1, 14),
+        date(2026, 1, 15),
+        date(2026, 1, 16),
+        date(2026, 7, 1),
+    ]
+
     def __init__(self) -> None:
         self.requests: list[dict] = []
 
     def list_for_cross_section(self, db: object, **kwargs: object) -> list[SimpleNamespace]:
         self.requests.append(kwargs)
-        if kwargs["factor_name"] == "momentum_20":
-            return [
-                SimpleNamespace(
-                    trade_date=date(2026, 7, 1),
-                    symbol="aaa",
-                    value=Decimal("1"),
-                    run_id=11,
-                ),
-                SimpleNamespace(
-                    trade_date=date(2026, 7, 1),
-                    symbol="BBB",
-                    value=Decimal("2"),
-                    run_id=11,
-                ),
-            ]
-        if kwargs["factor_name"] == "quality_20":
-            return [
-                SimpleNamespace(
-                    trade_date=date(2026, 7, 1),
-                    symbol="AAA",
-                    value=Decimal("3"),
-                    run_id=12,
-                ),
-                SimpleNamespace(
-                    trade_date=date(2026, 7, 1),
-                    symbol="BBB",
-                    value=Decimal("1"),
-                    run_id=12,
-                ),
-            ]
+        factor_name = kwargs["factor_name"]
+        start_date = kwargs["start_date"]
+        end_date = kwargs["end_date"]
+        if factor_name == "momentum_20":
+            return self._rows_for_range(
+                start_date, end_date, base_value=Decimal("1"), run_id=11
+            )
+        if factor_name == "quality_20":
+            return self._rows_for_range(
+                start_date, end_date, base_value=Decimal("3"), run_id=12
+            )
         return []
+
+    def _rows_for_range(
+        self,
+        start_date: date,
+        end_date: date,
+        base_value: Decimal,
+        run_id: int,
+    ) -> list[SimpleNamespace]:
+        rows: list[SimpleNamespace] = []
+        for trade_date in self._CALENDAR:
+            if start_date <= trade_date <= end_date:
+                rows.append(
+                    SimpleNamespace(
+                        trade_date=trade_date,
+                        symbol="AAA",
+                        value=base_value,
+                        run_id=run_id,
+                    )
+                )
+                rows.append(
+                    SimpleNamespace(
+                        trade_date=trade_date,
+                        symbol="BBB",
+                        value=base_value + Decimal("1"),
+                        run_id=run_id,
+                    )
+                )
+        return rows
 
 
 class FakeSecurityRepository:
@@ -77,12 +101,16 @@ class FakeTradingCalendarRepository:
 
 class FakeBacktestService:
     def __init__(self) -> None:
-        self.kwargs: dict | None = None
+        self.calls: list[dict] = []
+
+    @property
+    def kwargs(self) -> dict | None:
+        return self.calls[-1] if self.calls else None
 
     def run(self, db: object, **kwargs: object) -> SimpleNamespace:
-        self.kwargs = kwargs
+        self.calls.append(kwargs)
         return SimpleNamespace(
-            run_id=7,
+            run_id=7 + len(self.calls) - 1,
             result=SimpleNamespace(
                 initial_cash=kwargs["initial_cash"],
                 final_equity=Decimal("110000"),
@@ -333,7 +361,7 @@ def test_strategy_research_service_rejects_unbound_rolling_execution() -> None:
         backtest_service=FakeBacktestService(),
     )
 
-    with pytest.raises(ValueError, match="rolling execution requires immutable training artifacts"):
+    with pytest.raises(ValueError, match="rolling execution must use run_rolling_factor_selection"):
         service.run_factor_selection(
             object(),
             name="pseudo-rolling",
@@ -383,3 +411,206 @@ def test_strategy_research_service_rejects_missing_factor_values() -> None:
         assert "factor values not found for missing@v1" in str(exc)
     else:
         raise AssertionError("missing factor values must be rejected")
+
+
+class FakeTrainingArtifactRepository:
+    def __init__(self) -> None:
+        self.artifacts: list[SimpleNamespace] = []
+        self._next_id = 1
+
+    def get_by_window_id(self, db: object, *, window_id: str) -> SimpleNamespace | None:
+        for artifact in self.artifacts:
+            if artifact.window_id == window_id:
+                return artifact
+        return None
+
+    def create(self, db: object, **kwargs: object) -> SimpleNamespace:
+        artifact = SimpleNamespace(id=self._next_id, **kwargs)
+        self._next_id += 1
+        self.artifacts.append(artifact)
+        return artifact
+
+
+def test_strategy_research_service_runs_rolling_factor_selection() -> None:
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    training_artifact_repository = FakeTrainingArtifactRepository()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+        backtest_service=backtest_service,
+        training_artifact_repository=training_artifact_repository,
+    )
+
+    results = service.run_rolling_factor_selection(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+        name="rolling-smoke",
+        factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+        top_n=1,
+        allowed_security_types={"stock"},
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+    )
+
+    assert len(results) == 4
+    assert [result.window.index for result in results] == [0, 1, 2, 3]
+    assert all(
+        result.window.execution_status == "run_completed" for result in results
+    )
+    assert len(training_artifact_repository.artifacts) == 4
+    assert len(backtest_service.calls) == 4
+
+    first_artifact = training_artifact_repository.artifacts[0]
+    assert first_artifact.window_id == (
+        "rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08"
+    )
+    assert first_artifact.training_start_date == date(2026, 1, 2)
+    assert first_artifact.test_end_date == date(2026, 1, 8)
+    assert first_artifact.artifact_hash is not None
+    assert len(first_artifact.artifact_hash) == 64
+    assert first_artifact.training_input_snapshot["contract_version"] == (
+        "rolling_training_input_v1"
+    )
+    assert first_artifact.training_input_snapshot["factor_frame"]["row_count"] == 6
+
+    first_call = backtest_service.calls[0]
+    assert first_call["training_artifact_id"] == 1
+    assert first_call["start_date"] == date(2026, 1, 7)
+    assert first_call["end_date"] == date(2026, 1, 8)
+    contract = first_call["research_contract"]
+    assert contract["validation_mode"] == "rolling"
+    assert contract["validation_protocol"] == "rolling_walk_forward_v1"
+    assert contract["window_binding_status"] == "artifact_bound"
+    assert contract["validation_window_id"] == first_artifact.window_id
+
+
+def test_strategy_research_service_reuses_existing_training_artifact() -> None:
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    training_artifact_repository = FakeTrainingArtifactRepository()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+        backtest_service=backtest_service,
+        training_artifact_repository=training_artifact_repository,
+    )
+
+    service.run_rolling_factor_selection(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+        name="rolling-smoke",
+        factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+        top_n=1,
+        allowed_security_types={"stock"},
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+    )
+    first_artifact_count = len(training_artifact_repository.artifacts)
+    first_calls = len(backtest_service.calls)
+
+    service.run_rolling_factor_selection(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+        name="rolling-rerun",
+        factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+        top_n=1,
+        allowed_security_types={"stock"},
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+    )
+
+    assert len(training_artifact_repository.artifacts) == first_artifact_count
+    assert len(backtest_service.calls) == first_calls + 4
+
+
+def test_strategy_research_service_rejects_artifact_hash_mismatch() -> None:
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    training_artifact_repository = FakeTrainingArtifactRepository()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+        backtest_service=backtest_service,
+        training_artifact_repository=training_artifact_repository,
+    )
+
+    service.run_rolling_factor_selection(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+        name="rolling-smoke",
+        factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+        top_n=1,
+        allowed_security_types={"stock"},
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+    )
+
+    # Simulate backfill: mutate the stored artifact hash so it no longer matches
+    # the training input computed from the current factor rows.
+    training_artifact_repository.artifacts[0].artifact_hash = "stale-hash"
+
+    with pytest.raises(ValueError, match="content hash does not match"):
+        service.run_rolling_factor_selection(
+            object(),
+            exchange="SH",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 16),
+            training_days=3,
+            test_days=2,
+            step_days=2,
+            name="rolling-rerun",
+            factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+            top_n=1,
+            allowed_security_types={"stock"},
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc123",
+            data_version="market-qfq-20260720",
+        )

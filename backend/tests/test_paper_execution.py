@@ -106,6 +106,21 @@ class FakeRiskService:
         return self.facts
 
 
+class FakeDailyBarRepository:
+    def __init__(self, bars: dict | None = None) -> None:
+        self.bars = bars or {}
+
+    def list_by_symbols_on_date(
+        self,
+        db,
+        *,
+        symbols,
+        trade_date,
+        adjust_type,
+    ):
+        return [bar for symbol, bar in self.bars.items() if symbol in symbols]
+
+
 def _risk_order(order_id: int, symbol: str, side: str, quantity: int):
     return SimpleNamespace(
         id=order_id,
@@ -124,7 +139,15 @@ def _risk_order(order_id: int, symbol: str, side: str, quantity: int):
     )
 
 
-def _setup(*, orders=None, cash=Decimal("100"), positions=None, **paper_kwargs):
+def _setup(
+    *,
+    orders=None,
+    cash=Decimal("100"),
+    positions=None,
+    execution_day_bars=None,
+    daily_bar_repository=None,
+    **paper_kwargs,
+):
     orders = orders or [
         _risk_order(1, "AAA", "sell", -50),
         _risk_order(2, "BBB", "buy", 50),
@@ -132,6 +155,30 @@ def _setup(*, orders=None, cash=Decimal("100"), positions=None, **paper_kwargs):
     positions = positions or [
         SimpleNamespace(symbol="AAA", quantity=100, average_cost=Decimal("10"))
     ]
+    if execution_day_bars is None:
+        # Default: a tradable bar on the plan date for every order symbol so
+        # legacy tests keep their existing expectations.
+        from types import SimpleNamespace as _SN
+
+        execution_day_bars = {
+            order.symbol: _SN(
+                symbol=order.symbol,
+                open=Decimal("10"),
+                close=Decimal("10"),
+                high=Decimal("10"),
+                low=Decimal("10"),
+                pre_close=Decimal("10"),
+                limit_up=Decimal("20"),
+                limit_down=Decimal("1"),
+                is_suspended=False,
+                special_treatment_status=None,
+                quality_status="trusted",
+            )
+            for order in orders
+        }
+    daily_bar_repository = daily_bar_repository or FakeDailyBarRepository(
+        execution_day_bars
+    )
     account = SimpleNamespace(id=1, cash_balance=cash, name="paper-main")
     check = SimpleNamespace(
         id=31,
@@ -217,6 +264,7 @@ def _setup(*, orders=None, cash=Decimal("100"), positions=None, **paper_kwargs):
         execution_repository=execution_repository,
         paper_repository=paper_repository,
         risk_service=FakeRiskService((check, orders, plan, targets, equity)),
+        daily_bar_repository=daily_bar_repository,
     )
     return service, approval, execution_repository, paper_repository
 
@@ -362,3 +410,157 @@ def test_paper_execution_rejects_changed_request_for_same_key() -> None:
             expected_approval_hash=approval.approval_hash,
             idempotency_key="execute-56",
         )
+
+
+def _tradable_bar(
+    *,
+    symbol: str,
+    open_: str,
+    limit_up: str | None = None,
+    limit_down: str | None = None,
+    is_suspended: bool = False,
+    pre_close: str = "10",
+):
+    return SimpleNamespace(
+        symbol=symbol,
+        open=Decimal(open_),
+        close=Decimal(open_),
+        high=Decimal(open_),
+        low=Decimal(open_),
+        pre_close=Decimal(pre_close),
+        limit_up=Decimal(limit_up) if limit_up is not None else None,
+        limit_down=Decimal(limit_down) if limit_down is not None else None,
+        is_suspended=is_suspended,
+        special_treatment_status=None,
+        quality_status="trusted",
+    )
+
+
+def test_paper_execution_blocks_buy_at_execution_day_limit_up() -> None:
+
+    orders = [
+        _risk_order(1, "AAA", "buy", 50),
+    ]
+    positions = []
+    # Buy reference price below limit_up; open at limit_up => buy blocked.
+    risk_order = orders[0]
+    risk_order.ref_price = Decimal("10")  # type: ignore[attr-defined]
+    risk_order.reference_price = Decimal("10")  # type: ignore[attr-defined]
+    execution_day_bars = {
+        "AAA": _tradable_bar(symbol="AAA", open_="11", limit_up="11"),
+    }
+    service, approval, _, paper = _setup(
+        orders=orders,
+        cash=Decimal("1000"),
+        positions=positions,
+        execution_day_bars=execution_day_bars,
+    )
+
+    result = service.execute(
+        FakeSession(),
+        approval_id=41,
+        expected_approval_hash=approval.approval_hash,
+        idempotency_key="execute-tradability-buy",
+    )
+
+    assert result.status == "rejected"
+    assert result.failure_code == "buy_blocked_by_execution_day_tradability"
+    assert paper.saved == []
+
+
+def test_paper_execution_blocks_sell_at_execution_day_limit_down() -> None:
+
+    orders = [
+        _risk_order(1, "AAA", "sell", -50),
+    ]
+    risk_order = orders[0]
+    risk_order.reference_price = Decimal("10")  # type: ignore[attr-defined]
+    execution_day_bars = {
+        "AAA": _tradable_bar(
+            symbol="AAA", open_="9", limit_down="9", pre_close="10",
+        ),
+    }
+    service, approval, _, paper = _setup(
+        orders=orders,
+        cash=Decimal("100"),
+        execution_day_bars=execution_day_bars,
+    )
+
+    result = service.execute(
+        FakeSession(),
+        approval_id=41,
+        expected_approval_hash=approval.approval_hash,
+        idempotency_key="execute-tradability-sell",
+    )
+
+    assert result.status == "rejected"
+    assert result.failure_code == "sell_blocked_by_execution_day_tradability"
+    assert paper.saved == []
+
+
+def test_paper_execution_blocks_all_when_security_suspended_on_execution_day() -> None:
+
+    orders = [
+        _risk_order(1, "AAA", "buy", 50),
+    ]
+    risk_order = orders[0]
+    risk_order.reference_price = Decimal("10")  # type: ignore[attr-defined]
+    execution_day_bars = {
+        "AAA": _tradable_bar(symbol="AAA", open_="10", is_suspended=True),
+    }
+    service, approval, _, paper = _setup(
+        orders=orders,
+        cash=Decimal("1000"),
+        positions=[],
+        execution_day_bars=execution_day_bars,
+    )
+
+    result = service.execute(
+        FakeSession(),
+        approval_id=41,
+        expected_approval_hash=approval.approval_hash,
+        idempotency_key="execute-tradability-suspended",
+    )
+
+    assert result.status == "rejected"
+    assert result.failure_code == "buy_blocked_by_execution_day_tradability"
+    assert paper.saved == []
+
+
+def test_paper_execution_blocks_when_no_execution_day_bar() -> None:
+    orders = [
+        _risk_order(1, "AAA", "buy", 50),
+    ]
+    service, approval, _, paper = _setup(
+        orders=orders,
+        cash=Decimal("1000"),
+        positions=[],
+        execution_day_bars={},
+    )
+
+    result = service.execute(
+        FakeSession(),
+        approval_id=41,
+        expected_approval_hash=approval.approval_hash,
+        idempotency_key="execute-tradability-missing",
+    )
+
+    assert result.status == "rejected"
+    assert result.failure_code == "missing_execution_day_bar"
+    assert paper.saved == []
+
+
+def test_paper_execution_executes_when_execution_day_is_tradable() -> None:
+    """Smoke test: with a tradable bar the full flow still completes."""
+    service, approval, _, paper = _setup()
+
+    result = service.execute(
+        FakeSession(),
+        approval_id=41,
+        expected_approval_hash=approval.approval_hash,
+        idempotency_key="execute-tradability-ok",
+    )
+
+    assert result.status == "completed"
+    assert paper.positions["AAA"].quantity == 50
+    assert paper.positions["BBB"].quantity == 50

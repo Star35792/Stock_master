@@ -107,13 +107,49 @@ class FakePaperRepository:
         return SimpleNamespace(id=account_id, name="paper-main")
 
 
-def _service(repository=None):
+class FakeDailyBarRepository:
+    def __init__(self, bars: dict | None = None) -> None:
+        self.bars = bars or {}
+
+    def list_by_symbols_on_date(
+        self,
+        db,
+        *,
+        symbols,
+        trade_date,
+        adjust_type,
+    ):
+        return [bar for symbol, bar in self.bars.items() if symbol in symbols]
+
+
+def _service(repository=None, *, daily_bar_repository=None):
     repository = repository or FakeApprovalRepository()
+    if daily_bar_repository is None:
+        # Default: provide a tradable bar so existing tests do not need
+        # to know about the new execution-day tradability check.
+        daily_bar_repository = FakeDailyBarRepository(
+            {
+                "600000.SH": SimpleNamespace(
+                    symbol="600000.SH",
+                    open=Decimal("100"),
+                    close=Decimal("100"),
+                    high=Decimal("100"),
+                    low=Decimal("100"),
+                    pre_close=Decimal("100"),
+                    limit_up=Decimal("110"),
+                    limit_down=Decimal("90"),
+                    is_suspended=False,
+                    special_treatment_status=None,
+                    quality_status="trusted",
+                )
+            }
+        )
     return (
         PaperExecutionApprovalService(
             repository=repository,
             risk_service=FakeRiskService(),
             paper_repository=FakePaperRepository(),
+            daily_bar_repository=daily_bar_repository,
         ),
         repository,
     )
@@ -191,3 +227,54 @@ def test_revoke_pending_paper_execution_approval() -> None:
     assert revoked.effective_status == "revoked"
     assert revoked.consumable_later is False
     assert revoked.revocation_reason == "operator cancelled"
+
+
+def test_create_paper_execution_approval_blocks_buy_at_limit_up() -> None:
+    from app.services.paper_approval import PaperApprovalConflict
+
+    daily_bar_repository = FakeDailyBarRepository(
+        {
+            "600000.SH": SimpleNamespace(
+                symbol="600000.SH",
+                open=Decimal("100"),
+                close=Decimal("100"),
+                high=Decimal("100"),
+                low=Decimal("100"),
+                pre_close=Decimal("100"),
+                limit_up=Decimal("100"),
+                limit_down=Decimal("90"),
+                is_suspended=False,
+                special_treatment_status=None,
+                quality_status="trusted",
+            )
+        }
+    )
+    service, repository = _service(daily_bar_repository=daily_bar_repository)
+
+    with pytest.raises(PaperApprovalConflict, match="buy is blocked"):
+        service.create(
+            FakeSession(),
+            risk_check_id=31,
+            expected_evaluation_hash="e" * 64,
+            confirmation_phrase="CONFIRM PAPER EXECUTION 31",
+            idempotency_key="approval-45",
+        )
+
+    assert repository.save_count == 0
+
+
+def test_create_paper_execution_approval_blocks_when_no_execution_day_bar() -> None:
+    from app.services.paper_approval import PaperApprovalConflict
+
+    service, repository = _service(daily_bar_repository=FakeDailyBarRepository({}))
+
+    with pytest.raises(PaperApprovalConflict, match="no trusted none daily bar"):
+        service.create(
+            FakeSession(),
+            risk_check_id=31,
+            expected_evaluation_hash="e" * 64,
+            confirmation_phrase="CONFIRM PAPER EXECUTION 31",
+            idempotency_key="approval-46",
+        )
+
+    assert repository.save_count == 0

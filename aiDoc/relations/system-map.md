@@ -20,7 +20,7 @@
 - `market` 是可信消费层。
 - `factor` 保存可复现的因子定义、运行和值。
 - `strategy` 保存回测运行、成交、净值、持仓和绩效。
-- `portfolio` 保存不可执行草案，`risk` 保存绑定服务端事实的评估，`trade` 保存短时确认和 approval 唯一绑定的 paper 执行批次。公共执行必须按 `plan -> equity/readiness -> risk evaluation -> approval -> execution batch` 单向消费，不能绕过确认直接调用旧纸盘内核。
+- `portfolio` 保存不可执行草案，`risk` 保存绑定服务端事实的评估，`trade` 保存短时确认和 approval 唯一绑定的 paper 执行批次。公共执行必须按 `plan -> equity/readiness -> risk evaluation -> approval -> execution batch` 单向消费，不能绕过确认直接调用旧纸盘内核。`trade` 在确认与执行两阶段都按 `market.daily_bar`（`adjust_type=none`）执行 `AShareTradabilityPolicy`；执行批次哈希显式包含 `execution_day_bar_hash`，把批次绑定到预演时的执行日行情快照
 - `system` 保存任务、质量问题和审计。
 
 ## 工具边界
@@ -37,3 +37,4 @@
 - 数据流、事实源、存储边界变化：更新 `aiDoc/relations/trusted-daily-data-center.md`。
 - 数据导入和质量规则变化：更新 `aiDoc/data/`。
 - 调度、回填、数据湖边界变化：更新本文件，并按需更新深入架构文档。
+- 模拟盘确认/执行接入执行日可交易性、`execution_day_bar_hash` 绑定或 `PaperExecutionService` 政策变化：更新 `aiDoc/plans/hard-gates-execution-plan.md` 与 `aiDoc/plans/roadmap.md` 的 V5.3 小节。

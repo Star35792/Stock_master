@@ -53,6 +53,7 @@ class TrainingArtifact(CreatedAtMixin, Base):
     test_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     test_end_date: Mapped[date] = mapped_column(Date, nullable=False)
     training_input_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    artifact_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
     data_version: Mapped[str] = mapped_column(String(100), nullable=False)
 

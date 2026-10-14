@@ -5,9 +5,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.backtest import A_SHARE_COST_V1, build_fee_model
+from app.backtest import A_SHARE_COST_V1, AShareTradabilityPolicy, build_fee_model
 from app.config.settings import settings
 from app.database.transaction import idempotent_write, retry_on_conflict
+from app.repositories.market import DailyBarRepository
 from app.repositories.trade import (
     PaperExecutionApprovalRepository,
     PaperExecutionBatchRepository,
@@ -30,7 +31,7 @@ from app.trade import BrokerFill, BrokerOrderRequest, PaperBrokerAdapter
 
 EXECUTION_POLICY = {
     "name": "deterministic_full_fill_paper_execution",
-    "version": "v2",
+    "version": "v3",
     "code_version": settings.app_code_version,
     "execution_mode": "paper",
     "execution_order": "risk_reducing_sells_then_risk_increasing_buys",
@@ -44,8 +45,14 @@ EXECUTION_POLICY = {
     "slippage_bps": "2",
     "average_cost_basis": "fill_price_including_buy_commission",
     "sellability_policy": "same_day_buys_not_sellable_for_all_securities",
-    "tradability_policy": "not_enforced_reference_price_simulation",
+    "tradability_policy": "enforced_via_execution_day_market_daily_bar",
+    "tradability_policy_name": "a_share_v1",
+    "tradability_policy_scope": "limit_up_down_suspended_and_st_amplitude",
 }
+
+# Tradability policy instance used by the paper execution service. The same
+# policy is applied by the backtest engine so research and simulation agree
+# on the conditions under which a buy or sell can fill.
 
 
 class PaperExecutionConflict(ValueError):
@@ -83,11 +90,15 @@ class PaperExecutionService:
         execution_repository: PaperExecutionBatchRepository | None = None,
         paper_repository: PaperTradingRepository | None = None,
         risk_service: BoundRiskEvaluationService | None = None,
+        daily_bar_repository: DailyBarRepository | None = None,
+        tradability_policy: AShareTradabilityPolicy | None = None,
     ) -> None:
         self.approval_repository = approval_repository or PaperExecutionApprovalRepository()
         self.execution_repository = execution_repository or PaperExecutionBatchRepository()
         self.paper_repository = paper_repository or PaperTradingRepository()
         self.risk_service = risk_service or BoundRiskEvaluationService()
+        self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
+        self.tradability_policy = tradability_policy or AShareTradabilityPolicy()
         self.broker = PaperBrokerAdapter(
             fee_model=build_fee_model(
                 fee_model_version=A_SHARE_COST_V1,
@@ -100,6 +111,7 @@ class PaperExecutionService:
                 transfer_fee_rate=Decimal(EXECUTION_POLICY["transfer_fee_rate"]),
                 exchange_fee_rate=Decimal(EXECUTION_POLICY["exchange_fee_rate"]),
             ),
+            tradability_policy=self.tradability_policy,
         )
 
     def execute(
@@ -208,6 +220,12 @@ class PaperExecutionService:
             account.cash_balance,
             positions,
         )
+        started_at = datetime.now(UTC)
+        execution_day_bars, execution_day_bar_hash = self._load_execution_day_bars(
+            db,
+            plan=plan,
+            orders=risk_orders,
+        )
         rebuilt_summary, _, rebuilt_order_hash = build_paper_order_batch(
             check=check,
             orders=risk_orders,
@@ -216,6 +234,7 @@ class PaperExecutionService:
             equity=equity,
             account=account,
             broker=self.broker,
+            execution_day_bars=execution_day_bars,
         )
         rebuilt_approval_hash = build_approval_hash(
             check=check,
@@ -245,7 +264,6 @@ class PaperExecutionService:
             raise PaperExecutionConflict("approved order batch changed before execution")
         self._validate_policy(approval.confirmation_policy)
 
-        started_at = datetime.now(UTC)
         try:
             planned, cash_after, state_after, total_commission = self._preflight(
                 db,
@@ -253,6 +271,7 @@ class PaperExecutionService:
                 positions=positions,
                 plan=plan,
                 risk_orders=risk_orders,
+                execution_day_bars=execution_day_bars,
             )
         except PaperExecutionBlocked as exc:
             return self._save_rejected(
@@ -265,6 +284,7 @@ class PaperExecutionService:
                 failure_code=exc.code,
                 failure_message=str(exc),
                 started_at=started_at,
+                execution_day_bar_hash=execution_day_bar_hash,
             )
 
         account_state_hash_after = hash_paper_account_state(
@@ -273,7 +293,9 @@ class PaperExecutionService:
             list(state_after.values()),
         )
         completed_at = datetime.now(UTC)
-        execution_policy_hash = hash_payload(EXECUTION_POLICY)
+        execution_policy_hash = hash_payload(
+            {**EXECUTION_POLICY, "execution_day_bar_hash": execution_day_bar_hash}
+        )
         values = {
             "approval_id": approval.id,
             "risk_check_id": approval.risk_check_id,
@@ -380,7 +402,16 @@ class PaperExecutionService:
             raise PaperExecutionNotFound("paper execution batch not found")
         return self._to_read(batch)
 
-    def _preflight(self, db, *, account, positions, plan, risk_orders):
+    def _preflight(
+        self,
+        db,
+        *,
+        account,
+        positions,
+        plan,
+        risk_orders,
+        execution_day_bars,
+    ):
         position_state = {
             position.symbol: {
                 "symbol": position.symbol,
@@ -398,12 +429,18 @@ class PaperExecutionService:
             key=lambda order: (0 if order.side == "sell" else 1, order.symbol),
         )
         for execution_index, risk_order in enumerate(ordered_orders):
+            self._assert_execution_day_tradable(
+                plan=plan,
+                risk_order=risk_order,
+                execution_day_bars=execution_day_bars,
+            )
             order = BrokerOrderRequest(
                 symbol=risk_order.symbol,
                 side=risk_order.side,
                 quantity=abs(risk_order.order_quantity),
                 reference_price=Decimal(risk_order.reference_price),
                 trade_date=plan.as_of_date,
+                bar=execution_day_bars.get(risk_order.symbol),
             )
             fill = self.broker.execute(order)
             current = position_state.get(
@@ -484,6 +521,83 @@ class PaperExecutionService:
             )
         return planned, cash, position_state, total_commission
 
+    def _load_execution_day_bars(self, db, *, plan, orders):
+        """Read trusted ``none`` bars for the execution day.
+
+        Returns a ``{symbol: bar}`` map plus a stable hash that the execution
+        batch records as part of its policy. The hash binds the run to the
+        exact execution-day market snapshot the broker saw; any later change
+        to those rows invalidates the batch and forces a fresh approval.
+        """
+        symbols = {order.symbol for order in orders}
+        if not symbols:
+            return {}, hash_payload(
+                {"plan_as_of_date": plan.as_of_date.isoformat(), "symbols": []}
+            )
+        bars = self.daily_bar_repository.list_by_symbols_on_date(
+            db,
+            symbols=symbols,
+            trade_date=plan.as_of_date,
+            adjust_type="none",
+        )
+        bar_by_symbol = {bar.symbol: bar for bar in bars}
+        bar_hash = self._hash_execution_day_bars(plan, bar_by_symbol)
+        return bar_by_symbol, bar_hash
+
+    @staticmethod
+    def _hash_execution_day_bars(plan, bar_by_symbol) -> str:
+        bar_records = []
+        for symbol in sorted(bar_by_symbol):
+            bar = bar_by_symbol[symbol]
+            bar_records.append(
+                {
+                    "symbol": symbol,
+                    "open": str(getattr(bar, "open", None) or ""),
+                    "high": str(getattr(bar, "high", None) or ""),
+                    "low": str(getattr(bar, "low", None) or ""),
+                    "close": str(getattr(bar, "close", None) or ""),
+                    "pre_close": str(getattr(bar, "pre_close", None) or ""),
+                    "limit_up": str(getattr(bar, "limit_up", None) or ""),
+                    "limit_down": str(getattr(bar, "limit_down", None) or ""),
+                    "is_suspended": bool(getattr(bar, "is_suspended", False)),
+                    "special_treatment_status": getattr(
+                        bar, "special_treatment_status", None
+                    ),
+                    "quality_status": getattr(bar, "quality_status", ""),
+                }
+            )
+        return hash_payload(
+            {
+                "plan_as_of_date": plan.as_of_date.isoformat(),
+                "bars": bar_records,
+            }
+        )
+
+    def _assert_execution_day_tradable(
+        self, *, plan, risk_order, execution_day_bars
+    ) -> None:
+        bar = execution_day_bars.get(risk_order.symbol)
+        if bar is None:
+            raise PaperExecutionBlocked(
+                "missing_execution_day_bar",
+                (
+                    f"{risk_order.symbol} has no trusted none daily bar on "
+                    f"execution day {plan.as_of_date.isoformat()}; "
+                    "A-share tradability cannot be evaluated"
+                ),
+            )
+        tradability = self.tradability_policy.check(bar)
+        if risk_order.side == "buy" and not tradability.can_buy:
+            raise PaperExecutionBlocked(
+                "buy_blocked_by_execution_day_tradability",
+                tradability.reason or "buy is not tradable on the execution day",
+            )
+        if risk_order.side == "sell" and not tradability.can_sell:
+            raise PaperExecutionBlocked(
+                "sell_blocked_by_execution_day_tradability",
+                tradability.reason or "sell is not tradable on the execution day",
+            )
+
     def _save_rejected(
         self,
         db,
@@ -496,9 +610,12 @@ class PaperExecutionService:
         failure_code,
         failure_message,
         started_at,
+        execution_day_bar_hash,
     ):
         completed_at = datetime.now(UTC)
-        execution_policy_hash = hash_payload(EXECUTION_POLICY)
+        execution_policy_hash = hash_payload(
+            {**EXECUTION_POLICY, "execution_day_bar_hash": execution_day_bar_hash}
+        )
         execution_hash = hash_payload(
             {
                 "approval_hash": approval.approval_hash,

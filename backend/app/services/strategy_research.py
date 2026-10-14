@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -7,8 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.repositories.factor import FactorValueRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
+from app.repositories.strategy import TrainingArtifactRepository
 from app.schemas.strategy import RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
+from app.services.rolling_backtest import RollingBacktestWindowResult
 from app.strategies import (
     FactorScoreSpec,
     MinimumScorePolicy,
@@ -25,6 +29,7 @@ class StrategyResearchService:
         security_repository: SecurityRepository | None = None,
         trading_calendar_repository: TradingCalendarRepository | None = None,
         backtest_service: DailyBacktestService | None = None,
+        training_artifact_repository: TrainingArtifactRepository | None = None,
     ) -> None:
         self.factor_value_repository = factor_value_repository or FactorValueRepository()
         self.security_repository = security_repository or SecurityRepository()
@@ -32,6 +37,9 @@ class StrategyResearchService:
             trading_calendar_repository or TradingCalendarRepository()
         )
         self.backtest_service = backtest_service or DailyBacktestService()
+        self.training_artifact_repository = (
+            training_artifact_repository or TrainingArtifactRepository()
+        )
 
     def generate_rolling_windows(
         self,
@@ -83,58 +91,12 @@ class StrategyResearchService:
             raise ValueError("open trading dates are insufficient for one rolling window")
         return windows
 
-    def run_factor_selection(
-        self,
-        db: Session,
-        *,
-        name: str,
-        strategy_name: str = "factor_selection",
-        factor_specs: list[FactorScoreSpec],
-        top_n: int,
-        signal_lag: int = 1,
-        rebalance_rule: str = "daily",
-        holding_period: int = 1,
-        benchmark: str | None = None,
-        allowed_security_types: set[str],
-        coverage_ratio: Decimal | None = None,
-        weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED,
-        minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED,
-        minimum_score: Decimal | None = None,
-        invested_weight: Decimal = Decimal("1"),
-        start_date: date,
-        end_date: date,
-        adjust_type: str,
-        initial_cash: Decimal,
-        commission_rate: Decimal,
-        slippage_bps: Decimal,
-        lot_size: int,
-        code_version: str,
-        data_version: str,
-        validation_mode: str = "none",
-        training_start_date: date | None = None,
-        training_end_date: date | None = None,
-        fee_model_version: str | None = None,
-        min_commission: Decimal | None = None,
-        sell_stamp_duty_rate: Decimal | None = None,
-        transfer_fee_rate: Decimal | None = None,
-        exchange_fee_rate: Decimal | None = None,
-    ) -> PersistedBacktestResult:
-        self._validate_validation_window(
-            validation_mode=validation_mode,
-            training_start_date=training_start_date,
-            training_end_date=training_end_date,
-            test_start_date=start_date,
-            test_end_date=end_date,
-        )
+    def _normalize_factor_specs(
+        self, factor_specs: list[FactorScoreSpec]
+    ) -> list[FactorScoreSpec]:
         if not factor_specs:
             raise ValueError("factor_specs must not be empty")
-        if signal_lag != 1:
-            raise ValueError("only signal_lag=1 is supported")
-        if rebalance_rule != "daily":
-            raise ValueError("only rebalance_rule=daily is supported")
-        if holding_period != 1:
-            raise ValueError("only holding_period=1 is supported")
-        normalized_specs = sorted(
+        return sorted(
             factor_specs,
             key=lambda spec: (
                 spec.factor_name,
@@ -143,6 +105,14 @@ class StrategyResearchService:
                 spec.higher_is_better,
             ),
         )
+
+    def _load_factor_rows(
+        self,
+        db: Session,
+        factor_specs: list[FactorScoreSpec],
+        start_date: date,
+        end_date: date,
+    ) -> dict[FactorScoreSpec, list[SimpleNamespace]]:
         factor_rows = {
             spec: self._normalize_factor_rows(
                 self.factor_value_repository.list_for_cross_section(
@@ -153,18 +123,165 @@ class StrategyResearchService:
                     end_date=end_date,
                 )
             )
-            for spec in normalized_specs
+            for spec in factor_specs
         }
         for spec, rows in factor_rows.items():
             if not rows:
                 raise ValueError(
-                    f"factor values not found for {spec.factor_name}@{spec.factor_version}"
+                    f"factor values not found for {spec.factor_name}@{spec.factor_version} "
+                    f"between {start_date.isoformat()} and {end_date.isoformat()}"
                 )
-        symbols = {
-            row.symbol
-            for rows in factor_rows.values()
-            for row in rows
+        return factor_rows
+
+    @staticmethod
+    def _compute_artifact_hash(snapshot: dict[str, Any]) -> str:
+        canonical = json.dumps(
+            snapshot, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _build_training_input_snapshot(
+        self,
+        *,
+        window_id: str,
+        factor_specs: list[FactorScoreSpec],
+        training_start_date: date,
+        training_end_date: date,
+        training_rows: dict[FactorScoreSpec, list[SimpleNamespace]],
+        security_types: dict[str, str],
+    ) -> dict[str, Any]:
+        frame = StrategyFactorFrame.from_rows(
+            as_of_date=training_end_date,
+            rows_by_factor=training_rows,
+        )
+        frame_snapshot = frame.snapshot()
+        return {
+            "contract_version": "rolling_training_input_v1",
+            "window_id": window_id,
+            "training_start_date": training_start_date.isoformat(),
+            "training_end_date": training_end_date.isoformat(),
+            "factor_specs": [
+                {
+                    "factor_name": spec.factor_name,
+                    "factor_version": spec.factor_version,
+                    "weight": str(spec.weight),
+                    "higher_is_better": spec.higher_is_better,
+                }
+                for spec in factor_specs
+            ],
+            "factor_frame": frame_snapshot,
+            "symbol_universe": sorted(
+                {row.symbol for rows in training_rows.values() for row in rows}
+            ),
+            "security_type_map": {
+                symbol.upper(): security_type
+                for symbol, security_type in security_types.items()
+            },
         }
+
+    def _get_or_create_training_artifact(
+        self,
+        db: Session,
+        *,
+        window: RollingWindowRead,
+        strategy_name: str,
+        factor_specs: list[FactorScoreSpec],
+        training_rows: dict[FactorScoreSpec, list[SimpleNamespace]],
+        security_types: dict[str, str],
+        code_version: str,
+        data_version: str,
+    ) -> Any:
+        existing = self.training_artifact_repository.get_by_window_id(
+            db, window_id=window.window_id
+        )
+        snapshot = self._build_training_input_snapshot(
+            window_id=window.window_id,
+            factor_specs=factor_specs,
+            training_start_date=window.training_start_date,
+            training_end_date=window.training_end_date,
+            training_rows=training_rows,
+            security_types=security_types,
+        )
+        artifact_hash = self._compute_artifact_hash(snapshot)
+        if existing is not None:
+            if existing.artifact_hash != artifact_hash:
+                raise ValueError(
+                    f"training artifact for window {window.window_id} already exists "
+                    "but its content hash does not match the current training input; "
+                    "factor data may have been backfilled or changed"
+                )
+            return existing
+        return self.training_artifact_repository.create(
+            db,
+            window_id=window.window_id,
+            strategy_name=strategy_name,
+            factor_specs=snapshot["factor_specs"],
+            training_start_date=window.training_start_date,
+            training_end_date=window.training_end_date,
+            test_start_date=window.test_start_date,
+            test_end_date=window.test_end_date,
+            training_input_snapshot=snapshot,
+            artifact_hash=artifact_hash,
+            code_version=code_version,
+            data_version=data_version,
+        )
+
+    def _run_single_factor_selection(
+        self,
+        db: Session,
+        *,
+        name: str,
+        strategy_name: str,
+        factor_specs: list[FactorScoreSpec],
+        top_n: int,
+        signal_lag: int,
+        rebalance_rule: str,
+        holding_period: int,
+        benchmark: str | None,
+        allowed_security_types: set[str],
+        coverage_ratio: Decimal | None,
+        weighting_mode: WeightingMode,
+        minimum_score_policy: MinimumScorePolicy,
+        minimum_score: Decimal | None,
+        invested_weight: Decimal,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        initial_cash: Decimal,
+        commission_rate: Decimal,
+        slippage_bps: Decimal,
+        lot_size: int,
+        code_version: str,
+        data_version: str,
+        validation_mode: str,
+        training_start_date: date | None,
+        training_end_date: date | None,
+        fee_model_version: str | None,
+        min_commission: Decimal | None,
+        sell_stamp_duty_rate: Decimal | None,
+        transfer_fee_rate: Decimal | None,
+        exchange_fee_rate: Decimal | None,
+        training_artifact_id: int | None = None,
+        validation_window_id: str | None = None,
+    ) -> PersistedBacktestResult:
+        self._validate_validation_window(
+            validation_mode=validation_mode,
+            training_start_date=training_start_date,
+            training_end_date=training_end_date,
+            test_start_date=start_date,
+            test_end_date=end_date,
+        )
+        if signal_lag != 1:
+            raise ValueError("only signal_lag=1 is supported")
+        if rebalance_rule != "daily":
+            raise ValueError("only rebalance_rule=daily is supported")
+        if holding_period != 1:
+            raise ValueError("only holding_period=1 is supported")
+        normalized_specs = self._normalize_factor_specs(factor_specs)
+        factor_rows = self._load_factor_rows(
+            db, normalized_specs, start_date, end_date
+        )
+        symbols = {row.symbol for rows in factor_rows.values() for row in rows}
         security_types = self.security_repository.get_security_types(db, symbols)
         normalized_security_types = {
             symbol.upper(): security_type
@@ -218,6 +335,7 @@ class StrategyResearchService:
             training_start_date=training_start_date,
             training_end_date=training_end_date,
             strategy_input_snapshot=strategy_frame.snapshot(),
+            validation_window_id=validation_window_id,
         )
         return self.backtest_service.run(
             db,
@@ -239,7 +357,205 @@ class StrategyResearchService:
             sell_stamp_duty_rate=sell_stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate,
             exchange_fee_rate=exchange_fee_rate,
+            training_artifact_id=training_artifact_id,
         )
+
+    def run_factor_selection(
+        self,
+        db: Session,
+        *,
+        name: str,
+        strategy_name: str = "factor_selection",
+        factor_specs: list[FactorScoreSpec],
+        top_n: int,
+        signal_lag: int = 1,
+        rebalance_rule: str = "daily",
+        holding_period: int = 1,
+        benchmark: str | None = None,
+        allowed_security_types: set[str],
+        coverage_ratio: Decimal | None = None,
+        weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED,
+        minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED,
+        minimum_score: Decimal | None = None,
+        invested_weight: Decimal = Decimal("1"),
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        initial_cash: Decimal,
+        commission_rate: Decimal,
+        slippage_bps: Decimal,
+        lot_size: int,
+        code_version: str,
+        data_version: str,
+        validation_mode: str = "none",
+        training_start_date: date | None = None,
+        training_end_date: date | None = None,
+        fee_model_version: str | None = None,
+        min_commission: Decimal | None = None,
+        sell_stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+        exchange_fee_rate: Decimal | None = None,
+    ) -> PersistedBacktestResult:
+        if validation_mode == "rolling":
+            raise ValueError(
+                "rolling execution must use run_rolling_factor_selection; "
+                "single backtest requests cannot bind a validation window"
+            )
+        return self._run_single_factor_selection(
+            db,
+            name=name,
+            strategy_name=strategy_name,
+            factor_specs=factor_specs,
+            top_n=top_n,
+            signal_lag=signal_lag,
+            rebalance_rule=rebalance_rule,
+            holding_period=holding_period,
+            benchmark=benchmark,
+            allowed_security_types=allowed_security_types,
+            coverage_ratio=coverage_ratio,
+            weighting_mode=weighting_mode,
+            minimum_score_policy=minimum_score_policy,
+            minimum_score=minimum_score,
+            invested_weight=invested_weight,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            initial_cash=initial_cash,
+            commission_rate=commission_rate,
+            slippage_bps=slippage_bps,
+            lot_size=lot_size,
+            code_version=code_version,
+            data_version=data_version,
+            validation_mode=validation_mode,
+            training_start_date=training_start_date,
+            training_end_date=training_end_date,
+            fee_model_version=fee_model_version,
+            min_commission=min_commission,
+            sell_stamp_duty_rate=sell_stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate,
+            exchange_fee_rate=exchange_fee_rate,
+        )
+
+    def run_rolling_factor_selection(
+        self,
+        db: Session,
+        *,
+        exchange: str,
+        start_date: date,
+        end_date: date,
+        training_days: int,
+        test_days: int,
+        step_days: int,
+        name: str,
+        strategy_name: str = "factor_selection",
+        factor_specs: list[FactorScoreSpec],
+        top_n: int,
+        signal_lag: int = 1,
+        rebalance_rule: str = "daily",
+        holding_period: int = 1,
+        benchmark: str | None = None,
+        allowed_security_types: set[str],
+        coverage_ratio: Decimal | None = None,
+        weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED,
+        minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED,
+        minimum_score: Decimal | None = None,
+        invested_weight: Decimal = Decimal("1"),
+        adjust_type: str,
+        initial_cash: Decimal,
+        commission_rate: Decimal,
+        slippage_bps: Decimal,
+        lot_size: int,
+        code_version: str,
+        data_version: str,
+        fee_model_version: str | None = None,
+        min_commission: Decimal | None = None,
+        sell_stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+        exchange_fee_rate: Decimal | None = None,
+    ) -> list[RollingBacktestWindowResult]:
+        windows = self.generate_rolling_windows(
+            db,
+            exchange=exchange,
+            start_date=start_date,
+            end_date=end_date,
+            training_days=training_days,
+            test_days=test_days,
+            step_days=step_days,
+        )
+        normalized_specs = self._normalize_factor_specs(factor_specs)
+        results: list[RollingBacktestWindowResult] = []
+        for window in windows:
+            training_rows = self._load_factor_rows(
+                db,
+                normalized_specs,
+                window.training_start_date,
+                window.training_end_date,
+            )
+            symbols = {
+                row.symbol for rows in training_rows.values() for row in rows
+            }
+            security_types = self.security_repository.get_security_types(db, symbols)
+            artifact = self._get_or_create_training_artifact(
+                db,
+                window=window,
+                strategy_name=strategy_name,
+                factor_specs=normalized_specs,
+                training_rows=training_rows,
+                security_types=security_types,
+                code_version=code_version,
+                data_version=data_version,
+            )
+            result = self._run_single_factor_selection(
+                db,
+                name=f"{name}:{window.index}",
+                strategy_name=strategy_name,
+                factor_specs=normalized_specs,
+                top_n=top_n,
+                signal_lag=signal_lag,
+                rebalance_rule=rebalance_rule,
+                holding_period=holding_period,
+                benchmark=benchmark,
+                allowed_security_types=allowed_security_types,
+                coverage_ratio=coverage_ratio,
+                weighting_mode=weighting_mode,
+                minimum_score_policy=minimum_score_policy,
+                minimum_score=minimum_score,
+                invested_weight=invested_weight,
+                start_date=window.test_start_date,
+                end_date=window.test_end_date,
+                adjust_type=adjust_type,
+                initial_cash=initial_cash,
+                commission_rate=commission_rate,
+                slippage_bps=slippage_bps,
+                lot_size=lot_size,
+                code_version=code_version,
+                data_version=data_version,
+                validation_mode="rolling",
+                training_start_date=window.training_start_date,
+                training_end_date=window.training_end_date,
+                fee_model_version=fee_model_version,
+                min_commission=min_commission,
+                sell_stamp_duty_rate=sell_stamp_duty_rate,
+                transfer_fee_rate=transfer_fee_rate,
+                exchange_fee_rate=exchange_fee_rate,
+                training_artifact_id=artifact.id,
+                validation_window_id=window.window_id,
+            )
+            results.append(
+                RollingBacktestWindowResult(
+                    window=RollingWindowRead(
+                        index=window.index,
+                        window_id=window.window_id,
+                        training_start_date=window.training_start_date,
+                        training_end_date=window.training_end_date,
+                        test_start_date=window.test_start_date,
+                        test_end_date=window.test_end_date,
+                        execution_status="run_completed",
+                    ),
+                    persisted=result,
+                )
+            )
+        return results
 
     @staticmethod
     def _normalize_factor_rows(rows: list[Any]) -> list[SimpleNamespace]:
@@ -291,8 +607,8 @@ class StrategyResearchService:
         training_start_date: date | None,
         training_end_date: date | None,
         strategy_input_snapshot: dict[str, Any],
+        validation_window_id: str | None = None,
     ) -> dict[str, Any]:
-        validation_window_id = None
         validation_protocol = None
         window_binding_status = "not_applicable"
         if validation_mode == "out_of_sample":
@@ -305,6 +621,12 @@ class StrategyResearchService:
                 f"{end_date.isoformat()}"
             )
             window_binding_status = "recorded_only"
+        elif validation_mode == "rolling":
+            assert training_start_date is not None
+            assert training_end_date is not None
+            assert validation_window_id is not None
+            validation_protocol = "rolling_walk_forward_v1"
+            window_binding_status = "artifact_bound"
         return {
             "strategy_name": strategy_name,
             "factor_specs": [
@@ -374,11 +696,6 @@ class StrategyResearchService:
             raise ValueError("validation_mode must be one of: none, out_of_sample, rolling")
         if test_start_date > test_end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
-        if validation_mode == "rolling":
-            raise ValueError(
-                "rolling execution requires immutable training artifacts; "
-                "the rolling-windows endpoint is planning-only"
-            )
         if validation_mode == "none":
             if training_start_date is not None or training_end_date is not None:
                 raise ValueError("training dates require a validation mode")

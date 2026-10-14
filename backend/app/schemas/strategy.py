@@ -237,7 +237,73 @@ class RollingWindowRead(BaseModel):
     training_end_date: date
     test_start_date: date
     test_end_date: date
-    execution_status: Literal["planning_only"] = "planning_only"
+    execution_status: Literal[
+        "planning_only", "artifact_created", "run_completed"
+    ] = "planning_only"
+
+
+class RollingFactorSelectionBacktestRequest(BaseModel):
+    exchange: Literal["SH", "SZ", "BJ", "HK"]
+    start_date: date
+    end_date: date
+    training_days: int = Field(
+        gt=0, le=1000, description="Training-window open trading dates"
+    )
+    test_days: int = Field(
+        gt=0, le=1000, description="Test-window open trading dates"
+    )
+    step_days: int = Field(
+        gt=0, le=1000, description="Open trading dates between window starts"
+    )
+    name: str = Field(min_length=1, max_length=100)
+    strategy_name: str = Field(
+        default="factor_selection", min_length=1, max_length=100
+    )
+    factor_specs: list[FactorScoreSpecRequest] = Field(min_length=1)
+    top_n: int = Field(gt=0)
+    signal_lag: int = Field(default=1, ge=1)
+    rebalance_rule: Literal["daily"] = "daily"
+    holding_period: int = Field(default=1, gt=0)
+    benchmark: str | None = Field(default=None, min_length=1, max_length=100)
+    allowed_security_types: set[Literal["stock", "etf", "index"]] = Field(
+        default_factory=lambda: {"stock"}
+    )
+    coverage_ratio: Decimal | None = Field(default=None, gt=0, le=1)
+    weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+    minimum_score_policy: MinimumScorePolicy = (
+        MinimumScorePolicy.ALWAYS_FULLY_INVESTED
+    )
+    minimum_score: Decimal | None = Field(default=None, ge=0, le=1)
+    invested_weight: Decimal = Field(default=Decimal("1"), gt=0, le=1)
+    adjust_type: Literal["none", "qfq", "hfq"] = "qfq"
+    initial_cash: Decimal = Field(gt=0)
+    commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
+    slippage_bps: Decimal = Field(default=Decimal("2"), ge=0)
+    lot_size: int = Field(default=100, gt=0)
+    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = (
+        "linear_commission_v1"
+    )
+    min_commission: Decimal | None = Field(default=None, ge=0)
+    sell_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
+    transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
+    exchange_fee_rate: Decimal | None = Field(default=None, ge=0)
+    code_version: str = Field(min_length=1)
+    data_version: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_weighting_mode_and_invested_weight(
+        self,
+    ) -> "RollingFactorSelectionBacktestRequest":
+        if (
+            self.weighting_mode is WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+            and self.minimum_score_policy is MinimumScorePolicy.HOLD_CASH_WHEN_NO_CANDIDATE
+            and self.invested_weight != Decimal("1")
+        ):
+            raise ValueError(
+                "equal_weight_fully_invested with hold_cash_when_no_candidate "
+                "always invests 100%; choose another weighting mode to leave cash"
+            )
+        return self
 
 
 class BacktestDriftRequest(BaseModel):

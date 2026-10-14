@@ -22,6 +22,7 @@ from app.models.strategy import (
     BacktestPosition,
     BacktestRun,
     BacktestTradeRecord,
+    TrainingArtifact,
 )
 from app.models.system import DataQualityIssue, DataSource, JobLog
 from app.models.trade import (
@@ -75,6 +76,7 @@ __all__ = [
     "RiskCheck",
     "RiskCheckOrder",
     "Security",
+    "TrainingArtifact",
     "TradingCalendar",
     "ValuationSnapshot",
 ]

@@ -4,7 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.backtest import A_SHARE_COST_V1, build_fee_model
+from app.backtest import A_SHARE_COST_V1, AShareTradabilityPolicy, build_fee_model
 from app.config.settings import settings
 from app.database.transaction import idempotent_write
 from app.repositories.trade import (
@@ -36,6 +36,10 @@ def _default_paper_broker() -> PaperBrokerAdapter:
             exchange_fee_rate=Decimal("0.0000487"),
         ),
     )
+
+
+def _default_tradability_policy() -> AShareTradabilityPolicy:
+    return AShareTradabilityPolicy()
 
 
 CONFIRMATION_POLICY = {
@@ -72,7 +76,61 @@ def _decimal_text(value) -> str:
     return format(Decimal(value).normalize(), "f")
 
 
-def build_paper_order_batch(*, check, orders, plan, targets, equity, account, broker):
+def assert_execution_day_tradable(
+    *,
+    plan,
+    orders,
+    execution_day_bars: dict,
+    tradability_policy: AShareTradabilityPolicy | None = None,
+) -> None:
+    """Validate that every order can be filled on the execution day.
+
+    The function mirrors :class:`AShareTradabilityPolicy` and is meant to be
+    invoked by the approval service before persisting an approval. Missing
+    bars and any blocked direction raise :class:`PaperApprovalConflict`.
+    """
+    policy = tradability_policy or _default_tradability_policy()
+    for order in orders:
+        bar = execution_day_bars.get(order.symbol)
+        if bar is None:
+            raise PaperApprovalConflict(
+                f"{order.symbol} has no trusted none daily bar on execution "
+                f"day {plan.as_of_date.isoformat()}; A-share tradability "
+                "cannot be evaluated"
+            )
+        tradability = policy.check(bar)
+        if order.side == "buy" and not tradability.can_buy:
+            raise PaperApprovalConflict(
+                f"{order.symbol} buy is blocked on the execution day: "
+                + (tradability.reason or "buy is not tradable")
+            )
+        if order.side == "sell" and not tradability.can_sell:
+            raise PaperApprovalConflict(
+                f"{order.symbol} sell is blocked on the execution day: "
+                + (tradability.reason or "sell is not tradable")
+            )
+
+
+def build_paper_order_batch(
+    *,
+    check,
+    orders,
+    plan,
+    targets,
+    equity,
+    account,
+    broker,
+    execution_day_bars: dict | None = None,
+):
+    """Build a deterministic order summary for a paper execution batch.
+
+    When ``execution_day_bars`` is supplied the function attaches the matching
+    bar to every ``BrokerOrderRequest`` so the broker's tradability policy is
+    evaluated with the real execution-day snapshot. The caller is expected to
+    have run an explicit pre-flight (``assert_execution_day_tradable``) when
+    the bar dictionary is empty (e.g. confirmation replay that already
+    accepted the order batch).
+    """
     target_by_symbol = {target.symbol: target for target in targets}
     ordered_orders = sorted(
         orders,
@@ -82,14 +140,26 @@ def build_paper_order_batch(*, check, orders, plan, targets, equity, account, br
     estimated_cash = Decimal(equity.cash_balance)
     for execution_index, order in enumerate(ordered_orders):
         target = target_by_symbol[order.symbol]
-        fill = broker.execute(
+        bar = (
+            execution_day_bars.get(order.symbol)
+            if execution_day_bars is not None
+            else None
+        )
+        # Confirmation-time pre-build already ran an explicit tradability
+        # pre-flight. The broker's own check would be redundant and would
+        # abort the summary build on any blocked order, so it is disabled
+        # here. Real execution paths go through the default ``execute``
+        # which still enforces the policy.
+        fill = broker.execute_with_tradability(
             BrokerOrderRequest(
                 symbol=order.symbol,
                 side=order.side,
                 quantity=abs(order.order_quantity),
                 reference_price=order.reference_price,
                 trade_date=plan.as_of_date,
-            )
+                bar=bar,
+            ),
+            enforce_tradability=False,
         )
         estimated_amount = Decimal(fill.quantity) * fill.price
         if order.side == "sell":
@@ -182,11 +252,33 @@ class PaperExecutionApprovalService:
         risk_service: BoundRiskEvaluationService | None = None,
         paper_repository: PaperTradingRepository | None = None,
         broker: PaperBrokerAdapter | None = None,
+        daily_bar_repository=None,
+        tradability_policy: AShareTradabilityPolicy | None = None,
     ) -> None:
         self.repository = repository or PaperExecutionApprovalRepository()
         self.risk_service = risk_service or BoundRiskEvaluationService()
         self.paper_repository = paper_repository or PaperTradingRepository()
         self.broker = broker or _default_paper_broker()
+        self.daily_bar_repository = daily_bar_repository
+        self.tradability_policy = tradability_policy or _default_tradability_policy()
+
+    def _load_execution_day_bars(self, db, *, plan, orders):
+        if self.daily_bar_repository is None:
+            from app.repositories.market import DailyBarRepository
+
+            self.daily_bar_repository = DailyBarRepository()
+        symbols = {order.symbol for order in orders}
+        if not symbols:
+            return {}
+        return {
+            bar.symbol: bar
+            for bar in self.daily_bar_repository.list_by_symbols_on_date(
+                db,
+                symbols=symbols,
+                trade_date=plan.as_of_date,
+                adjust_type="none",
+            )
+        }
 
     def create(
         self,
@@ -242,6 +334,17 @@ class PaperExecutionApprovalService:
         )
         if account is None:
             raise PaperApprovalNotFound("paper account not found")
+        execution_day_bars = self._load_execution_day_bars(
+            db,
+            plan=plan,
+            orders=orders,
+        )
+        assert_execution_day_tradable(
+            plan=plan,
+            orders=orders,
+            execution_day_bars=execution_day_bars,
+            tradability_policy=self.tradability_policy,
+        )
         order_summary, estimated_cash, order_batch_hash = build_paper_order_batch(
             check=check,
             orders=orders,
@@ -250,6 +353,7 @@ class PaperExecutionApprovalService:
             equity=equity,
             account=account,
             broker=self.broker,
+            execution_day_bars=execution_day_bars,
         )
         approved_at = datetime.now(UTC)
         expires_at = approved_at + APPROVAL_TTL

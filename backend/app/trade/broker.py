@@ -18,7 +18,10 @@ class BrokerOrderRequest:
     quantity: int
     reference_price: Decimal
     trade_date: date
-    # Optional execution bar for A-share tradability checks.
+    # Optional execution bar for A-share tradability checks. Set by callers
+    # that have authoritative execution-day market data. Callers that do not
+    # (e.g. confirmation-time order summary pre-build) should leave the field
+    # ``None``; the broker then applies fee model only.
     bar: Any | None = None
 
 
@@ -60,13 +63,29 @@ class PaperBrokerAdapter:
         self.tradability_policy = tradability_policy or AShareTradabilityPolicy()
 
     def execute(self, order: BrokerOrderRequest) -> BrokerFill:
+        return self.execute_with_tradability(order, enforce_tradability=True)
+
+    def execute_with_tradability(
+        self,
+        order: BrokerOrderRequest,
+        *,
+        enforce_tradability: bool,
+    ) -> BrokerFill:
+        """Run the order through the fee model.
+
+        When ``enforce_tradability`` is true the broker rejects blocked
+        directions via :class:`_PaperExecutionBlocked`. Confirmation-time
+        callers that already validated tradability separately should pass
+        ``enforce_tradability=False`` so the broker only computes fill price
+        and fees.
+        """
         if order.side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
         if order.quantity <= 0:
             raise ValueError("quantity must be positive")
         if order.reference_price <= 0:
             raise ValueError("reference_price must be positive")
-        if order.bar is not None:
+        if enforce_tradability and order.bar is not None:
             tradability = self.tradability_policy.check(order.bar)
             if order.side == "buy" and not tradability.can_buy:
                 raise _PaperExecutionBlocked(

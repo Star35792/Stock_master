@@ -19,6 +19,7 @@ class TrainingArtifactRepository:
         test_start_date: date,
         test_end_date: date,
         training_input_snapshot: dict[str, Any],
+        artifact_hash: str,
         code_version: str,
         data_version: str,
     ) -> TrainingArtifact:
@@ -31,6 +32,7 @@ class TrainingArtifactRepository:
             test_start_date=test_start_date,
             test_end_date=test_end_date,
             training_input_snapshot=training_input_snapshot,
+            artifact_hash=artifact_hash,
             code_version=code_version,
             data_version=data_version,
         )

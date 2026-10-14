@@ -210,6 +210,7 @@ class DailyBacktestService:
         sell_stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
+        training_artifact_id: int | None = None,
     ) -> PersistedBacktestResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -307,6 +308,7 @@ class DailyBacktestService:
             start_date=start_date,
             end_date=end_date,
             initial_cash=initial_cash,
+            training_artifact_id=training_artifact_id,
         )
         try:
             corporate_actions = (

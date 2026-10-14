@@ -88,6 +88,42 @@ class FailOnSecondFillRepository(PaperTradingRepository):
         return result
 
 
+class FakeDailyBarRepository:
+    """Provides a tradable bar so the new execution-day check passes.
+
+    The integration test does not seed ``market.daily_bar``; without this
+    fake the execution would short-circuit on a missing execution-day bar
+    before reaching the second fill failure the test is asserting.
+    """
+
+    def list_by_symbols_on_date(
+        self,
+        db: Session,
+        *,
+        symbols,
+        trade_date,
+        adjust_type,
+    ):
+        from types import SimpleNamespace as _SN
+
+        return [
+            _SN(
+                symbol=symbol,
+                open=Decimal("10"),
+                close=Decimal("10"),
+                high=Decimal("10"),
+                low=Decimal("10"),
+                pre_close=Decimal("10"),
+                limit_up=Decimal("20"),
+                limit_down=Decimal("1"),
+                is_suspended=False,
+                special_treatment_status=None,
+                quality_status="trusted",
+            )
+            for symbol in sorted(symbols)
+        ]
+
+
 class BarrierApprovalRepository(PaperExecutionApprovalRepository):
     def __init__(self, barrier: Barrier) -> None:
         self.barrier = barrier
@@ -315,6 +351,7 @@ def test_rolls_back_second_fill_failure(session_factory) -> None:
     service = PaperExecutionService(
         paper_repository=FailOnSecondFillRepository(),
         risk_service=DatabaseRiskService(),
+        daily_bar_repository=FakeDailyBarRepository(),
     )
 
     with session_factory() as db, pytest.raises(RuntimeError, match="second fill"):
@@ -364,6 +401,7 @@ def test_concurrent_same_key_replays_one_batch(session_factory) -> None:
         service = PaperExecutionService(
             approval_repository=BarrierApprovalRepository(barrier),
             risk_service=DatabaseRiskService(),
+            daily_bar_repository=FakeDailyBarRepository(),
         )
         with session_factory() as db:
             result = service.execute(
