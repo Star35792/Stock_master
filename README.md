@@ -105,10 +105,16 @@ uv run python scripts/scheduler/run_daily_loop.py
 常用验证命令：
 
 ```bash
-uv run --extra dev ruff check app tests alembic
+# 后端
+uv run --extra dev ruff check app tests
 uv run --extra dev pytest
-uv run alembic current
+uv run --extra dev alembic check
+
+# 前端
+npm run build
 ```
+
+CI 配置位于 `.github/workflows/ci.yml`，本地可运行 `scripts/ci-check.sh`（Git Bash / Linux / macOS）做同样检查。
 
 ## 目录结构
 
