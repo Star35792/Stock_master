@@ -51,6 +51,13 @@ def create_portfolio_plan(
 
     input_snapshot = payload.model_dump(mode="json")
     input_snapshot["input_source"] = "operator_provided"
+    style_factor_map = None
+    if payload.constraints.style_factor_map is not None:
+        style_factor_map = {
+            k: v
+            for k, v in payload.constraints.style_factor_map.model_dump().items()
+            if v is not None
+        }
     try:
         result = service.build(
             db,
@@ -59,7 +66,9 @@ def create_portfolio_plan(
             assets=[PortfolioAsset(**asset.model_dump()) for asset in payload.assets],
             cash=payload.cash,
             constraints=PortfolioConstraints(
-                **payload.constraints.model_dump(exclude={"risk_budget"}),
+                **payload.constraints.model_dump(
+                    exclude={"risk_budget", "style_factor_map", "benchmark_symbol"}
+                ),
                 risk_budget=(
                     PortfolioRiskBudget(**payload.constraints.risk_budget.model_dump())
                     if payload.constraints.risk_budget is not None
@@ -69,6 +78,8 @@ def create_portfolio_plan(
             code_version=settings.app_code_version,
             idempotency_key=normalized_key,
             input_snapshot=input_snapshot,
+            style_factor_map=style_factor_map,
+            benchmark_symbol=payload.constraints.benchmark_symbol,
         )
         db.commit()
         return result

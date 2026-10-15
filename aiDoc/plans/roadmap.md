@@ -46,9 +46,9 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - CSV 路径暂不作为当前阻塞项。
 - P0-3 数据→因子日级闭环已交付：`daily_loop` 编排器串联 `daily_sync` 与 `factor_pipeline`，每次运行写入 `system.job_log`；`system.job_log` 从空表变为有实际写入入口，但数据质量问题和数据源配置表仍需后续接入。
 - 数据获取困难是系统性问题：例如 HiThink 当前无法获取 `562820.SH` 集成电路ETF嘉实，需要用东方财富等补充源兜底。补充源不能绕过数据中心，必须先进入 `raw`，再经质量校验构建到 `market`。
-- V5.1 组合草案已接入风险预算（`PortfolioRiskBudget`）：行业权重上限与组合约束同源，并在 `PortfolioTarget.reasons` 中记录违反原因；风格暴露、跟踪误差、组合波动率已暴露 schema 和持久化，但计算与强制待风格因子/基准收益数据就绪。V5.2 readiness/净值/ADV/正式风险评估和 V5.3 短时确认/幂等模拟执行已形成公共闭环。执行固定 paper-only 和 local single-user，在内存全批预演通过后才单事务写入；确认、账户、订单、成交和执行批次可追溯，PostgreSQL 回滚与同键并发已在隔离库验证。真实成本、异步部分成交和外部券商对账仍属于后续加固或 V7 边界。
+- V5.1 组合草案已接入风险预算（`PortfolioRiskBudget`）：行业权重上限、风格暴露、跟踪误差与组合波动率四类约束与组合约束同源，由 `PortfolioBuilder._apply_style_and_tracking_risk` 强制执行（先于组约束执行），风格代理因子来自 `market.valuation_snapshot` 与 `factor.factor_value`，组合收益率按单资产收益率加权汇总，超预算时等比例缩放并在 `PortfolioTarget.reasons` 记录 `style_budget` / `tracking_error_budget` / `volatility_budget`；`PortfolioPlanRead.style_risk` 与持久化 `plan.style_risk` 可回读风格暴露明细、跟踪误差、波动率与缺失基准标记。风格代理口径（size=ln 市值、value=-PB、momentum/volatility/liquidity=factor_value z-score）为显式研究假设，非完整风格模型。V5.2 readiness/净值/ADV/正式风险评估和 V5.3 短时确认/幂等模拟执行已形成公共闭环。执行固定 paper-only 和 local single-user，在内存全批预演通过后才单事务写入；确认、账户、订单、成交和执行批次可追溯，PostgreSQL 回滚与同键并发已在隔离库验证。真实成本、异步部分成交和外部券商对账仍属于后续加固或 V7 边界。
 - V7 尚未开始。当前没有真实账户只读适配器、券商回报对账、外部订单幂等状态机、人工审批记录和 kill switch；不得因测试通过而放行实盘边界。
-- 新增上层因子多为代理变量：行业和政策因子当前依赖现有证券行业标签，财务因子仍需把报告期口径升级为公告日/首次可得时间口径。
+- 新增上层因子多为代理变量：财务因子已按公告日生效（`report_date < trade_date`，运行元数据显式声明公告日语义与消费的报表修订哈希），报告修订版本化（`fundamental.financial_statement_revision`），金融行业证券从通用结构因子中剔除（行业专属指标待专门数据源），行业因子按 `market.security_industry_history` 时点标签生效（无历史时回退当前标签并显式记录）；历史行业分类数据源与行业专属财务指标仍待接入。
 
 ## V1 可信日线数据中心
 
@@ -212,6 +212,7 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 横截面派生因子运行批次、定义注册、幂等写入、查询 API 和命令行入口。
 - 已扩展到财务、行业、资金流、拥挤度、情绪、宏观、政策、估值和复合因子等多个研究信号族的复用层。
 - 批量诊断：`FactorBatchProfilerService` 对 `factor.factor_definition` 中全部活跃因子逐个运行截面诊断，单因子失败按因子隔离且不影响同批其他因子，整批运行写入 `system.job_log`（`status=success/partial/failed`）；派生 `__` 变换因子不重复作为源。`POST /api/v1/factors/batch-profiles` 触发批量运行，`GET /api/v1/factors/batch-profiles/summary` 按因子聚合已持久化 IC 证据（跨日期简单平均，缺失 horizon 返回空而非 0），命令行入口 `scripts/factors/run_batch_profiles.py`。
+- 财务时点正确性（硬门槛四）：财务因子按供应商公告日 `report_date < trade_date` 生效，运行元数据声明公告日语义与 `statement_content_digest`/`statement_revision_binding`；`fundamental.financial_statement_revision` 保留报告修订历史（修正披露/更正公告不静默覆盖）；金融行业证券从通用结构因子 fail-closed 剔除（`app/services/financial_sector.py`）；行业因子按 `market.security_industry_history` 的时点标签生效，无历史时回退当前标签并在元数据显式记录。历史行业数据源与行业专属财务指标仍待接入。
 
 阶段门：
 
@@ -340,6 +341,9 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 行业预算及股票、ETF、指数等证券类型预算。
 - 组预算超限支持两种执行模式：`proportional_scale`（等比缩放，保持原有默认行为）和 `score_ranked_trim`（按资产分数从低到高削减，被削到 0 的标的离场）。择优截断要求每个资产都带 `score`，缺失时拒绝而不是猜测。
 - 支持单标的额外上限 `extra_symbol_caps`，用于个别标的比通用上限更严的场景；它与通用上限在构造期合成单一有效上限，请求权重在构造期即被封顶，单调不增的组约束不会破坏该不变量。
+- 风险预算四约束：`max_industry_weight`、`max_style_exposure`、`max_tracking_error`、`max_portfolio_volatility` 与 `benchmark`。风格暴露/跟踪误差/组合波动率在组约束之前强制执行，超预算时等比例缩放权重并记录 `style_budget` / `tracking_error_budget` / `volatility_budget`；跟踪误差预算缺失基准符号或基准价格时 fail-closed。
+- 风格代理因子：`size`=ln 市值 z-score、`value`=-PB z-score、`momentum`/`volatility`/`liquidity`=factor_value z-score（`DEFAULT_STYLE_FACTOR_MAP`），可通过请求 `style_factor_map` 覆盖；基准成分股不在因子截面时主动暴露回退为组合暴露（显式简化假设）。
+- `PortfolioPlanRead.style_risk` 与持久化 `plan.style_risk` 回读风格暴露明细、跟踪误差、组合波动率、缺失风格与 `missing_benchmark` 标记。
 - 当前持仓到目标持仓的买卖数量计算。
 - 每个目标记录原始权重、约束后权重、最终权重和调整原因。
 - 组合计划和逐标的目标结果落库。

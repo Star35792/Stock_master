@@ -13,9 +13,12 @@ from app.services.hithink_financial_collection import (
 def test_financial_data_source_maps_statement_endpoint() -> None:
     source = HithinkFinanceDataSource(api_key="test")
     calls = []
-    source._get = lambda path, params: calls.append((path, params)) or {  # type: ignore[method-assign]
-        "item": [{"thscode": "600519.SH"}]
-    }
+    source._get = lambda path, params: (
+        calls.append((path, params))
+        or {  # type: ignore[method-assign]
+            "item": [{"thscode": "600519.SH"}]
+        }
+    )
 
     rows = source.fetch_financial_statements(
         symbol="600519.sh",

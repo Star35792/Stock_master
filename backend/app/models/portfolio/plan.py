@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
 from app.models.common import CreatedAtMixin
+from app.portfolio.style_risk import PortfolioStyleRisk
 
 
 class PortfolioPlanRecord(CreatedAtMixin, Base):
@@ -45,6 +46,7 @@ class PortfolioPlanRecord(CreatedAtMixin, Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    style_risk: Mapped[PortfolioStyleRisk | None] = mapped_column(JSON, nullable=True)
 
 
 class PortfolioTargetRecord(CreatedAtMixin, Base):

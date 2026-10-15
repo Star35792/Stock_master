@@ -62,6 +62,7 @@ class PortfolioPlanRepository:
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             input_snapshot=input_snapshot,
+            style_risk=plan.style_risk,
         )
         db.add(record)
         db.flush()

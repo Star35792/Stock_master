@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 from app.data_sources import HithinkFinanceDataSource
 from app.models.fundamental import FinancialIndicator, FinancialStatement
 from app.models.raw import RawFinancialPayload
+from app.repositories.fundamental import (
+    FinancialStatementRevisionRepository,
+    statement_content_hash,
+)
 from app.repositories.raw import RawDailyBarImportRepository
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -82,7 +86,13 @@ class HithinkFinancialCollectionService:
                 )
                 for item in items:
                     db.add(_raw_statement(batch.id, self.data_source.name, statement_type, item))
-                    _upsert_statement(db, self.data_source.name, statement_type, item)
+                    _upsert_statement(
+                        db,
+                        self.data_source.name,
+                        statement_type,
+                        item,
+                        batch_id=batch.id,
+                    )
                     statement_rows += 1
                     raw_rows += 1
 
@@ -146,7 +156,12 @@ def _raw_indicators(batch_id: int, source_name: str, payload: dict) -> RawFinanc
 
 
 def _upsert_statement(
-    db: Session, source_name: str, statement_type: str, item: dict
+    db: Session,
+    source_name: str,
+    statement_type: str,
+    item: dict,
+    *,
+    batch_id: int | None = None,
 ) -> None:
     row = {
         "symbol": str(item["thscode"]).upper(),
@@ -164,6 +179,12 @@ def _upsert_statement(
         },
         "source_name": source_name,
     }
+    _record_revision_if_changed(
+        db,
+        row=row,
+        row_hash=statement_content_hash(row),
+        batch_id=batch_id,
+    )
     statement = insert(FinancialStatement).values(row)
     statement = statement.on_conflict_do_update(
         index_elements=[
@@ -182,6 +203,61 @@ def _upsert_statement(
         },
     )
     db.execute(statement)
+
+
+def _record_revision_if_changed(
+    db: Session,
+    *,
+    row: dict,
+    row_hash: str,
+    batch_id: int | None,
+) -> None:
+    """Append an immutable revision row when the report content changes.
+
+    ``financial_statement`` keeps only the latest content per report key. The
+    first observation of a key writes revision 1; every later observation with
+    different content (restatement, correction, or a changed announcement date)
+    writes the next revision before the current row is overwritten, so the
+    superseded content stays queryable. Identical content is a no-op.
+    """
+
+    repository = FinancialStatementRevisionRepository()
+    current = repository.current_statement(
+        db,
+        symbol=row["symbol"],
+        statement_type=row["statement_type"],
+        period=row["period"],
+        fiscal_year=row["fiscal_year"],
+        fiscal_period=row["fiscal_period"],
+    )
+    if current is not None and statement_content_hash(
+        {
+            "report_date": current.report_date,
+            "period_end": current.period_end,
+            "currency": current.currency,
+            "metrics": current.metrics,
+        }
+    ) == statement_content_hash(row):
+        return
+    revision_no = (
+        repository.next_revision_no(
+            db,
+            symbol=row["symbol"],
+            statement_type=row["statement_type"],
+            period=row["period"],
+            fiscal_year=row["fiscal_year"],
+            fiscal_period=row["fiscal_period"],
+        )
+        if current is not None
+        else 1
+    )
+    repository.append(
+        db,
+        row=row,
+        revision_no=revision_no,
+        row_hash=row_hash,
+        batch_id=batch_id,
+    )
 
 
 def _upsert_indicators(db: Session, source_name: str, payload: dict) -> int:

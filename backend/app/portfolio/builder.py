@@ -2,9 +2,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 from app.portfolio.enums import ConstraintEnforcementMode
 from app.portfolio.risk_budget import PortfolioRiskBudget
+from app.portfolio.style_risk import (
+    PortfolioStyleRisk,
+    build_portfolio_style_risk,
+    scale_style_exposures,
+)
 
 
 class _SymbolCapReason(StrEnum):
@@ -29,9 +35,7 @@ class PortfolioConstraints:
     max_symbol_weight: Decimal = Decimal("0.20")
     max_industry_weight: Decimal = Decimal("0.40")
     security_type_budgets: dict[str, Decimal] | None = None
-    enforcement_mode: ConstraintEnforcementMode = (
-        ConstraintEnforcementMode.PROPORTIONAL_SCALE
-    )
+    enforcement_mode: ConstraintEnforcementMode = ConstraintEnforcementMode.PROPORTIONAL_SCALE
     extra_symbol_caps: dict[str, Decimal] = field(default_factory=dict)
     risk_budget: PortfolioRiskBudget | None = None
 
@@ -59,15 +63,26 @@ class PortfolioPlan:
     target_cash: Decimal
     cash_after: Decimal
     targets: tuple[PortfolioTarget, ...]
+    style_risk: PortfolioStyleRisk | None = None
 
 
 class PortfolioBuilder:
+    def __init__(
+        self,
+        style_data_service: Any | None = None,
+    ) -> None:
+        self.style_data_service = style_data_service
+
     def build(
         self,
         *,
         assets: list[PortfolioAsset],
         cash: Decimal,
         constraints: PortfolioConstraints,
+        db: Any | None = None,
+        as_of_date: Any | None = None,
+        style_factor_map: dict[str, tuple[str, str]] | None = None,
+        benchmark_symbol: str | None = None,
     ) -> PortfolioPlan:
         self._validate(assets, cash, constraints)
         total_equity = cash + sum(
@@ -82,13 +97,23 @@ class PortfolioBuilder:
             for asset in assets
         }
         weights = {
-            asset.symbol: min(asset.requested_weight, symbol_caps[asset.symbol])
-            for asset in assets
+            asset.symbol: min(asset.requested_weight, symbol_caps[asset.symbol]) for asset in assets
         }
         reasons: dict[str, list[str]] = {asset.symbol: [] for asset in assets}
         for asset in assets:
             if asset.requested_weight > symbol_caps[asset.symbol]:
                 reasons[asset.symbol].append("max_symbol_weight")
+
+        style_risk = self._apply_style_and_tracking_risk(
+            assets=assets,
+            weights=weights,
+            reasons=reasons,
+            constraints=constraints,
+            db=db,
+            as_of_date=as_of_date,
+            style_factor_map=style_factor_map,
+            benchmark_symbol=benchmark_symbol,
+        )
 
         self._enforce_group(
             assets=assets,
@@ -113,6 +138,7 @@ class PortfolioBuilder:
             reason="industry_budget",
             mode=constraints.enforcement_mode,
         )
+
         # Single-symbol caps are already enforced by the min() at construction;
         # _scale_group and _trim_group are both monotonically decreasing, so no
         # re-capping pass is needed or possible here.
@@ -164,6 +190,7 @@ class PortfolioBuilder:
             target_cash=target_cash,
             cash_after=cash_after,
             targets=tuple(targets),
+            style_risk=style_risk,
         )
 
     @staticmethod
@@ -173,6 +200,123 @@ class PortfolioBuilder:
         if constraints.risk_budget is not None:
             limit = min(limit, constraints.risk_budget.max_industry_weight)
         return limit
+
+    def _apply_style_and_tracking_risk(
+        self,
+        *,
+        assets: list[PortfolioAsset],
+        weights: dict[str, Decimal],
+        reasons: dict[str, list[str]],
+        constraints: PortfolioConstraints,
+        db: Any | None,
+        as_of_date: Any | None,
+        style_factor_map: dict[str, tuple[str, str]] | None,
+        benchmark_symbol: str | None,
+    ) -> PortfolioStyleRisk | None:
+        if constraints.risk_budget is None:
+            return None
+        budget = constraints.risk_budget
+        need_style = budget.max_style_exposure is not None
+        need_te = budget.max_tracking_error is not None
+        need_vol = budget.max_portfolio_volatility is not None
+        if not need_style and not need_te and not need_vol:
+            return None
+        if db is None or as_of_date is None:
+            raise ValueError("style/tracking/volatility risk budgets require db and as_of_date")
+        if self.style_data_service is None:
+            from app.services.portfolio_style_data import PortfolioStyleDataService
+
+            self.style_data_service = PortfolioStyleDataService()
+        symbols = sorted(weights.keys())
+        style_factors = self.style_data_service.load_style_exposures(
+            db,
+            as_of_date=as_of_date,
+            symbols=symbols,
+            style_factor_map=style_factor_map,
+        )
+        benchmark_weights: dict[str, Decimal] | None = None
+        benchmark_prices: list[Decimal] | None = None
+        if benchmark_symbol is None:
+            benchmark_symbol = budget.benchmark
+        if need_te or benchmark_symbol is not None:
+            if benchmark_symbol is None:
+                raise ValueError("tracking error risk budget requires a benchmark symbol")
+            benchmark_prices = self.style_data_service.load_benchmark_prices(
+                db,
+                benchmark_symbol=benchmark_symbol,
+                end_date=as_of_date,
+            )
+            if benchmark_prices is None:
+                raise ValueError(f"benchmark {benchmark_symbol} price history unavailable")
+            benchmark_weights = {benchmark_symbol: Decimal("1")}
+
+        portfolio_prices = self.style_data_service.load_historical_prices(
+            db,
+            symbols=symbols,
+            end_date=as_of_date,
+        )
+
+        if need_style:
+            max_style = budget.max_style_exposure
+            assert max_style is not None
+            scaled = scale_style_exposures(
+                weights=weights,
+                style_factors=style_factors,
+                max_active_exposure=max_style,
+                benchmark_weights=benchmark_weights,
+            )
+            if scaled != weights:
+                for symbol in weights:
+                    weights[symbol] = scaled[symbol]
+                    reasons[symbol].append("style_budget")
+
+        style_risk = build_portfolio_style_risk(
+            weights=weights,
+            style_factors=style_factors,
+            portfolio_prices=portfolio_prices,
+            benchmark_prices=benchmark_prices,
+        )
+
+        if need_te:
+            max_te = budget.max_tracking_error
+            assert max_te is not None
+            if style_risk.tracking_error is None:
+                raise ValueError("tracking error required but could not be computed")
+            if style_risk.tracking_error > max_te:
+                scale = max_te / style_risk.tracking_error
+                for symbol in weights:
+                    if weights[symbol] > 0:
+                        weights[symbol] *= scale
+                        reasons[symbol].append("tracking_error_budget")
+                style_risk = build_portfolio_style_risk(
+                    weights=weights,
+                    style_factors=style_factors,
+                    portfolio_prices=portfolio_prices,
+                    benchmark_prices=benchmark_prices,
+                )
+
+        if need_vol:
+            max_vol = budget.max_portfolio_volatility
+            assert max_vol is not None
+            if style_risk.portfolio_volatility is None:
+                raise ValueError("portfolio volatility required but could not be computed")
+            if style_risk.portfolio_volatility > max_vol:
+                scale = max_vol / style_risk.portfolio_volatility
+                # Slightly tighten the scale to absorb tiny Decimal/rounding drift
+                # so the recomputed volatility is guaranteed to sit inside the budget.
+                scale = (scale * Decimal("0.9999999999")).quantize(Decimal("0.0000000001"))
+                for symbol in weights:
+                    if weights[symbol] > 0:
+                        weights[symbol] *= scale
+                        reasons[symbol].append("volatility_budget")
+                style_risk = build_portfolio_style_risk(
+                    weights=weights,
+                    style_factors=style_factors,
+                    portfolio_prices=portfolio_prices,
+                    benchmark_prices=benchmark_prices,
+                )
+
+        return style_risk
 
     def _enforce_group(
         self,
@@ -277,9 +421,7 @@ class PortfolioBuilder:
             if cap <= 0 or cap > 1:
                 raise ValueError("extra symbol caps must be within (0, 1]")
             if symbol not in {asset.symbol for asset in assets}:
-                raise ValueError(
-                    f"extra symbol cap references unknown symbol {symbol!r}"
-                )
+                raise ValueError(f"extra symbol cap references unknown symbol {symbol!r}")
         if len({asset.symbol for asset in assets}) != len(assets):
             raise ValueError("asset symbols must be unique")
         for asset in assets:
@@ -292,9 +434,7 @@ class PortfolioBuilder:
             if asset.lot_size <= 0:
                 raise ValueError("lot_size must be positive")
         if constraints.enforcement_mode is ConstraintEnforcementMode.SCORE_RANKED_TRIM:
-            missing = sorted(
-                asset.symbol for asset in assets if asset.score is None
-            )
+            missing = sorted(asset.symbol for asset in assets if asset.score is None)
             if missing:
                 raise ValueError(
                     "score_ranked_trim requires a score on every asset; missing: "

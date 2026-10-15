@@ -12,7 +12,11 @@ from app.repositories.factor import (
     FactorRunRepository,
     FactorValueRepository,
 )
-from app.repositories.market import DailyBarRepository, SecurityRepository
+from app.repositories.market import (
+    DailyBarRepository,
+    SecurityIndustryHistoryRepository,
+    SecurityRepository,
+)
 
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
@@ -50,28 +54,36 @@ INDUSTRY_FACTOR_SPECS = (
         name="industry_momentum_60",
         display_name="Industry momentum 60",
         description=(
-            "60-trading-day equal-weight industry momentum using current security "
-            "industry labels"
+            "60-trading-day equal-weight industry momentum using point-in-time "
+            "security industry labels (current label fallback when no history)"
         ),
-        inputs=("market.daily_bar.close", "market.security.industry"),
+        inputs=(
+            "market.daily_bar.close",
+            "market.security_industry_history",
+            "market.security.industry",
+        ),
         horizon_days=60,
     ),
     IndustryFactorSpec(
         name="industry_breadth_20",
         display_name="Industry breadth 20",
-        description=(
-            "share of current-industry stocks with positive 20-trading-day return"
+        description=("share of point-in-time-industry stocks with positive 20-trading-day return"),
+        inputs=(
+            "market.daily_bar.close",
+            "market.security_industry_history",
+            "market.security.industry",
         ),
-        inputs=("market.daily_bar.close", "market.security.industry"),
         horizon_days=20,
     ),
     IndustryFactorSpec(
         name="industry_turnover_share_change_20",
         display_name="Industry turnover share change 20",
-        description=(
-            "current-industry total amount share minus its 20-observation lag"
+        description=("point-in-time-industry total amount share minus its 20-observation lag"),
+        inputs=(
+            "market.daily_bar.amount",
+            "market.security_industry_history",
+            "market.security.industry",
         ),
-        inputs=("market.daily_bar.amount", "market.security.industry"),
         horizon_days=20,
     ),
 )
@@ -82,12 +94,16 @@ class IndustryFactorService:
         self,
         daily_bar_repository: DailyBarRepository | None = None,
         security_repository: SecurityRepository | None = None,
+        security_industry_history_repository: (SecurityIndustryHistoryRepository | None) = None,
         definition_repository: FactorDefinitionRepository | None = None,
         run_repository: FactorRunRepository | None = None,
         value_repository: FactorValueRepository | None = None,
     ) -> None:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.security_repository = security_repository or SecurityRepository()
+        self.security_industry_history_repository = (
+            security_industry_history_repository or SecurityIndustryHistoryRepository()
+        )
         self.definition_repository = definition_repository or FactorDefinitionRepository()
         self.run_repository = run_repository or FactorRunRepository()
         self.value_repository = value_repository or FactorValueRepository()
@@ -130,10 +146,31 @@ class IndustryFactorService:
                 bars_by_symbol[bar.symbol].append(bar)
 
         all_symbols = set(bars_by_symbol)
-        industries = self.security_repository.get_industries(db, all_symbols)
+        current_industries = self.security_repository.get_industries(db, all_symbols)
+        # Point-in-time classification: resolve the label effective on each
+        # trade date from history; fall back to the current label only when no
+        # history row covers the symbol, and record the fallback explicitly.
+        industries_by_date: dict[date, dict[str, str]] = {}
+        fallback_symbols: set[str] = set()
+        for trade_date in sorted(
+            {bar.trade_date for bars in bars_by_symbol.values() for bar in bars}
+        ):
+            pit = self.security_industry_history_repository.industries_as_of(
+                db, symbols=all_symbols, as_of=trade_date
+            )
+            resolved: dict[str, str] = {}
+            for symbol in all_symbols:
+                industry = pit.get(symbol)
+                if industry is None:
+                    industry = current_industries.get(symbol) or None
+                    if industry is not None:
+                        fallback_symbols.add(symbol)
+                if industry:
+                    resolved[symbol] = industry
+            industries_by_date[trade_date] = resolved
         industry_metrics_by_factor = self._build_industry_metrics_by_factor(
             bars_by_symbol=bars_by_symbol,
-            industries=industries,
+            industries_by_date=industries_by_date,
             specs=specs,
         )
 
@@ -162,7 +199,7 @@ class IndustryFactorService:
                     "symbols": normalized_symbols,
                     "target_start_date": start_date.isoformat(),
                     "target_end_date": end_date.isoformat(),
-                    "industry_mapping_source": "current_security.industry",
+                    "industry_mapping_source": ("security_industry_history_as_of_trade_date"),
                     "lookback_days": LOOKBACK_DAYS,
                 },
                 code_version=code_version,
@@ -170,7 +207,15 @@ class IndustryFactorService:
                 input_start_date=input_start_date,
                 input_end_date=end_date,
                 metadata={
-                    "mapping_source": "current_security.industry",
+                    "mapping_source": ("security_industry_history_as_of_trade_date"),
+                    "industry_classification": {
+                        "policy": (
+                            "pit_history_with_current_label_fallback"
+                            if fallback_symbols
+                            else "pit_history"
+                        ),
+                        "fallback_symbols": sorted(fallback_symbols),
+                    },
                     "horizon_days": spec.horizon_days,
                 },
             )
@@ -178,7 +223,7 @@ class IndustryFactorService:
                 db,
                 spec=spec,
                 bars_by_symbol=bars_by_symbol,
-                industries=industries,
+                industries_by_date=industries_by_date,
                 industry_metrics_by_factor=industry_metrics_by_factor[spec.name],
                 run_id=run.id,
                 start_date=start_date,
@@ -201,9 +246,7 @@ class IndustryFactorService:
             run_ids=run_ids,
         )
 
-    def _select_specs(
-        self, factor_names: list[str] | None
-    ) -> tuple[IndustryFactorSpec, ...]:
+    def _select_specs(self, factor_names: list[str] | None) -> tuple[IndustryFactorSpec, ...]:
         if not factor_names:
             return INDUSTRY_FACTOR_SPECS
 
@@ -220,19 +263,17 @@ class IndustryFactorService:
         self,
         *,
         bars_by_symbol: dict[str, list[Any]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
         specs: tuple[IndustryFactorSpec, ...],
     ) -> dict[str, dict[date, dict[str, Decimal]]]:
         result: dict[str, dict[date, dict[str, Decimal]]] = {}
         turnover_specs = {
-            spec.name: spec
-            for spec in specs
-            if spec.name == "industry_turnover_share_change_20"
+            spec.name: spec for spec in specs if spec.name == "industry_turnover_share_change_20"
         }
         for spec in turnover_specs.values():
             result[spec.name] = self._build_industry_turnover_share_change(
                 bars_by_symbol=bars_by_symbol,
-                industries=industries,
+                industries_by_date=industries_by_date,
                 horizon_days=spec.horizon_days,
             )
 
@@ -249,10 +290,10 @@ class IndustryFactorService:
             )
             symbol_returns = returns_by_horizon[spec.horizon_days]
             for symbol, dates in symbol_returns.items():
-                industry = industries.get(symbol)
-                if not industry:
-                    continue
                 for trade_date, value in dates.items():
+                    industry = industries_by_date.get(trade_date, {}).get(symbol)
+                    if not industry:
+                        continue
                     industry_values_by_date[trade_date][industry].append(value)
 
             result[spec.name] = {}
@@ -262,10 +303,7 @@ class IndustryFactorService:
                     if spec.name == "industry_momentum_60":
                         metric = sum(values, Decimal()) / Decimal(len(values))
                     elif spec.name == "industry_breadth_20":
-                        metric = (
-                            Decimal(sum(value > 0 for value in values))
-                            / Decimal(len(values))
-                        )
+                        metric = Decimal(sum(value > 0 for value in values)) / Decimal(len(values))
                     else:
                         raise ValueError(f"unsupported factor: {spec.name}")
                     result[spec.name][trade_date][industry] = metric
@@ -275,7 +313,7 @@ class IndustryFactorService:
     def _build_industry_turnover_share_change(
         *,
         bars_by_symbol: dict[str, list[Any]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
         horizon_days: int,
     ) -> dict[date, dict[str, Decimal]]:
         industry_amount_by_date: dict[date, dict[str, Decimal]] = defaultdict(
@@ -283,10 +321,10 @@ class IndustryFactorService:
         )
         total_amount_by_date: dict[date, Decimal] = defaultdict(Decimal)
         for symbol, bars in bars_by_symbol.items():
-            industry = industries.get(symbol)
-            if not industry:
-                continue
             for bar in bars:
+                industry = industries_by_date.get(bar.trade_date, {}).get(symbol)
+                if not industry:
+                    continue
                 if bar.amount is None:
                     continue
                 industry_amount_by_date[bar.trade_date][industry] += bar.amount
@@ -298,8 +336,7 @@ class IndustryFactorService:
             if total_amount <= 0:
                 continue
             shares_by_date[trade_date] = {
-                industry: amount / total_amount
-                for industry, amount in industry_amounts.items()
+                industry: amount / total_amount for industry, amount in industry_amounts.items()
             }
 
         ordered_dates = sorted(shares_by_date)
@@ -345,18 +382,18 @@ class IndustryFactorService:
         *,
         spec: IndustryFactorSpec,
         bars_by_symbol: dict[str, list[Any]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
         industry_metrics_by_factor: dict[date, dict[str, Decimal]],
         run_id: int,
         start_date: date,
     ) -> int:
         rows_written = 0
         for symbol, bars in bars_by_symbol.items():
-            industry = industries.get(symbol)
-            if not industry:
-                continue
             for bar in bars:
                 if bar.trade_date < start_date:
+                    continue
+                industry = industries_by_date.get(bar.trade_date, {}).get(symbol)
+                if not industry:
                     continue
                 value = industry_metrics_by_factor.get(bar.trade_date, {}).get(industry)
                 if value is None:

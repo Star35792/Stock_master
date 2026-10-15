@@ -2,7 +2,7 @@
 
 > 目标：在启动自动选股与策略自进化之前，完成四项金融正确性硬门槛。
 > 执行顺序：A股真实交易成本与可交易性 → 滚动 walk-forward → 组合风险预算 → 财务时点正确性。
-> 当前阶段：硬门槛一已经完成版本化费用模型、回测可交易性检查与公共 paper 接入执行日行情与可交易性检查；硬门槛二仍为后续规划，当前滚动窗口不能直接执行。
+> 当前阶段：硬门槛一已经完成版本化费用模型、回测可交易性检查与公共 paper 接入执行日行情与可交易性检查；硬门槛二滚动窗口已可执行并绑定不可变训练产物；硬门槛三已完成行业、风格暴露、跟踪误差与组合波动率四类风险预算的计算与强制；硬门槛四已完成公告日生效、报告修订版本化、金融行业口径隔离与时点行业分类落地，剩余数据源接入项作为显式限制。
 
 ## 1. 总体原则
 
@@ -157,7 +157,7 @@ A 股特殊交易约束：
 
 ### 4.1 目标
 
-在组合构建阶段引入行业集中度、风格暴露和基准跟踪误差约束。
+在组合构建阶段引入行业集中度、风格暴露、基准跟踪误差和组合波动率约束，并可计算、可强制、可审计。
 
 ### 4.2 关键设计
 
@@ -168,49 +168,72 @@ A 股特殊交易约束：
 2. **组合构建升级**
    - `PortfolioConstraints` 增加 `risk_budget: PortfolioRiskBudget | None`。
    - `PortfolioBuilder.build` 把 `max_industry_weight` 与 `risk_budget.max_industry_weight` 取较小值作为实际行业上限；权重被削减时 `PortfolioTarget.reasons` 记录 `industry_budget`。
-   - 风格暴露、跟踪误差、组合波动率字段已暴露给 schema 和持久化，但**计算与强制尚未实现**（缺少风格因子和基准收益数据源），当前作为显式研究假设占位。
+   - 约束执行顺序：单标的上限（构造期）→ 风格暴露/跟踪误差/组合波动率（`_apply_style_and_tracking_risk`）→ 证券类型预算 → 行业预算 → 现金保留。风格风险预算先于组约束执行，避免组预算提前把暴露压回合规区间导致风险约束永远不触发。
 
-3. **事前风控同源**
+3. **风格暴露代理因子**
+   - `PortfolioStyleDataService`（`backend/app/services/portfolio_style_data.py`）从现有数据源构造风格代理：
+     - `size`：`market.valuation_snapshot` 总市值的自然对数，横截面 z-score；
+     - `value`：`-PB`，横截面 z-score；
+     - `momentum` / `volatility` / `liquidity`：`factor.factor_value` 的 `momentum_20` / `volatility_20` / `liquidity_20`，横截面 z-score。
+   - 风格因子映射可通过 `style_factor_map` 覆盖（默认见 `DEFAULT_STYLE_FACTOR_MAP`）。
+
+4. **风格暴露计算与缩放**
+   - `compute_style_exposures` 计算组合暴露 `Σ(w_i · f_i)`、基准暴露与主动暴露（active exposure）。当基准成分股不在因子截面中时，主动暴露回退为组合暴露，确保风格预算仍能约束绝对暴露。
+   - `scale_style_exposures` 按 `max_active_exposure / max|active|` 等比例缩放全部权重；触发时 `PortfolioTarget.reasons` 记录 `style_budget`，缩放后的原因即使被后续组约束覆盖也保留，保证审计可追溯。
+
+5. **跟踪误差与组合波动率**
+   - 组合收益率按单资产收益率加权汇总（`Σ w_i · r_i`），与权重线性相关；跟踪误差为组合与基准日收益差的年化标准差，组合波动率为组合日收益的年化标准差（`_std` 使用 `Decimal.sqrt`，`compute_returns` 提供日收益序列）。
+   - 超出 `max_tracking_error` / `max_portfolio_volatility` 时按预算等比例下调权重，并在 `reasons` 记录 `tracking_error_budget` / `volatility_budget`；缩放系数额外收紧（×0.9999999999 后量化到 1e-10）以吸收 `Decimal.sqrt` 的尾差，保证重算后严格落在预算内。
+   - 跟踪误差预算要求基准符号存在且基准价格序列可得，缺失时 fail-closed 抛 `ValueError`，不会静默跳过。
+
+6. **事前风控同源**
    - `BoundRiskEvaluationService.evaluate` 从 `plan.parameters` 读取保存的约束构造 `RiskLimits`，使 `PreTradeRiskEngine` 使用的 `max_symbol_weight` / `max_industry_weight` 与组合构建时实际生效的值一致。
 
-4. **指数增强支持**
-   - `PortfolioRiskBudget.benchmark` 已暴露，可在后续接入基准收益后计算主动暴露与跟踪误差。
+7. **指数增强支持**
+   - `PortfolioRiskBudget.benchmark` 参与风格主动暴露计算与跟踪误差强制；`PortfolioPlanRead.style_risk` 暴露风格暴露明细、跟踪误差、波动率、缺失风格与缺失基准标记；`PortfolioPlanRepository.save` 持久化 `plan.style_risk`。
 
 ### 4.3 阶段门
 
 - [x] 组合构建支持行业风险预算约束（`PortfolioBuilder` 已读取 `risk_budget.max_industry_weight`）
 - [x] 风险预算违反时有明确原因记录（`PortfolioTarget.reasons` 包含 `industry_budget`）
 - [x] 事前风控使用同一套风险预算（`_risk_limits_from_plan` 从 `plan.parameters` 构造 `RiskLimits`）
-- [ ] 风格暴露、跟踪误差、组合波动率约束的计算与强制（待风格因子和基准收益数据就绪）
+- [x] 风格暴露、跟踪误差、组合波动率约束的计算与强制：`app/portfolio/style_risk.py` + `app/services/portfolio_style_data.py` 落地，`PortfolioBuilder._apply_style_and_tracking_risk` 强制执行，`PortfolioPlanRead.style_risk` 可回读
 
 ## 5. 硬门槛四：财务/基本面因子时点正确性
 
 ### 5.1 目标
 
-所有基本面因子使用公告日或首次可得时间，而不是报告期结束日。
+所有基本面因子使用公告日或首次可得时间，而不是报告期结束日；报告修订可追溯；金融行业不套用通用结构比率；行业分类按时点生效。
 
 ### 5.2 关键设计
 
-1. **财务数据升级**
-   - `market.financial` 或新表记录 `announcement_date`、`report_period_end`。
-   - 因子计算时按 `announcement_date` 生效。
+1. **公告日生效（已具备）**
+   - `fundamental.financial_statement` 记录 `report_date`（源侧 `report_date_ms`，即公告日）与 `period_end`（报告期结束日）。
+   - `FinancialFactorsService._write_factor_values` 与 `ValuationFactorsService` 均按 `report_date < bar.trade_date` 生效；因子运行参数写入 `availability_policy="announcement_date_before_trade_date"`，元数据写入 `report_date_semantics="source_provided_announcement_date"`，显式声明公告日口径来自供应商字段而非平台推导。
 
-2. **报告版本**
-   - 保留原始披露、修正披露、更正公告的版本。
-   - 只在修正公告后使用新值。
+2. **报告修订版本化**
+   - 新增 `fundamental.financial_statement_revision`：与 `financial_statement` 同键（symbol/statement_type/period/fiscal_year/fiscal_period），按 `revision_no` 单调递增，保存每次内容变化的完整快照（`report_date`/`period_end`/`currency`/`metrics`/`row_hash`/`batch_id`）。
+   - `HithinkFinancialCollectionService._upsert_statement` 写入前比较内容 hash：相同内容幂等跳过；内容变化（修正披露、更正公告、公告日变化）先追加修订再覆盖当前行，被取代的内容留在前一修订中可查。
+   - `FinancialStatementRevisionRepository.latest_by_key` 提供每键最新修订；`FinancialFactorsService` 在运行元数据写入 `statement_content_digest`（本次消费的报表内容摘要）与 `statement_revision_binding`（键→最新修订 hash），事后可核对"这次因子跑在哪个报表版本上"。
 
 3. **金融行业独立口径**
-   - 银行、保险、券商使用独立财务指标。
+   - 新增 `app/services/financial_sector.py`：金融行业（银行/保险/证券/券商/期货/金融/信托）证券不再套用通用结构比率（资产负债率、流动比率、利息保障倍数、应计比率、毛利率、营运利润率、ROIC 等），改为 fail-closed 跳过并在运行元数据记录 `financial_sector_policy`（版本、被跳过因子清单、被跳过证券、限制说明）。
+   - ROE/ROA、增长率、CAGR、稳定性类因子对金融发行者仍计算（报表确有对应科目）。
+   - 行业专属指标（净息差、资本充足率、综合成本率等）需要专门数据源，作为显式限制声明，不用通用因子代理。
 
-4. **历史行业分类**
-   - 使用历史时点行业分类，不用当前分类回填。
+4. **历史行业分类（时点）**
+   - 新增 `market.security_industry_history`：`(symbol, industry, effective_from, effective_to)`，`effective_to` 为 NULL 表示开放区间；`record_interval` 在写入新区间时关闭此前的开放区间，并拒绝早于开放区间起点的回填。
+   - `SecurityIndustryHistoryRepository.industries_as_of` 按交易日解析生效标签；重叠区间取 `effective_from` 最新者，避免数据缺陷静默丢行。
+   - `IndustryFactorService` 按每个交易日的时点标签计算机械动量/宽度/成交额占比变化；无历史时回退当前标签，并在运行元数据记录 `industry_classification.policy`（`pit_history` 或 `pit_history_with_current_label_fallback`）与回退证券清单，不静默混用。
 
 ### 5.3 阶段门
 
-- [ ] 所有财务因子能追溯到公告日
-- [ ] 报告修订版本化
-- [ ] 金融行业使用独立口径
-- [ ] 历史行业分类可用
+- [x] 所有财务因子能追溯到公告日：`report_date < trade_date` 生效 + 运行元数据显式声明公告日语义
+- [x] 报告修订版本化：`financial_statement_revision` 表、采集端修订写入、因子运行绑定修订 hash 与内容摘要
+- [x] 金融行业使用独立口径：通用结构比率 fail-closed 跳过并显式记录；行业专属指标限制已声明
+- [x] 历史行业分类可用：`security_industry_history` 表与仓库落地，行业因子按 as-of 生效，回退显式记录
+- [ ] 历史行业分类数据源接入：当前表结构可用但尚无供应商历史行业回流，行业因子在无历史证券上回退当前标签
+- [ ] 行业专属财务指标（净息差/资本充足率/综合成本率）：需要专门数据源，作为显式限制声明
 
 ## 6. 执行顺序与依赖
 
@@ -352,3 +375,122 @@ A 股特殊交易约束：
 ### 最终结论
 
 允许提交。P1 项中第 1 项（artifact hash 校验）建议提交前快速补齐；若本次不补齐，则在最终结论中明确记录为附条件提交，责任在后续切片关闭。
+
+## 10. 硬门槛三组合风险预算强制化评审记录
+
+> 触发原因：把组合风险预算从“行业权重 + 占位声明”升级为可计算的风格暴露、跟踪误差与组合波动率约束，并新增 `PortfolioStyleDataService` 数据源、`style_risk.py` 计算内核和 `PortfolioPlanRead.style_risk` 公共回读字段。该变更新增公共 API 字段、schema、持久化列和主链路上的金融语义，按 `aiDoc/plans/decision-review-protocol.md` 第 1 节判定为 T2。
+> 受影响模块与文档：`backend/app/portfolio/style_risk.py`（新增）、`backend/app/portfolio/builder.py`、`backend/app/services/portfolio_style_data.py`（新增）、`backend/app/services/portfolio.py`、`backend/app/schemas/portfolio.py`、`backend/app/api/routes/portfolio.py`、`backend/app/models/portfolio/plan.py`、`backend/app/repositories/portfolio/plan.py`、相关测试、`aiDoc/plans/roadmap.md`、`README.md`、本文件。
+> 当前阶段：硬门槛一、二已提交；硬门槛三是自动选股/策略自进化的前置金融正确性条件之一。本次把硬门槛三从“部分完成”推进到“计算与强制已交付”。
+> 评审方式：主代理分角色独立评审。
+
+### 四角色结论
+
+- 架构师：通过。新增模块保持既有分层：`style_risk.py` 是纯计算内核（无 IO），`portfolio_style_data.py` 负责数据装载，`PortfolioBuilder._apply_style_and_tracking_risk` 在既有 `build()` 流程中编排，`api/routes/portfolio.py` 只做参数转换。`_apply_style_and_tracking_risk` 被提前到 `_enforce_group` 之前执行，风险预算先于组约束生效，避免行业/类别预算提前把风格暴露压回合规区间导致风险约束永不触发；组约束只减不增，不会破坏已满足的风险预算。`PortfolioPlanRecord.style_risk` 为可空 JSON 列，`PortfolioPlanRepository.save` 透传，向前兼容。
+- 产品经理：通过。`PortfolioConstraintsRequest` 新增可选 `style_factor_map` 与 `benchmark_symbol`，`PortfolioPlanRead` 新增 `style_risk` 回读，契约向后兼容；未提供风险预算时行为与此前完全一致。`PortfolioTarget.reasons` 新增 `style_budget` / `tracking_error_budget` / `volatility_budget`，Vue3 工作台可在不改动现有交互的前提下展示新增拒绝/调整原因。
+- 金融行业专家：有条件通过。风格代理因子（size=ln 市值、value=-PB、momentum/volatility/liquidity=factor_value z-score）全部来自既有可信事实源（`market.valuation_snapshot`、`factor.factor_value`），横截面 z-score 是显式声明的标准化口径；组合收益率按单资产收益率加权汇总，与权重线性相关，缩放权重会等比例降低跟踪误差与波动率。限制：
+  1. 风格代理不等于真实 Barra 风格因子，代理口径已写入 `PortfolioStyleDataService.DEFAULT_STYLE_FACTOR_MAP` 与研究合同，不宣传为全量风格模型；
+  2. 基准成分股不在因子截面时主动暴露回退为组合暴露（基准暴露按 0 处理），是显式简化假设；
+  3. 缩放策略为确定性等比例下调而非优化器，满足预算即可，不承诺最小跟踪误差组合。上述三点作为显式研究假设记录。
+- Vibe Coding 规则编写者：通过。触发条件可判定（新增公共 API 字段与持久化列），文档同步覆盖 `aiDoc/plans/hard-gates-execution-plan.md`、`aiDoc/plans/roadmap.md`、`README.md`；测试新增 3 个风险预算场景（风格缩放、缺基准拒绝、波动率缩放）并保持 15 条 builder 测试全通过；`AGENT.MD` 第 162 条要求新文档以时间戳前缀命名，本次未新增文档文件。
+
+### 金融硬检查
+
+- 数据血缘：风格因子来自 `market.valuation_snapshot` 与 `factor.factor_value`，历史价格与基准价格来自 `market.daily_bar`（`quality_status=trusted`），符合 `raw -> market -> factor -> research` 链路。
+- 未来函数：风格暴露按计划日 `as_of_date` 装载；价格窗口以 `end_date=as_of_date` 为终点向后回溯，不使用未来价格。
+- 复现与审计：`PortfolioPlanRead.style_risk` 回读风格暴露明细、跟踪误差、波动率、缺失风格与 `missing_benchmark` 标记；`PortfolioPlanRecord.style_risk` JSON 落库，可与任意时刻快照对账。
+- 资金风险：本次只涉及组合构建层，不触碰 paper/实盘执行链路，无真实资金风险。
+- fail-closed：设置跟踪误差预算但缺失基准符号或基准价格时抛 `ValueError`；设置风格/跟踪/波动率预算但缺少 `db` 或 `as_of_date` 时抛 `ValueError`，均不静默跳过。
+
+### P0 / P1 阻断项
+
+- P0：无。
+- P1（显式研究假设，非阻断）：
+  1. 风格代理因子口径（size/value/momentum/volatility/liquidity）为代理而非完整风格模型，需接入真实多因子风格库后替换；
+  2. 基准成分股因子缺失时主动暴露回退为组合暴露；
+  3. 等比例缩放为确定性强制，非均值-方差优化。
+- P2 优化建议：
+  1. 后续可引入窗口切换成本与复合收益曲线（与硬门槛二阶段门 3.3 最后一项联动）；
+  2. 风格因子可扩展为用户自定义因子表达式，当前映射表已预留覆盖入口。
+
+### 测试与验证
+
+- 全部后端测试：619 passed，22 warnings，0 failed。
+- Ruff：`All checks passed!`；本次触及文件已通过 `ruff format`。
+- 新增/调整测试：`test_portfolio_builder.py` 新增 `test_portfolio_builder_scales_weights_for_style_exposure_budget`、`test_portfolio_builder_rejects_missing_benchmark_for_tracking_error`、`test_portfolio_builder_scales_weights_for_volatility_budget`，并扩展 `FakeStyleDataService`；`test_portfolio_service.py::test_risk_budget_roundtrips_through_persisted_parameters` 收敛为仅触发行业预算，避免在无 DB 场景装载风格数据。
+
+### 文档同步
+
+- `aiDoc/plans/hard-gates-execution-plan.md` 第 4 节关键设计与阶段门更新，新增本节评审记录。
+- `aiDoc/plans/roadmap.md` V5.1 与顶部“仍需注意”同步风险预算强制化边界。
+- `README.md` 核心 API 面补充组合草案风险预算请求/回读字段。
+
+### 明确不做
+
+- 不引入真实多因子风格模型（Barra 等），当前仅代理口径。
+- 不实现组合优化器，风险预算通过确定性等比例缩放强制。
+- 不生成跨窗口复合收益曲线。
+- 不修改 V5.2 / V5.3 已交付的风控、确认与 paper 执行链路。
+
+### 最终结论
+
+允许提交。风格代理口径与回退假设作为显式研究假设记录在 4.2 节，后续接入真实风格数据源时作为独立切片替换。
+
+## 11. 硬门槛四财务时点正确性切片评审记录
+
+> 触发原因：新增 `fundamental.financial_statement_revision` 与 `market.security_industry_history` 两张表及仓库，财务采集端写入报告修订历史，财务因子运行绑定修订 hash 与内容摘要，行业因子改为按交易日的时点行业标签生效，金融行业证券从通用结构因子中 fail-closed 剔除。该变更新增表、schema、持久化语义与因子运行元数据，按 `aiDoc/plans/decision-review-protocol.md` 第 1 节判定为 T2。
+> 受影响模块与文档：`backend/app/models/fundamental/financial.py`、`backend/app/models/market/security_industry_history.py`（新增）、`backend/app/repositories/fundamental/revision.py`（新增）、`backend/app/repositories/market/security_industry_history.py`（新增）、`backend/app/services/hithink_financial_collection.py`、`backend/app/services/financial_factors.py`、`backend/app/services/industry_factors.py`、`backend/app/services/financial_sector.py`（新增）、相关测试、`aiDoc/plans/roadmap.md`、`README.md`、本文件。
+> 当前阶段：硬门槛一至三已提交；硬门槛四是自动选股/策略自进化的前置金融正确性条件之一。本次完成阶段门 5.3 前四项，数据源接入与行业专属指标留作显式限制。
+> 评审方式：主代理分角色独立评审。
+
+### 四角色结论
+
+- 架构师：通过。修订表与行业历史表均为追加式新表，由 `create_all` 创建，不动既有表结构；采集端在既有 `_upsert_statement` 前插入"读当前行 → 比内容 hash → 追加修订"步骤，冲突覆盖逻辑保持不变；因子服务通过新增可选仓库依赖注入，默认构造不破坏既有调用方（`run_financial_factors.py` / `run_industry_factors.py` 仍无参构造）。`SecurityIndustryHistoryRepository.record_interval` 对早于开放区间起点的回填直接抛错，避免时间线静默损坏。
+- 产品经理：通过。无新增公共 API；因子运行元数据新增字段向后兼容（既有消费者读取 parameters/metadata 的键不受影响）。金融行业证券不再产出误导性结构因子，前端因子列表对这些证券显示为空而不是错误值，语义更诚实。
+- 金融行业专家：有条件通过。公告日口径、修订版本化、时点行业分类、金融行业剔除四项均按阶段门落地；修订历史保留被取代内容，因子运行绑定 `statement_content_digest` 与 `latest_revision_row_hash`，事后审计可还原"跑在哪个报表版本上"。限制：
+  1. `report_date_ms` 的公告日语义由供应商字段承担，平台未独立核验公告时点；
+  2. 历史行业分类表当前无供应商回流数据源，行业因子对无历史证券回退当前标签（已在元数据显式记录）；
+  3. 金融行业剔除后不产出替代指标，行业专属口径（净息差/资本充足率/综合成本率）待专门数据源。
+  上述三项作为显式限制写入阶段门 5.3 未勾选项。
+- Vibe Coding 规则编写者：通过。触发条件可判定（新增表与持久化语义），文档同步覆盖 `hard-gates-execution-plan.md`、`roadmap.md`、`README.md`；新增测试 7 项（修订仓库 5 + 采集修订 1 + 行业历史仓库并入）+ 因子服务 3 项 + 行业因子 1 项，全部通过；未新增文档文件，符合 `AGENT.MD` 第 162 条。
+
+### 金融硬检查
+
+- 时点正确性：财务因子继续按 `report_date < bar.trade_date` 生效，运行元数据显式声明公告日语义；行业因子按每个交易日的时点标签解析，历史标签变化在切换日生效。
+- 未来函数：修订内容只在采集时点落库，因子运行绑定当时最新修订 hash；重跑使用当前内容并通过 digest 差异可检测，不会假装历史运行用了旧内容。
+- 数据血缘：修订行与 `raw.financial_payload` 同批（`batch_id`），可回溯到原始批次；行业历史行记录 `source_name`。
+- 复现与审计：`statement_content_digest` + `statement_revision_binding` 进入 `factor_run.metadata`，与 `factor.factor_value` 的 `run_id` 关联可逐值对账。
+- 资金风险：本次只涉及研究层因子，不触碰 paper/实盘执行链路。
+
+### P0 / P1 阻断项
+
+- P0：无。
+- P1（显式限制，非阻断）：
+  1. 历史行业分类无供应商数据源，表结构先行；
+  2. 行业专属财务指标待专门数据源；
+  3. 公告日语义依赖供应商字段。
+- P2 优化建议：
+  1. 后续可为 `fundamental.financial_indicator`（无日期字段的财务指标表）补齐时点口径或停止消费；
+  2. 采集端可为修订触发条件（内容变化）增加告警，便于人工复核重大财务重述。
+
+### 测试与验证
+
+- 全部后端测试：630 passed，22 warnings，0 failed。
+- Ruff：`All checks passed!`；触及文件已 `ruff format`。
+- 新增测试：`test_financial_statement_revision.py`（内容 hash 确定性、修订追加与查询、采集修订历史与幂等、行业历史窗口解析与回退拒绝、两表初始化）；`test_financial_factors.py`（金融行业剔除、当前标签回退声明、修订绑定、运行元数据公告日语义）；`test_industry_factors.py`（时点再分类切换）。
+
+### 文档同步
+
+- `aiDoc/plans/hard-gates-execution-plan.md` 第 5 节关键设计与阶段门更新，新增本节评审记录；顶部当前阶段同步。
+- `aiDoc/plans/roadmap.md` V3 因子章节补充公告日/修订/时点行业/金融行业口径边界。
+- `README.md` 当前状态与研究能力描述同步。
+
+### 明确不做
+
+- 不引入供应商历史行业回流（表结构先行，数据源后续）。
+- 不实现行业专属财务指标计算。
+- 不核验供应商公告日语义（继续显式声明）。
+- 不修改已交付的回测、组合、风控与 paper 执行链路。
+
+### 最终结论
+
+允许提交。阶段门 5.3 剩余两项（历史行业数据源、行业专属指标）作为显式限制记录，按独立切片推进。

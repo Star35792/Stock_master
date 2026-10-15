@@ -19,7 +19,9 @@ from app.schemas.portfolio import (
     PortfolioConstraintsRequest,
     PortfolioPlanRead,
     PortfolioRiskBudgetRequest,
+    PortfolioStyleRiskRead,
     PortfolioTargetRead,
+    StyleExposureRead,
 )
 
 
@@ -85,6 +87,8 @@ class PortfolioConstructionService:
         code_version: str,
         idempotency_key: str,
         input_snapshot: dict[str, Any],
+        style_factor_map: dict[str, tuple[str, str]] | None = None,
+        benchmark_symbol: str | None = None,
     ) -> PortfolioPlanRead:
         request_hash = hash_portfolio_snapshot(input_snapshot)
         existing = self.repository.get_by_idempotency_key(
@@ -98,6 +102,10 @@ class PortfolioConstructionService:
             assets=assets,
             cash=cash,
             constraints=constraints,
+            db=db,
+            as_of_date=as_of_date,
+            style_factor_map=style_factor_map,
+            benchmark_symbol=benchmark_symbol,
         )
         try:
             with idempotent_write(db):
@@ -206,6 +214,23 @@ class PortfolioConstructionService:
             )
             for target in targets
         ]
+        style_risk = None
+        if hasattr(record, "style_risk") and record.style_risk is not None:
+            style_risk = PortfolioStyleRiskRead(
+                style_exposures=[
+                    StyleExposureRead(
+                        style_name=exp.style_name,
+                        portfolio_exposure=exp.portfolio_exposure,
+                        benchmark_exposure=exp.benchmark_exposure,
+                        active_exposure=exp.active_exposure,
+                    )
+                    for exp in record.style_risk.style_exposures
+                ],
+                tracking_error=record.style_risk.tracking_error,
+                portfolio_volatility=record.style_risk.portfolio_volatility,
+                missing_styles=list(record.style_risk.missing_styles),
+                missing_benchmark=record.style_risk.missing_benchmark,
+            )
         return PortfolioPlanRead(
             plan_id=record.id,
             name=record.name,
@@ -219,4 +244,5 @@ class PortfolioConstructionService:
             created_at=record.created_at,
             targets=target_reads,
             risk_budget=_risk_budget_from_parameters(record.parameters),
+            style_risk=style_risk,
         )

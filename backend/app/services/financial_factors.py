@@ -2,6 +2,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -12,8 +13,21 @@ from app.repositories.factor import (
     FactorRunRepository,
     FactorValueRepository,
 )
-from app.repositories.fundamental import FinancialStatementRepository
-from app.repositories.market import DailyBarRepository
+from app.repositories.fundamental import (
+    FinancialStatementRepository,
+    FinancialStatementRevisionRepository,
+    statement_content_hash,
+)
+from app.repositories.market import (
+    DailyBarRepository,
+    SecurityIndustryHistoryRepository,
+    SecurityRepository,
+)
+from app.services.financial_sector import (
+    EXCLUDED_FACTORS,
+    POLICY_VERSION as FINANCIAL_SECTOR_POLICY_VERSION,
+    is_financial_industry,
+)
 
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
@@ -187,8 +201,7 @@ FINANCIAL_FACTOR_SPECS = (
         category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="ROE single-period proxy (legacy roe_ttm key)",
         description=(
-            "latest reported single-period net profit / ending shareholders "
-            "equity; not TTM"
+            "latest reported single-period net profit / ending shareholders equity; not TTM"
         ),
         inputs=(
             "fundamental.financial_statement.income.metrics",
@@ -263,8 +276,7 @@ FINANCIAL_FACTOR_SPECS = (
         category=FactorCategory.FUNDAMENTAL_QUALITY,
         display_name="OCF growth YoY",
         description=(
-            "latest reported operating cash flow / comparable prior-year "
-            "operating cash flow - 1"
+            "latest reported operating cash flow / comparable prior-year operating cash flow - 1"
         ),
         inputs=("fundamental.financial_statement.cash_flow.metrics",),
     ),
@@ -342,6 +354,11 @@ class FinancialFactorService:
         self,
         daily_bar_repository: DailyBarRepository | None = None,
         financial_statement_repository: FinancialStatementRepository | None = None,
+        financial_statement_revision_repository: (
+            FinancialStatementRevisionRepository | None
+        ) = None,
+        security_repository: SecurityRepository | None = None,
+        security_industry_history_repository: (SecurityIndustryHistoryRepository | None) = None,
         definition_repository: FactorDefinitionRepository | None = None,
         run_repository: FactorRunRepository | None = None,
         value_repository: FactorValueRepository | None = None,
@@ -349,6 +366,13 @@ class FinancialFactorService:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.financial_statement_repository = (
             financial_statement_repository or FinancialStatementRepository()
+        )
+        self.financial_statement_revision_repository = (
+            financial_statement_revision_repository or FinancialStatementRevisionRepository()
+        )
+        self.security_repository = security_repository or SecurityRepository()
+        self.security_industry_history_repository = (
+            security_industry_history_repository or SecurityIndustryHistoryRepository()
         )
         self.definition_repository = definition_repository or FactorDefinitionRepository()
         self.run_repository = run_repository or FactorRunRepository()
@@ -404,9 +428,47 @@ class FinancialFactorService:
             for snapshots in snapshots_by_symbol.values()
             for snapshot in snapshots
         }
-        snapshots_by_symbol_period = self._snapshots_by_symbol_period(
-            snapshots_by_symbol
+        snapshots_by_symbol_period = self._snapshots_by_symbol_period(snapshots_by_symbol)
+
+        # Point-in-time industry classification: resolve the label effective on
+        # each trade date from history, falling back to the current label when
+        # no history exists. The fallback is recorded, never silent.
+        all_symbols = set(bars_by_symbol)
+        current_industries = self.security_repository.get_industries(db, all_symbols)
+        trade_dates = sorted({bar.trade_date for bars in bars_by_symbol.values() for bar in bars})
+        industries_by_date: dict[date, dict[str, str]] = {}
+        fallback_symbols: set[str] = set()
+        unresolved_symbols: set[str] = set()
+        for trade_date in trade_dates:
+            pit = self.security_industry_history_repository.industries_as_of(
+                db, symbols=all_symbols, as_of=trade_date
+            )
+            resolved: dict[str, str] = {}
+            for symbol in all_symbols:
+                industry = pit.get(symbol)
+                if industry is None:
+                    industry = current_industries.get(symbol) or None
+                    if industry is not None:
+                        fallback_symbols.add(symbol)
+                if industry is None:
+                    unresolved_symbols.add(symbol)
+                    continue
+                resolved[symbol] = industry
+            industries_by_date[trade_date] = resolved
+        if not trade_dates:
+            # No bars means no factor rows; keep the classification honest by
+            # resolving once at the run end date for metadata purposes.
+            industries_by_date = {}
+        financial_symbols = sorted(
+            {
+                symbol
+                for resolved in industries_by_date.values()
+                for symbol, industry in resolved.items()
+                if is_financial_industry(industry)
+            }
         )
+        statement_digest = self._statement_content_digest(statements)
+        revision_binding = self._statement_revision_binding(db, symbols=statement_symbols)
 
         rows_by_factor: dict[str, int] = {}
         run_ids: dict[str, int] = {}
@@ -433,7 +495,7 @@ class FinancialFactorService:
                     "symbols": normalized_symbols,
                     "target_start_date": start_date.isoformat(),
                     "target_end_date": end_date.isoformat(),
-                    "availability_policy": "report_date_before_trade_date",
+                    "availability_policy": "announcement_date_before_trade_date",
                 },
                 code_version=code_version,
                 release_id=release_id,
@@ -443,6 +505,29 @@ class FinancialFactorService:
                     "missing_policy": "skip_missing_statement_or_required_metric",
                     "applicable_security_types": list(SUPPORTED_SECURITY_TYPES),
                     "higher_is_better": spec.higher_is_better,
+                    # ``report_date`` is the supplier-provided announcement
+                    # date; factors take effect strictly after it.
+                    "report_date_semantics": "source_provided_announcement_date",
+                    "statement_content_digest": statement_digest,
+                    "statement_revision_binding": {
+                        "policy": "latest_revision_row_hash",
+                        "revisions": revision_binding,
+                    },
+                    "industry_classification": {
+                        "policy": (
+                            "pit_history_with_current_label_fallback"
+                            if fallback_symbols
+                            else "pit_history"
+                        ),
+                        "fallback_symbols": sorted(fallback_symbols),
+                        "unresolved_symbols": sorted(unresolved_symbols),
+                    },
+                    "financial_sector_policy": {
+                        "version": FINANCIAL_SECTOR_POLICY_VERSION,
+                        "excluded_factors": sorted(EXCLUDED_FACTORS),
+                        "excluded_symbols": financial_symbols,
+                        "limitation": ("industry_specific_metrics_require_dedicated_data_source"),
+                    },
                 },
             )
             rows_written = self._write_factor_values(
@@ -452,6 +537,8 @@ class FinancialFactorService:
                 snapshots_by_symbol=snapshots_by_symbol,
                 comparable_snapshots=comparable_snapshots,
                 snapshots_by_symbol_period=snapshots_by_symbol_period,
+                industries_by_date=industries_by_date,
+                excluded_for_financials=spec.name in EXCLUDED_FACTORS,
                 run_id=run.id,
             )
             self.run_repository.update_status(
@@ -471,9 +558,7 @@ class FinancialFactorService:
             run_ids=run_ids,
         )
 
-    def _select_specs(
-        self, factor_names: list[str] | None
-    ) -> tuple[FinancialFactorSpec, ...]:
+    def _select_specs(self, factor_names: list[str] | None) -> tuple[FinancialFactorSpec, ...]:
         if not factor_names:
             return FINANCIAL_FACTOR_SPECS
 
@@ -486,6 +571,70 @@ class FinancialFactorService:
             raise ValueError(f"unknown factor names: {', '.join(unknown)}")
         return tuple(spec for spec in FINANCIAL_FACTOR_SPECS if spec.name in requested)
 
+    @staticmethod
+    def _statement_content_digest(statements: list[Any]) -> str:
+        """Digest over the exact statement content consumed by this run.
+
+        A later restatement changes the digest, so a factor run can always be
+        checked against the statement content that existed when it executed.
+        """
+
+        parts = []
+        for row in sorted(
+            statements,
+            key=lambda item: (
+                item.symbol,
+                item.statement_type,
+                item.fiscal_year,
+                item.fiscal_period,
+                item.report_date,
+            ),
+        ):
+            content_hash = statement_content_hash(
+                {
+                    "report_date": row.report_date,
+                    "period_end": row.period_end,
+                    "currency": row.currency,
+                    "metrics": row.metrics,
+                }
+            )
+            parts.append(
+                "|".join(
+                    (
+                        row.symbol,
+                        row.statement_type,
+                        str(row.fiscal_year),
+                        row.fiscal_period,
+                        row.report_date.isoformat(),
+                        content_hash,
+                    )
+                )
+            )
+        return sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+    def _statement_revision_binding(
+        self, db: Session, *, symbols: list[str] | None
+    ) -> dict[str, str]:
+        latest = self.financial_statement_revision_repository.latest_by_key(db, symbols=symbols)
+        return {
+            "|".join(
+                (
+                    symbol,
+                    statement_type,
+                    period,
+                    str(fiscal_year),
+                    fiscal_period,
+                )
+            ): revision.row_hash
+            for (
+                symbol,
+                statement_type,
+                period,
+                fiscal_year,
+                fiscal_period,
+            ), revision in latest.items()
+        }
+
     def _write_factor_values(
         self,
         db: Session,
@@ -495,6 +644,8 @@ class FinancialFactorService:
         snapshots_by_symbol: dict[str, list[FinancialSnapshot]],
         comparable_snapshots: dict[tuple[str, int, str], FinancialSnapshot],
         snapshots_by_symbol_period: dict[tuple[str, str], list[FinancialSnapshot]],
+        industries_by_date: dict[date, dict[str, str]],
+        excluded_for_financials: bool,
         run_id: int,
     ) -> int:
         rows_written = 0
@@ -510,6 +661,12 @@ class FinancialFactorService:
                     current_snapshot = snapshots[snapshot_index]
                     snapshot_index += 1
                 if current_snapshot is None:
+                    continue
+                # Financial-sector issuers are excluded from generic
+                # structural factors; see app/services/financial_sector.py.
+                if excluded_for_financials and is_financial_industry(
+                    industries_by_date.get(bar.trade_date, {}).get(symbol)
+                ):
                     continue
 
                 value = self._calculate_value(
@@ -657,8 +814,8 @@ class FinancialFactorService:
 
     @staticmethod
     def _snapshots_by_symbol(rows: list[Any]) -> dict[str, list[FinancialSnapshot]]:
-        grouped: dict[tuple[str, int, str, date, date], dict[str, dict[str, Any]]] = (
-            defaultdict(dict)
+        grouped: dict[tuple[str, int, str, date, date], dict[str, dict[str, Any]]] = defaultdict(
+            dict
         )
         for row in rows:
             key = (
@@ -840,9 +997,7 @@ def _roe_stability_3y(
         return None
     values = [value for value in roe_values if value is not None]
     mean = sum(values, Decimal()) / Decimal(len(values))
-    variance = sum(((value - mean) ** 2 for value in values), Decimal()) / Decimal(
-        len(values)
-    )
+    variance = sum(((value - mean) ** 2 for value in values), Decimal()) / Decimal(len(values))
     with localcontext() as context:
         context.prec = 28
         return variance.sqrt()
@@ -906,22 +1061,34 @@ def _financial_anomaly_score(
     previous_year: FinancialSnapshot | None,
 ) -> Decimal | None:
     checks = [
-        _greater_than(service._ratio(
-            _metric(current, "balance", _TOTAL_LIABILITIES),
-            _metric(current, "balance", _TOTAL_ASSETS),
-        ), Decimal("0.8")),
-        _less_than(service._ratio(
-            _metric(current, "balance", _CURRENT_ASSETS),
-            _metric(current, "balance", _CURRENT_LIABILITIES),
-        ), Decimal("1")),
-        _less_than(service._ratio(
-            _metric(current, "income", _OPERATING_PROFIT),
-            _abs_metric(current, "income", _INTEREST_EXPENSE),
-        ), Decimal("1")),
-        _less_than(service._ratio(
-            _metric(current, "cash_flow", _OPERATING_CASH_FLOW),
-            _metric(current, "income", _NET_PROFIT),
-        ), Decimal("0")),
+        _greater_than(
+            service._ratio(
+                _metric(current, "balance", _TOTAL_LIABILITIES),
+                _metric(current, "balance", _TOTAL_ASSETS),
+            ),
+            Decimal("0.8"),
+        ),
+        _less_than(
+            service._ratio(
+                _metric(current, "balance", _CURRENT_ASSETS),
+                _metric(current, "balance", _CURRENT_LIABILITIES),
+            ),
+            Decimal("1"),
+        ),
+        _less_than(
+            service._ratio(
+                _metric(current, "income", _OPERATING_PROFIT),
+                _abs_metric(current, "income", _INTEREST_EXPENSE),
+            ),
+            Decimal("1"),
+        ),
+        _less_than(
+            service._ratio(
+                _metric(current, "cash_flow", _OPERATING_CASH_FLOW),
+                _metric(current, "income", _NET_PROFIT),
+            ),
+            Decimal("0"),
+        ),
         _greater_than(
             _growth_gap(
                 service,

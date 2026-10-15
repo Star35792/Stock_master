@@ -42,6 +42,15 @@ class PortfolioRiskBudgetRequest(BaseModel):
     benchmark: str | None = Field(default=None, min_length=1, max_length=100)
 
 
+class StyleFactorMapRequest(BaseModel):
+    size: tuple[str, str] | None = None
+    value: tuple[str, str] | None = None
+    momentum: tuple[str, str] | None = None
+    volatility: tuple[str, str] | None = None
+    liquidity: tuple[str, str] | None = None
+    quality: tuple[str, str] | None = None
+
+
 class PortfolioConstraintsRequest(BaseModel):
     cash_reserve_rate: Decimal = Field(default=Decimal("0.05"), ge=0, lt=1)
     max_symbol_weight: Decimal = Field(default=Decimal("0.20"), gt=0, le=1)
@@ -50,6 +59,8 @@ class PortfolioConstraintsRequest(BaseModel):
     enforcement_mode: ConstraintEnforcementMode = ConstraintEnforcementMode.PROPORTIONAL_SCALE
     extra_symbol_caps: dict[str, Decimal] = Field(default_factory=dict)
     risk_budget: PortfolioRiskBudgetRequest | None = Field(default=None)
+    style_factor_map: StyleFactorMapRequest | None = Field(default=None)
+    benchmark_symbol: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("security_type_budgets")
     @classmethod
@@ -121,6 +132,21 @@ class PortfolioTargetRead(BaseModel):
     reasons: list[str]
 
 
+class StyleExposureRead(BaseModel):
+    style_name: str
+    portfolio_exposure: Decimal
+    benchmark_exposure: Decimal | None
+    active_exposure: Decimal | None
+
+
+class PortfolioStyleRiskRead(BaseModel):
+    style_exposures: list[StyleExposureRead]
+    tracking_error: Decimal | None
+    portfolio_volatility: Decimal | None
+    missing_styles: list[str]
+    missing_benchmark: bool
+
+
 class PortfolioPlanRead(BaseModel):
     plan_id: int
     name: str
@@ -137,6 +163,7 @@ class PortfolioPlanRead(BaseModel):
     created_at: datetime
     targets: list[PortfolioTargetRead]
     risk_budget: PortfolioRiskBudgetRequest | None = None
+    style_risk: PortfolioStyleRiskRead | None = None
 
 
 class PortfolioReadinessCheck(BaseModel):

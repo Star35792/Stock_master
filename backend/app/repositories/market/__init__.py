@@ -5,6 +5,9 @@ from app.repositories.market.daily_bar import DailyBarRepository
 from app.repositories.market.daily_bar_source_compare import DailyBarSourceCompareRepository
 from app.repositories.market.manual_correction import ManualCorrectionRepository
 from app.repositories.market.security import SecurityRepository
+from app.repositories.market.security_industry_history import (
+    SecurityIndustryHistoryRepository,
+)
 from app.repositories.market.trading_calendar import TradingCalendarRepository
 from app.repositories.market.valuation_snapshot import ValuationSnapshotRepository
 
@@ -15,6 +18,7 @@ __all__ = [
     "DailyBarRepository",
     "DailyBarSourceCompareRepository",
     "ManualCorrectionRepository",
+    "SecurityIndustryHistoryRepository",
     "SecurityRepository",
     "TradingCalendarRepository",
     "ValuationSnapshotRepository",

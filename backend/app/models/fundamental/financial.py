@@ -77,3 +77,57 @@ class FinancialIndicator(TimestampMixin, Base):
     indicator_name: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[Decimal | None] = mapped_column(Numeric(30, 10))
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
+
+
+class FinancialStatementRevision(TimestampMixin, Base):
+    """Immutable revision history for ``fundamental.financial_statement``.
+
+    ``financial_statement`` keeps only the latest observed content per report
+    key. Every time a re-collection produces *different* content for the same
+    key (restatement, correction, or a late-arriving announcement date), the
+    previous content is preserved here before the current row is overwritten.
+    ``revision_no`` starts at 1 for the first observed version and increases by
+    one per content change, so any historical factor run can be audited against
+    the exact statement content that was available when it ran.
+    """
+
+    __tablename__ = "financial_statement_revision"
+    __table_args__ = (
+        Index(
+            "uq_financial_statement_revision_key",
+            "symbol",
+            "statement_type",
+            "period",
+            "fiscal_year",
+            "fiscal_period",
+            "revision_no",
+            unique=True,
+        ),
+        Index(
+            "ix_financial_statement_revision_lookup",
+            "symbol",
+            "statement_type",
+            "fiscal_year",
+            "fiscal_period",
+        ),
+        {"schema": "fundamental"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        Sequence("fundamental_financial_statement_revision_id_seq"),
+        primary_key=True,
+    )
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    statement_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    period: Mapped[str] = mapped_column(String(20), nullable=False)
+    fiscal_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    row_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    batch_id: Mapped[int | None] = mapped_column(BigInteger)
