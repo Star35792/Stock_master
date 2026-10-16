@@ -70,12 +70,23 @@ base AS (
       AND (p.p_latest / p.p_d20 - 1) BETWEEN -0.35 AND -0.15
       AND (p.p_latest / p.p_d5 - 1) BETWEEN -0.05 AND 0.15
       AND st.avg_amount_20 >= 10000000
+      AND (s.industry IS NULL OR (
+          s.industry NOT LIKE '%金融%'
+          AND s.industry NOT LIKE '%银行%'
+          AND s.industry NOT LIKE '%证券%'
+          AND s.industry NOT LIKE '%保险%'
+          AND s.industry NOT LIKE '%期货%'
+          AND s.industry NOT LIKE '%黄金%'
+          AND s.industry NOT LIKE '%贵金属%'
+      ))
       AND s.name NOT LIKE '%银行%'
       AND s.name NOT LIKE '%保险%'
       AND s.name NOT LIKE '%证券%'
       AND s.name NOT LIKE '%信托%'
       AND s.name NOT LIKE '%期货%'
       AND s.name NOT LIKE '%黄金%'
+      AND (s.name NOT LIKE '%ST%')
+      AND (db.special_treatment_status IS NULL OR db.special_treatment_status != 'ST')
 )
 SELECT
     b.*,
