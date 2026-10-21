@@ -31,7 +31,7 @@
 - 产品经理：确认产品价值、MVP 边界、用户流程、可验收标准和明确延期项。
 - 前端工程师：负责 Vue 前端实现、组件拆分、交互可用性、只读/写入边界表达和构建验证。
 - 后端工程师：负责 FastAPI 分层、API/schema、service/repository 边界、测试、幂等、审计和安全写入边界。
-- 金融专家：负责量化投资、组合构建、风控、模拟盘/实盘边界和核心金融计算正确性。
+- 金融专家：负责量化投资、组合构建、风控、选股与持仓管理边界和核心金融计算正确性。
 
 若当前工具不支持长期子代理，主代理必须按相同角色清单逐项审查并说明降级；不得因为没有运行中的智能体而省略产品、前端、后端、项目管理或金融风控视角。
 
@@ -59,7 +59,9 @@
 
 Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，面向单机单用户采用极简分层存储：DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载控制面、事务事实与 `raw -> market -> factor -> ... -> trade` 全链路，大体量列式温层落本地 Parquet（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。经评估不引入 PostgreSQL/SQLite/MinIO/Redis。`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，接入 `daily_loop` 与 Parquet release 为后续切片。
 
-项目已经从 V1 可信日线数据中心推进到 V6 最小运维工作台。当前优先目标是把已经落地的因子、回测、组合、风控和模拟盘能力产品化、可观测化，并继续保持可信数据中心规则：
+**项目边界（重要）**：本项目**只用于选股研究与持仓管理**，不连接券商，不做实盘自动化交易，不发送任何真实订单。系统产出止于「研究结论 + 选股名单 + 组合持仓方案 + 风险预算与持仓推演」，由人工在外部终端自行下单。`trade` 域在此语义下仅指本地模拟推演账户，不是通向真实账户的跳板；不引入真实账户只读适配器、外部订单幂等状态机、券商回报对账或 kill switch。
+
+项目已经从 V1 可信日线数据中心推进到 V6 最小运维工作台。当前优先目标是把已经落地的因子、回测、组合、风控和模拟推演能力产品化、可观测化，并继续保持可信数据中心规则：
 
 - 多源导入。
 - 原始数据留痕。
@@ -130,14 +132,14 @@ models / database
 - 改 schema、ORM、Alembic、索引、约束或表域：更新 `aiDoc/modules/schema-plan.md`，并同步 `aiDoc/modules/module-index.md`。
 - 改 API 路由、请求/响应 schema 或前端依赖的接口：更新 `README.md` 的核心 API 面，必要时更新 `aiDoc/README.md`。
 - 改数据源、导入、质量规则、修复、血缘或回填策略：更新 `aiDoc/data/` 对应文档。
-- 改因子、策略、回测、组合、风控、模拟盘能力：更新 `aiDoc/plans/roadmap.md` 和相关 `aiDoc/research/` 文档。
+- 改因子、策略、回测、组合、风控、选股与持仓管理能力：更新 `aiDoc/plans/roadmap.md` 和相关 `aiDoc/research/` 文档。
 - 发现长期稳定的项目事实、踩坑经验或用户偏好：更新 `aiDoc/memory/README.md`，不要写进正式产品文档。
 - 只做局部 bug fix 且不改变外部行为、架构、schema、API 或产品能力时，不强行改文档；在最终回复说明“文档无影响”。
 
 ### 决策评审与提交门
 
 - 任何任务先按 `aiDoc/plans/decision-review-protocol.md` 判定为 T0、T1 或 T2；只有 T2 启动架构师、产品经理、金融行业专家和 Vibe Coding 规则编写者四角色评审。
-- T2 包括规则、路线或 MVP、架构边界、公共 API、schema、数据契约与血缘、因子与策略口径、回测假设、组合、风控、交易及核心金融计算变化；项目级 AI 规则变更自身始终按 T2 处理。
+- T2 包括规则、路线或 MVP、架构边界、公共 API、schema、数据契约与血缘、因子与策略口径、回测假设、组合、风控、持仓管理与核心金融计算变化；项目级 AI 规则变更自身始终按 T2 处理。
 - 运行环境支持子代理时，四角色应先独立审查，再由主代理汇总和裁决；不支持时，由主代理按相同清单逐角色审查并明确说明降级，不得省略任何角色。
 - AI 执行 `git commit` 前必须检查 staged diff 并重新判级。T2 必须完成项目现状评审、关闭 P0；P1 只有经用户明确接受并记录后才可附条件提交，并给出有证据的优化建议；T0/T1 只做轻量 diff、测试、敏感信息和文档影响检查。
 - 评审结论必须包含触发原因、项目现状、证据、风险等级、阻断项、验证结果和文档同步；评审不替代测试，也不得借机扩大当前任务范围。
@@ -147,7 +149,7 @@ models / database
 
 - 使用 Python 3.13。
 - 使用 FastAPI、SQLAlchemy 2.x。
-- DuckDB 单库（`data/stock_master.duckdb`）承载控制面、审计、组合、风控、交易等强事务数据与大体量分析事实的查询；大体量列式温层落本地 Parquet。不引入 PostgreSQL、SQLite、MinIO 或 Redis（决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。
+- DuckDB 单库（`data/stock_master.duckdb`）承载控制面、审计、组合、风控、持仓推演等强事务数据与大体量分析事实的查询；大体量列式温层落本地 Parquet。不引入 PostgreSQL、SQLite、MinIO 或 Redis（决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。
 - 数据中心核心价格、金额和比率必须使用精确定点类型；DuckDB 使用 `Numeric`/`DECIMAL`，Parquet 使用 `DECIMAL`，不要用浮点保存核心金融数据。
 - 字段命名使用 snake_case。
 - 证券代码统一命名为 `symbol`。

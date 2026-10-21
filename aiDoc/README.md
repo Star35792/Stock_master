@@ -30,7 +30,8 @@
 | 外部因子池选型、策略层代码级优化 | [策略优化评审](research/20261013-2021-strategy-optimization-review.md) | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/hard-gates-execution-plan.md` |
 | 产品定位、投资者评估、量化工具愿景 | `aiDoc/strategy/product-investment-assessment.md` | `aiDoc/strategy/quantitative-tool-vision.md` |
 | 价格与价值匹配、安全边际研究及假设历史回测 | [策略定义](strategy/20260922-1314-price-value-margin-strategy.md) | `aiDoc/research/decision-factor-framework.md` |
-| 自动选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |
+| 选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |
+| 研究产出修复与因子证据 | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) | `aiDoc/plans/roadmap.md` |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
 | 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | `aiDoc/plans/decision-review-protocol.md`、本文件长期协作机制小节 |
 
@@ -50,7 +51,8 @@
 12. [量化工具愿景](strategy/quantitative-tool-vision.md)
 13. [自动选股与持仓管控路线图](plans/auto-selection-position-roadmap.md)
 14. [前置硬门槛执行计划](plans/hard-gates-execution-plan.md)
-15. [决策与提交评审协议](plans/decision-review-protocol.md)
+15. [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md)
+16. [决策与提交评审协议](plans/decision-review-protocol.md)
 
 ## 更新原则
 

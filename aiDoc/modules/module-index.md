@@ -18,9 +18,9 @@
 | `backtest.price_value` / `services.price_value_backtest` | 单股加现金的版本化假设历史模拟；复用 FCFE 与费用计算，可信未复权行情及交易日历驱动收盘信号、次日开盘成交和持续退出；仅保存 `strategy.backtest_*` 研究事实与合同，不创建 paper/真实订单、不认证历史时点 |
 | `portfolio` | 组合构建内核 |
 | `risk` | 下单前风控内核 |
-| `trade` | BrokerAdapter 和模拟盘执行 |
+| `trade` | 本地模拟推演执行与持仓记录（BrokerAdapter 仅隔离本地模拟回报） |
 
-当前公共边界：`api` 已暴露行情、数据质量、因子、回测、策略研究、运维查询，以及组合草案、只读风险前数据核对、paper 账本一致性审计、paper 账户不可变净值快照、绑定服务端事实源的正式风险评估、短时人工确认和幂等 paper 执行批次。账本审计只读取既有订单、成交、执行批次、现金和持仓事实并报告差异，不自动修复。执行入口只消费确认记录，重新验证全部哈希并固定使用本地 PaperBrokerAdapter；不能视为真实账户只读或受控交易适配器。
+当前公共边界：`api` 已暴露行情、数据质量、因子、回测、策略研究、运维查询，以及组合草案、只读风险前数据核对、paper 账本一致性审计、paper 账户不可变净值快照、绑定服务端事实源的正式风险评估、短时人工确认和幂等 paper 执行批次。账本审计只读取既有订单、成交、执行批次、现金和持仓事实并报告差异，不自动修复。执行入口只消费确认记录，重新验证全部哈希并固定使用本地 PaperBrokerAdapter；本项目不接入任何真实账户，也不实现受控交易适配器或实盘自动化交易。
 
 ## Schema 域
 
@@ -31,7 +31,7 @@
 - `strategy`：回测运行、成交、净值、持仓、绩效，以及训练产物关联；被回测引用的训练产物由外键阻止删除，不静默置空血缘。
 - `portfolio`：组合计划和目标。
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
-- `trade`：模拟盘账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
+- `trade`：本地模拟推演账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
 - `lake`：内容寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
 - `system`：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline`、`factor_batch_profiler` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
 

@@ -257,7 +257,7 @@ A 股特殊交易约束：
 
 ## 7. 结论
 
-四项硬门槛完成后，系统才具备支持自动选股和策略自进化的金融正确性基础。在此之前，任何自动选股结果都只能作为研究参考，不能进入模拟盘或实盘。
+四项硬门槛完成后，系统才具备支持自动选股和策略自进化的金融正确性基础。在此之前，任何自动选股结果都只能作为研究参考，不能进入持仓推演。
 
 ## 8. 硬门槛一执行日可交易性接入评审记录
 
@@ -278,7 +278,7 @@ A 股特殊交易约束：
 - 复权与公司行为：执行日读取 `adjust_type=none` 可信未复权 bar，与已有成交价口径一致；公司行为落地前命中除权除息区间的回测仍 fail-closed。
 - 偏差与资金风险：缺 bar 或可交易性拒绝的订单不再产生任何成交、订单、现金或持仓变更；执行批次落库为 `status=rejected`，`approval.status=consumed`，不能重新消费。
 - 复现与审计：执行批次 `execution_policy_hash` 显式包含 `execution_day_bar_hash`，可与 `market.daily_bar` 任意时刻快照对账。
-- 人工确认边界：本次未触碰确认 TTL、人工确认短语或 V7 实盘写侧边界。
+- 人工确认边界：本次未触碰确认 TTL、人工确认短语或模拟推演写侧边界。
 
 ### P0 / P1 阻断项
 
@@ -308,7 +308,7 @@ A 股特殊交易约束：
 
 ### 明确不做
 
-- 不引入券商可交易性或交易所级别的可交易性规则；当前以 `AShareTradabilityPolicy` 单一策略为准。
+- 不引入券商可交易性或交易所级别的可交易性规则；当前以 `AShareTradabilityPolicy` 单一策略为准。本项目不连接券商，该约束为永久约束。
 - 不修改 `a_share_cost_v1` 费用模型参数；本次仅在可交易性层面提升。
 - 不开放历史 paper 重放（replay only handles current approval 哈希，不重放已执行 / 已拒绝批次）。
 - 不修改 V5.1 / V5.2 已交付的 readiness、ADV、风险政策哈希链路。
@@ -340,7 +340,7 @@ A 股特殊交易约束：
 - 未来函数：`StrategyFactorFrame.__post_init__`（`backend/app/strategies/inputs.py:58`）会拒绝 `trade_date > as_of_date` 的观测，训练期 `as_of_date` 取 `training_end_date`，测试期 `as_of_date` 取测试区间内的每个信号日，训练期数据不会前视到测试期。
 - 样本泄漏：`run_rolling_factor_selection` 在每个窗口内先读取训练期因子、创建 artifact，再用测试期日期运行回测；训练数据不传入 `_run_single_factor_selection` 的测试期参数。
 - 复现与审计：每个窗口的 `training_artifact` 保存 `artifact_hash`（SHA-256）和完整 `training_input_snapshot`；`backtest_run.training_artifact_id` 外键绑定，研究合同写入 `validation_window_id` 和 `window_binding_status`。
-- 资金风险：本次只涉及研究层，不触碰 paper/实盘执行链路，无真实资金风险。
+- 资金风险：本次只涉及研究层，不触碰模拟推演执行链路，无真实资金风险。
 
 ### P0 / P1 阻断项
 
@@ -398,7 +398,7 @@ A 股特殊交易约束：
 - 数据血缘：风格因子来自 `market.valuation_snapshot` 与 `factor.factor_value`，历史价格与基准价格来自 `market.daily_bar`（`quality_status=trusted`），符合 `raw -> market -> factor -> research` 链路。
 - 未来函数：风格暴露按计划日 `as_of_date` 装载；价格窗口以 `end_date=as_of_date` 为终点向后回溯，不使用未来价格。
 - 复现与审计：`PortfolioPlanRead.style_risk` 回读风格暴露明细、跟踪误差、波动率、缺失风格与 `missing_benchmark` 标记；`PortfolioPlanRecord.style_risk` JSON 落库，可与任意时刻快照对账。
-- 资金风险：本次只涉及组合构建层，不触碰 paper/实盘执行链路，无真实资金风险。
+- 资金风险：本次只涉及组合构建层，不触碰模拟推演执行链路，无真实资金风险。
 - fail-closed：设置跟踪误差预算但缺失基准符号或基准价格时抛 `ValueError`；设置风格/跟踪/波动率预算但缺少 `db` 或 `as_of_date` 时抛 `ValueError`，均不静默跳过。
 
 ### P0 / P1 阻断项
@@ -459,7 +459,7 @@ A 股特殊交易约束：
 - 未来函数：修订内容只在采集时点落库，因子运行绑定当时最新修订 hash；重跑使用当前内容并通过 digest 差异可检测，不会假装历史运行用了旧内容。
 - 数据血缘：修订行与 `raw.financial_payload` 同批（`batch_id`），可回溯到原始批次；行业历史行记录 `source_name`。
 - 复现与审计：`statement_content_digest` + `statement_revision_binding` 进入 `factor_run.metadata`，与 `factor.factor_value` 的 `run_id` 关联可逐值对账。
-- 资金风险：本次只涉及研究层因子，不触碰 paper/实盘执行链路。
+- 资金风险：本次只涉及研究层因子，不触碰模拟推演执行链路。
 
 ### P0 / P1 阻断项
 

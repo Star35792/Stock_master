@@ -33,7 +33,7 @@ V1 数据中心本身暂不承担：
 - 分钟线、Tick 数据。
 - 因子平台的研究方法设计。
 - 策略 DSL 或完整研究平台。
-- 实盘交易闭环。
+- 实盘交易闭环与自动化下单（永久不在项目范围）。
 - 对所有历史财务数据的一次性完整建模。
 
 这些能力在日线可信数据中心稳定后再逐步扩展。
@@ -245,10 +245,10 @@ V1 稳定后已经扩展出的能力：
 - 组合和风控。
 - Vue3 可视化平台。
 
-仍需谨慎推进：
+明确不在项目范围内（永久约束）：
 
-- QMT/MiniQMT 或其他券商真实账户只读同步。
-- 任何实盘写操作。
+- 券商真实账户接入与任何实盘写操作：本项目不连接券商，不做实盘自动化交易；实际下单由人工在外部券商终端完成。
+- QMT/MiniQMT 或其他券商终端仅可作为行情/基础数据的**采集来源**，其任何账户、持仓、委托与成交写操作一律不接入本系统。
 - 分钟线、Tick 和高频交易。
 
 ## 10. 存储与工具边界
@@ -261,7 +261,7 @@ V1 稳定后已经扩展出的能力：
 
 分层存储架构（DuckDB 单库承载控制面+事务+温层查询、本地 Parquet 温层、本地 FS 冷存；不引入 PostgreSQL/SQLite/MinIO/Redis）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`。`curated/prices_qfq` 已接入 `daily_loop`（`factor_reads_curated` 开关），`fundamentals_pit`、factor release 与完整 Parquet release 发布/校验仍属后续切片。
 
-任何会进入策略、回测、组合和模拟盘的生产数据，仍应以经过质量校验和血缘追踪的 `market` / `factor` 层为准。
+任何会进入策略、回测、组合和持仓推演的生产数据，仍应以经过质量校验和血缘追踪的 `market` / `factor` 层为准。
 
 API 启动后的日线维护由 `scheduler/auto_data_sync.py` 的后台线程执行，调用
 `services/auto_data_sync.py` 编排参考数据刷新、HiThink dump 幂等导入和可信日线构建。
