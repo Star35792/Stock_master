@@ -18,7 +18,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,9 @@ EXPORT_TABLES = [
     ("raw", "daily_bar", "trade_date"),
     ("market", "adjustment_factor", "trade_date"),
     ("factor", "factor_value", "trade_date"),
+    ("raw", "corporate_action", "ex_date"),
+    ("fundamental", "financial_statement", "report_date"),
+    ("raw", "financial_payload", "report_date"),
 ]
 
 
@@ -54,10 +57,15 @@ class ExportResult:
     files: list[Path]
 
 
-def _table_fingerprint(con: duckdb.DuckDBPyConnection, schema: str, table: str) -> dict[str, Any]:
+def _table_fingerprint(
+    con: duckdb.DuckDBPyConnection,
+    schema: str,
+    table: str,
+    date_column: str,
+) -> dict[str, Any]:
     row = con.execute(
         f"""
-        SELECT COUNT(*), MIN(trade_date), MAX(trade_date)
+        SELECT COUNT(*), MIN({date_column}), MAX({date_column})
         FROM {schema}.{table}
         """
     ).fetchone()
@@ -89,7 +97,7 @@ def export_table(
     output_dir = warm_root / release_tag / schema / table
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fingerprint = _table_fingerprint(con, schema, table)
+    fingerprint = _table_fingerprint(con, schema, table, date_column)
     logger.info(
         "导出 %s.%s: %s 行, %s ~ %s",
         schema,
@@ -131,7 +139,7 @@ def export_table(
         "schema": schema,
         "table": table,
         "release_tag": release_tag,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "source_db": str(DEFAULT_DB_PATH.resolve()),
         **fingerprint,
         "partition_columns": ["trade_year", "trade_month"],
@@ -170,7 +178,13 @@ def verify_export(
     ).fetchone()[0]
     ok = int(parquet_count) == int(source_count)
     if ok:
-        logger.info("校验通过: %s.%s 源表 %s 行 == Parquet %s 行", result.schema, result.table, source_count, parquet_count)
+        logger.info(
+            "校验通过: %s.%s 源表 %s 行 == Parquet %s 行",
+            result.schema,
+            result.table,
+            source_count,
+            parquet_count,
+        )
     else:
         logger.error(
             "校验失败: %s.%s 源表 %s 行 != Parquet %s 行",
@@ -193,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--release-tag",
-        default=datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"),
+        default=datetime.now(UTC).strftime("%Y%m%d-%H%M%S"),
         help="本次导出 release tag",
     )
     parser.add_argument(

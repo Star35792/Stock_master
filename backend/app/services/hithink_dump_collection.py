@@ -341,7 +341,7 @@ WHERE r.adjust_type = 'none'
   AND r.low <= r.open AND r.low <= r.close AND r.low <= r.high
   AND (r.volume IS NULL OR r.volume >= 0)
   AND (r.amount IS NULL OR r.amount >= 0)
-ON CONFLICT (symbol, trade_date) DO UPDATE SET
+ON CONFLICT (symbol, trade_date, adjust_type) DO UPDATE SET
     security_type = EXCLUDED.security_type,
     open = EXCLUDED.open,
     high = EXCLUDED.high,

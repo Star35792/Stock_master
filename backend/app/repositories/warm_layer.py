@@ -41,8 +41,24 @@ WARM_TABLES: frozenset[tuple[str, str]] = frozenset(
         ("market", "adjustment_factor"),
         ("raw", "daily_bar"),
         ("factor", "factor_value"),
+        ("raw", "corporate_action"),
+        ("fundamental", "financial_statement"),
+        ("raw", "financial_payload"),
     }
 )
+
+# Date column used to merge the Parquet warm layer with the control-plane hot
+# window for each warm table.  The cutoff is ``MAX(date_col)`` in the exported
+# Parquet; rows in the control plane with a later date are UNIONed on top.
+WARM_TABLE_DATE_COLUMNS: dict[tuple[str, str], str] = {
+    ("market", "daily_bar"): "trade_date",
+    ("market", "adjustment_factor"): "trade_date",
+    ("raw", "daily_bar"): "trade_date",
+    ("factor", "factor_value"): "trade_date",
+    ("raw", "corporate_action"): "ex_date",
+    ("fundamental", "financial_statement"): "report_date",
+    ("raw", "financial_payload"): "report_date",
+}
 
 # Schemas that live in the control-plane DuckDB file and must be delegated to
 # the ATTACHed database.  We create local views for every table in these schemas
@@ -62,7 +78,7 @@ CONTROL_SCHEMAS: tuple[str, ...] = (
 
 # Schemas for which we build parquet-backed warm views.  Other schemas are fully
 # delegated to the control plane.
-WARM_SCHEMAS: tuple[str, ...] = ("market", "raw", "factor")
+WARM_SCHEMAS: tuple[str, ...] = ("market", "raw", "factor", "fundamental")
 
 
 class WarmLayerStore:
@@ -195,9 +211,10 @@ class WarmLayerStore:
                         )
                     col_sql = ", ".join(columns)
 
+                    date_col = WARM_TABLE_DATE_COLUMNS[(schema, table_name)]
                     parquet_max = con.execute(
                         f"""
-                        SELECT MAX(trade_date)
+                        SELECT MAX({date_col})
                         FROM read_parquet('{parquet_glob}', hive_partitioning=true)
                         """
                     ).fetchone()[0]
@@ -209,7 +226,7 @@ class WarmLayerStore:
                             FROM read_parquet('{parquet_glob}', hive_partitioning=true)
                             UNION ALL
                             SELECT {col_sql} FROM ctrl.{schema}.{table_name}
-                            WHERE trade_date > '{parquet_max}'
+                            WHERE {date_col} > '{parquet_max}'
                             """
                         )
                     else:

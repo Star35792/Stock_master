@@ -23,7 +23,7 @@ import json
 import logging
 import shutil
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +45,9 @@ HOT_WINDOW_TABLES: tuple[tuple[str, str, str], ...] = (
     ("market", "adjustment_factor", "trade_date"),
     ("raw", "daily_bar", "trade_date"),
     ("factor", "factor_value", "trade_date"),
+    ("raw", "corporate_action", "ex_date"),
+    ("fundamental", "financial_statement", "report_date"),
+    ("raw", "financial_payload", "report_date"),
 )
 
 
@@ -162,30 +165,65 @@ def _copy_unique_indexes(
     schema: str,
     table: str,
 ) -> None:
-    """Recreate unique constraints as unique indexes for upsert conflict targets.
+    """Recreate unique indexes so upsert ``ON CONFLICT`` targets keep working.
 
-    DuckDB does not support ``ALTER TABLE ADD UNIQUE``, but ``CREATE UNIQUE
-    INDEX`` serves the same purpose for ``ON CONFLICT``.
+    DuckDB stores unique constraints from ``CREATE UNIQUE INDEX`` only in
+    ``duckdb_indexes()``, while ``PRIMARY KEY`` appears in
+    ``duckdb_constraints()``.  We copy both the actual unique indexes (via their
+    SQL) and any standalone UNIQUE constraints by building an equivalent index.
     """
     full_name = f"{schema}.{table}"
-    rows = source.execute(
-        """
-        SELECT constraint_type, constraint_column_names
-        FROM duckdb_constraints()
-        WHERE schema_name = ?
-          AND table_name = ?
-          AND constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-        """,
-        [schema, table],
-    ).fetchall()
     existing_indexes = {
         r[0]
         for r in target.execute(
-            "SELECT index_name FROM duckdb_indexes() WHERE schema_name = ? AND table_name = ?",
+            """
+            SELECT index_name
+            FROM duckdb_indexes()
+            WHERE database_name = current_database()
+              AND schema_name = ?
+              AND table_name = ?
+            """,
             [schema, table],
         ).fetchall()
     }
-    for ctype, cols in rows:
+
+    # 1) Copy unique indexes already present in the source database.
+    index_rows = source.execute(
+        """
+        SELECT index_name, sql, is_primary
+        FROM duckdb_indexes()
+        WHERE schema_name = ?
+          AND table_name = ?
+          AND is_unique = true
+        """,
+        [schema, table],
+    ).fetchall()
+    for idx_name, sql, is_primary in index_rows:
+        if is_primary:
+            continue
+        if idx_name in existing_indexes:
+            continue
+        try:
+            target.execute(sql)
+            logger.info("Copied unique index %s on %s", idx_name, full_name)
+        except Exception as exc:
+            logger.warning(
+                "Failed to copy unique index %s on %s: %s", idx_name, full_name, exc
+            )
+
+    # 2) Also create indexes for any UNIQUE constraints that are not backed by
+    #    an index in the source (rare, but keeps the previous behaviour).
+    constraint_rows = source.execute(
+        """
+        SELECT constraint_column_names
+        FROM duckdb_constraints()
+        WHERE schema_name = ?
+          AND table_name = ?
+          AND constraint_type = 'UNIQUE'
+        """,
+        [schema, table],
+    ).fetchall()
+    for (cols,) in constraint_rows:
         if not cols:
             continue
         idx_name = f"ix_slim_{schema}_{table}_{'_'.join(cols)}"
@@ -193,12 +231,7 @@ def _copy_unique_indexes(
             continue
         col_sql = ", ".join(cols)
         try:
-            if ctype == "PRIMARY KEY":
-                # Primary key was already added via ALTER TABLE; skip index.
-                continue
-            target.execute(
-                f"CREATE UNIQUE INDEX {idx_name} ON {full_name} ({col_sql})"
-            )
+            target.execute(f"CREATE UNIQUE INDEX {idx_name} ON {full_name} ({col_sql})")
             logger.info("Created unique index %s on %s", idx_name, full_name)
         except Exception as exc:
             logger.warning(
@@ -345,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_backup:
             backup_dir = db_path.parent / "backups"
             backup_dir.mkdir(exist_ok=True)
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
             backup_path = backup_dir / f"{db_path.stem}-pre-slim-{stamp}{db_path.suffix}"
             shutil.copy2(db_path, backup_path)
             logger.info("Backup created: %s", backup_path)
@@ -386,7 +419,10 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "hot_window_tables": hot_window_stats,
         }
-        summary_path = db_path.parent / f"slim_summary-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.json"
+        summary_path = (
+            db_path.parent
+            / f"slim_summary-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.json"
+        )
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.info("Slimmed DB size: %.2f MiB", slim_size / 1024 / 1024)
         logger.info(
