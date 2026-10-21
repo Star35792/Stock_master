@@ -146,6 +146,7 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
                 {
                     "operating_revenue": "1200",
                     "net_profit": "300",
+                    "deducted_net_profit": "270",
                     "operating_profit": "500",
                 },
                 report_date=date(2026, 4, 30),
@@ -192,6 +193,8 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         "sales_to_price": 1,
         "fcf_yield": 1,
         "ev_to_ebitda": 1,
+        "deducted_earnings_yield": 1,
+        "deducted_earnings_quality": 1,
         "industry_valuation_gap": 1,
     }
     assert valuation_repository.kwargs is not None
@@ -200,7 +203,7 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         "end_date": date(2026, 5, 6),
         "symbols": ["600519.SH"],
     }
-    assert len(definition_repository.definitions) == 7
+    assert len(definition_repository.definitions) == 9
     assert all(run["status"] == "success" for run in run_repository.finished)
 
     values = {
@@ -215,6 +218,97 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
     assert values[("fcf_yield", date(2026, 5, 6))] == Decimal("0.0500000000")
     assert values[("ev_to_ebitda", date(2026, 5, 6))] == Decimal("7.0000000000")
     assert values[("industry_valuation_gap", date(2026, 5, 6))] == Decimal("0E-10")
+
+
+def test_deducted_earnings_factors() -> None:
+    valuation_repository = FakeValuationSnapshotRepository(
+        [_valuation(date(2026, 5, 6), "4000")]
+    )
+    statement_repository = FakeFinancialStatementRepository(
+        [
+            _statement(
+                "income",
+                {
+                    "net_profit": "300",
+                    "deducted_net_profit": "270",
+                },
+                report_date=date(2026, 4, 30),
+            ),
+        ]
+    )
+    value_repository = FakeFactorValueRepository()
+    service = ValuationFactorService(
+        daily_bar_repository=FakeDailyBarRepository([_bar(date(2026, 5, 6))]),
+        valuation_repository=valuation_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository({"600519.SH": "Baijiu"}),
+        financial_statement_repository=statement_repository,  # type: ignore[arg-type]
+        definition_repository=FakeFactorDefinitionRepository(),
+        run_repository=FakeFactorRunRepository(),
+        value_repository=value_repository,
+    )
+
+    result = service.run(
+        object(),
+        start_date=date(2026, 5, 6),
+        end_date=date(2026, 5, 6),
+        symbols=["600519.sh"],
+        factor_names=["deducted_earnings_yield", "deducted_earnings_quality"],
+        adjust_type="qfq",
+    )
+
+    assert result.rows_by_factor == {
+        "deducted_earnings_yield": 1,
+        "deducted_earnings_quality": 1,
+    }
+    values = {
+        (item["factor_name"], item["trade_date"]): item["value"]
+        for item in value_repository.values
+    }
+    assert values[("deducted_earnings_yield", date(2026, 5, 6))] == Decimal(
+        "0.0675000000"
+    )
+    assert values[("deducted_earnings_quality", date(2026, 5, 6))] == Decimal(
+        "0.9000000000"
+    )
+
+
+def test_deducted_earnings_yield_falls_back_to_none_when_missing() -> None:
+    valuation_repository = FakeValuationSnapshotRepository(
+        [_valuation(date(2026, 5, 6), "4000")]
+    )
+    statement_repository = FakeFinancialStatementRepository(
+        [
+            _statement(
+                "income",
+                {"net_profit": "300"},
+                report_date=date(2026, 4, 30),
+            ),
+        ]
+    )
+    value_repository = FakeFactorValueRepository()
+    service = ValuationFactorService(
+        daily_bar_repository=FakeDailyBarRepository([_bar(date(2026, 5, 6))]),
+        valuation_repository=valuation_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository({"600519.SH": "Baijiu"}),
+        financial_statement_repository=statement_repository,  # type: ignore[arg-type]
+        definition_repository=FakeFactorDefinitionRepository(),
+        run_repository=FakeFactorRunRepository(),
+        value_repository=value_repository,
+    )
+
+    result = service.run(
+        object(),
+        start_date=date(2026, 5, 6),
+        end_date=date(2026, 5, 6),
+        symbols=["600519.sh"],
+        factor_names=["deducted_earnings_yield", "deducted_earnings_quality"],
+        adjust_type="qfq",
+    )
+
+    assert result.rows_by_factor == {
+        "deducted_earnings_yield": 0,
+        "deducted_earnings_quality": 0,
+    }
 
 
 def test_valuation_factor_service_validates_inputs() -> None:

@@ -46,6 +46,8 @@
 
 项目的估值因子目前只有 `earnings_yield` / `book_to_price` / `fcf_yield` / `ev_to_ebitda`。**缺"扣非口径"是一个实质漏洞**：项目策略文档强调"不能用非经常性损益粉饰的利润判断质量"，但因子层没有扣非净利润这个入口。
 
+> **已关闭（2026-10-20）**：在 `backend/app/services/valuation_factors.py` 新增 `deducted_earnings_yield` 与 `deducted_earnings_quality`，并补充 `_DEDUCTED_NET_PROFIT` 字段别名与 fail-closed 缺失处理。详见 `aiDoc/research/20261020-2222-deducted-earnings-factor-optimization.md`。
+
 ---
 
 ## 3. 知识库不能直接用的地方（重要）

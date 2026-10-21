@@ -46,6 +46,14 @@ _NET_PROFIT = (
     "net_profit",
     "net_income",
 )
+_DEDUCTED_NET_PROFIT = (
+    "deducted_net_profit",
+    "net_profit_after_deduction",
+    "recurring_net_profit",
+    "net_profit_excluding_non_recurring",
+    "扣非净利润",
+    "归属于母公司股东的扣除非经常性损益的净利润",
+)
 _OPERATING_PROFIT = (
     "operating_profit",
     "ebit",
@@ -185,6 +193,28 @@ VALUATION_FACTOR_SPECS = (
             "market.valuation_snapshot.total_market_cap",
         ),
         higher_is_better=False,
+    ),
+    ValuationFactorSpec(
+        name="deducted_earnings_yield",
+        display_name="Deducted earnings yield",
+        description=(
+            "latest reported deducted (recurring) net profit / "
+            "latest available total market cap"
+        ),
+        inputs=(
+            "fundamental.financial_statement.income.metrics",
+            "market.valuation_snapshot.total_market_cap",
+        ),
+    ),
+    ValuationFactorSpec(
+        name="deducted_earnings_quality",
+        display_name="Deducted earnings quality",
+        description=(
+            "deducted (recurring) net profit / reported net profit; "
+            "higher means less non-recurring distortion"
+        ),
+        inputs=("fundamental.financial_statement.income.metrics",),
+        higher_is_better=True,
     ),
     ValuationFactorSpec(
         name="industry_valuation_gap",
@@ -514,6 +544,13 @@ class ValuationFactorService:
                 _enterprise_value(statement, valuation.total_market_cap),
                 _ebitda(statement),
             )
+        if factor_name == "deducted_earnings_yield":
+            return self._ratio(
+                _metric(statement, "income", _DEDUCTED_NET_PROFIT),
+                valuation.total_market_cap,
+            )
+        if factor_name == "deducted_earnings_quality":
+            return _deducted_earnings_quality(statement)
         raise ValueError(f"unsupported factor: {factor_name}")
 
     @staticmethod
@@ -665,6 +702,20 @@ def _ebitda(snapshot: FinancialSnapshot) -> Decimal | None:
     if operating_profit is None or depreciation is None:
         return None
     return operating_profit + depreciation
+
+
+def _deducted_earnings_quality(snapshot: FinancialSnapshot) -> Decimal | None:
+    """扣非净利润 / 净利润；>1 表示非经常性亏损，<1 表示非经常性收益。
+
+    该比值越接近 1，说明利润受非经常性损益影响越小；>1 同样代表
+    利润质量高（非经常性项目为负向），但这里按策略文档口径统一以
+    扣非利润占净利润比例作为质量度量。
+    """
+    deducted = _metric(snapshot, "income", _DEDUCTED_NET_PROFIT)
+    reported = _metric(snapshot, "income", _NET_PROFIT)
+    if deducted is None or reported is None or reported == 0:
+        return None
+    return deducted / reported
 
 
 def _decimal(value: object) -> Decimal | None:
