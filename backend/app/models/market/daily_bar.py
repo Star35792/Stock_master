@@ -6,7 +6,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    Index,
     Integer,
     Numeric,
     Sequence,
@@ -53,16 +52,6 @@ class DailyBar(TimestampMixin, Base):
         CheckConstraint(
             "amount is null or amount >= 0",
             name="ck_daily_bar_amount_non_negative",
-        ),
-        Index("ix_daily_bar_symbol_adjust_date", "symbol", "adjust_type", "trade_date"),
-        Index("ix_daily_bar_trade_date_type", "trade_date", "security_type"),
-        Index("ix_daily_bar_quality_status", "quality_status"),
-        Index(
-            "ix_daily_bar_status_symbol_adjust_date",
-            "quality_status",
-            "symbol",
-            "adjust_type",
-            "trade_date",
         ),
         {"schema": "market"},
     )

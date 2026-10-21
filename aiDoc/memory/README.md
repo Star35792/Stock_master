@@ -24,3 +24,5 @@
 - 财务因子仍需从报告期/报告日期进一步升级到公告日或首次可得时间口径。
 - 估值因子点在时：valuation_snapshot 是收盘后市值（close×股本），属于 end-of-day 行情数据，因子查找用 <=（同日可用，策略次日开盘执行无前视）；financial_statement 仍用严格 <（公告次日才用）。两者口径不同是有意为之。
 - 估值数据：Eastmoney clist 接口可免 cookie 批量取当前总市值/流通市值/PE/PB（f20/f21/f9/f23），但不支持指定历史日期；东方财富估值分析日期接口可返回指定交易日的 PE_TTM/PB_MRQ 等供应商记录，现仅采集到独立 raw 批次。历史接口不提供可认证的首次可得时间或修订版本，故回填尚不能用于历史全市场收益回测。Xueqiu kline 带历史 pe/pb/market_capital 但需 cookie，当前未配置。
+- **2026-10-21 拆分第二阶段完成**：`market.daily_bar`、`raw.daily_bar`、`market.adjustment_factor`、`factor.factor_value` 四张大表已完成控制面瘦身（`stock_master.duckdb` 从 4,397 MiB 降至 535 MiB，-87.8%），历史数据由 `data/warm/exported/` 中的 Parquet 温层承接。新增 `WarmLayerStore` 在内存 DuckDB 中合并 Parquet 历史与控制面热窗口，reader 无需改动 SQL 即可读到完整时间序列。`daily_loop`、因子计算、低价超跌反弹回测均已验证通过。
+- `market.daily_bar` 的 `UniqueConstraint` 已修正为 `(symbol, trade_date, adjust_type)`，`AdjustmentBuildService.rebuild_qfq` 已改为 `INSERT ... ON CONFLICT DO UPDATE` 以规避 DuckDB 同事务 DELETE 不可见问题。

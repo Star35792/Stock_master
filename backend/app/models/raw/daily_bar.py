@@ -32,18 +32,6 @@ class RawDailyBar(Base):
             "source_priority >= 0",
             name="ck_raw_daily_bar_source_priority_non_negative",
         ),
-        Index("ix_raw_daily_bar_symbol_date", "symbol", "trade_date"),
-        Index("ix_raw_daily_bar_symbol_adjust_date", "symbol", "adjust_type", "trade_date"),
-        Index(
-            "ix_raw_daily_bar_source_symbol_adjust_date",
-            "source_name",
-            "symbol",
-            "adjust_type",
-            "trade_date",
-        ),
-        Index("ix_raw_daily_bar_source_date", "source_name", "trade_date"),
-        Index("ix_raw_daily_bar_batch_id", "batch_id"),
-        Index("ix_raw_daily_bar_row_hash", "row_hash"),
         {"schema": "raw"},
     )
 

@@ -27,8 +27,6 @@ class AdjustmentFactor(TimestampMixin, Base):
             name="ck_adjustment_factor_adjust_type",
         ),
         CheckConstraint("factor > 0", name="ck_adjustment_factor_positive"),
-        Index("ix_adjustment_factor_symbol_type_date", "symbol", "adjust_type", "trade_date"),
-        Index("ix_adjustment_factor_date_type", "trade_date", "adjust_type"),
         {"schema": "market"},
     )
 

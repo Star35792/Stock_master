@@ -1,7 +1,8 @@
 """Tests for building the curated layer directly from live DuckDB tables.
 
 This mirrors the ``daily_loop`` path where ``AdjustmentBuildService`` has
-populated ``market.daily_bar`` with ``adjust_type='qfq'`` rows.
+populated ``market.adjustment_factor`` with ``adjust_type='qfq'`` factors and
+``market.daily_bar`` holds only ``adjust_type='none'`` rows.
 """
 
 from datetime import date
@@ -35,7 +36,7 @@ def _seed_db_tables(db_path: Path) -> None:
         connection.executemany(
             """
             INSERT INTO market.adjustment_factor
-            VALUES (?, ?, ?, 'qfq', ?, 'daily_loop', 'v1', now())
+            VALUES (?, ?, ?, 'qfq', ?, 'hithink_finance_dump', 'v1', now())
             """,
             [
                 (1, "000001.SZ", date(2026, 1, 5), Decimal("0.9")),
@@ -70,37 +71,38 @@ def _seed_db_tables(db_path: Path) -> None:
             )
             """,
             [
+                # Unadjusted rows; the curated layer multiplies by the QFQ factor.
                 (
-                    "000001.SZ", "stock", date(2026, 1, 5), "qfq",
-                    Decimal("9"), Decimal("9"), Decimal("9"), Decimal("9"),
+                    "000001.SZ", "stock", date(2026, 1, 5), "none",
+                    Decimal("10"), Decimal("10"), Decimal("10"), Decimal("10"),
                     Decimal("100"), Decimal("900"), Decimal("0.01"),
-                    "trusted", "daily_loop_qfq", 1,
+                    "trusted", "hithink", 1,
                 ),
                 (
-                    "000001.SZ", "stock", date(2026, 1, 6), "qfq",
-                    Decimal("9"), Decimal("9"), Decimal("9"), Decimal("9"),
+                    "000001.SZ", "stock", date(2026, 1, 6), "none",
+                    Decimal("10"), Decimal("10"), Decimal("10"), Decimal("10"),
                     Decimal("100"), Decimal("900"), Decimal("0.02"),
-                    "trusted", "daily_loop_qfq", 1,
+                    "trusted", "hithink", 1,
                 ),
                 (
-                    "000001.SZ", "stock", date(2026, 1, 7), "qfq",
+                    "000001.SZ", "stock", date(2026, 1, 7), "none",
                     Decimal("9.9"), Decimal("9.9"), Decimal("9.9"), Decimal("9.9"),
                     Decimal("100"), Decimal("990"), Decimal("0.015"),
-                    "trusted", "daily_loop_qfq", 1,
+                    "trusted", "hithink", 1,
                 ),
-                # A non-qfq row must be excluded from the curated layer.
+                # A non-trusted row must be excluded from the curated layer.
                 (
                     "000002.SZ", "stock", date(2026, 1, 7), "none",
                     Decimal("5"), Decimal("5"), Decimal("5"), Decimal("5"),
                     Decimal("10"), Decimal("50"), Decimal("0.005"),
-                    "trusted", "hithink", 1,
+                    "suspect", "hithink", 1,
                 ),
-                # A suspect qfq row must be excluded by default.
+                # A row with no matching factor must be excluded (cannot compute qfq).
                 (
-                    "000003.SZ", "stock", date(2026, 1, 7), "qfq",
+                    "000003.SZ", "stock", date(2026, 1, 7), "none",
                     Decimal("5"), Decimal("5"), Decimal("5"), Decimal("5"),
                     Decimal("10"), Decimal("50"), Decimal("0.005"),
-                    "suspect", "daily_loop_qfq", 1,
+                    "trusted", "hithink", 1,
                 ),
             ],
         )
@@ -152,8 +154,10 @@ def test_build_prices_qfq_from_db_is_idempotent(tmp_path) -> None:
         connection.execute(
             """
             INSERT INTO market.daily_bar VALUES
-            ('000001.SZ', 'stock', '2026-01-08', 'qfq',
-             10, 10, 10, 10, 100, 1000, 0.02, 'trusted', 'daily_loop_qfq', 1)
+            ('000001.SZ', 'stock', '2026-01-08', 'none',
+             10, 10, 10, 10, 100, 1000, 0.02, 'trusted', 'hithink', 1);
+            INSERT INTO market.adjustment_factor
+            VALUES (4, '000001.SZ', '2026-01-08', 'qfq', 1.0, 'hithink_finance_dump', 'v1', now())
             """
         )
     finally:

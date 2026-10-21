@@ -50,8 +50,9 @@ Parquet  = warm analytical facts（本地磁盘）
 - `factor` 元数据：因子定义、运行记录、profile/诊断摘要。
 - `strategy` 元数据：回测运行合同、参数、状态、绩效摘要；大体量逐日结果可迁往温层 Parquet。
 - `portfolio`、`risk`、`trade`：计划、确认、风控、订单、成交、现金、持仓和审计，以 DuckDB 事务为事实源，写入经 `retry_on_conflict`/`idempotent_write` 保证幂等与并发安全。
+- 大表热窗口：`market.daily_bar`、`raw.daily_bar`、`market.adjustment_factor`、`factor.factor_value` 在 DuckDB 中只保留近期滑动窗口（默认 90 天）用于幂等写入与快速对账；完整历史由 Parquet 温层承载，并通过 `WarmLayerStore` 对 reader 透明合并。
 
-同一 DuckDB 库也直接承担历史行情、逐证券因子值、逐日回测结果等宽表/长表的查询扫描；当这些数据量增长到值得列式温层时，再物化到 Parquet 温层（见下）。控制面与温层共库是个人单用户规模下的有意简化，非最终多机形态。
+控制面与热窗口共库是个人单用户规模下的有意简化，非最终多机形态。
 
 ### DuckDB + Parquet：温数据主存储
 
@@ -119,11 +120,13 @@ Parquet 保存列式数据文件，DuckDB 负责查询、转换、质量检查�
 已按 clean cut 完成第一步：历史 PostgreSQL 分析数据不迁移，只保留字段契约、质量规则、血缘语义和事务域表结构，全部 ORM 已切到 DuckDB 单库并从外部源重建分析数据。剩余步骤（温层接入日循环、Parquet release）按下列顺序推进：
 
 1. （已完成）DuckDB 单库承载 `raw -> market -> factor -> ... -> trade` 全链路与控制面，`daily_loop` 串联 `daily_sync` 与 `factor_pipeline` 并写 `system.job_log`。
-2. （已完成）`curated/prices_qfq` 接入 `daily_loop`：当 `factor_reads_curated=true` 且 `factor_adjust_type='qfq'` 时，`daily_loop` 在同步后从 `market.daily_bar` 的可信 QFQ 行重建前复权 Parquet，并从 `market.adjustment_factor` 携带逐日真实 `qfq_factor` 与 `turnover_rate`。重建是幂等的（先写临时目录再原子替换），失败会中断后续因子计算。
+2. （已完成）`curated/prices_qfq` 接入 `daily_loop`：当 `factor_reads_curated=true` 且 `factor_adjust_type='qfq'` 时，`daily_loop` 在同步后基于 `market.daily_bar(adjust_type='none')` 与 `market.adjustment_factor(adjust_type='qfq')` 重建前复权 Parquet，并携带逐日真实 `qfq_factor` 与 `turnover_rate`。重建是幂等的（先写临时目录再原子替换），失败会中断后续因子计算。QFQ 行不再物化到 `market.daily_bar`。
 3. （已完成 P0.2a）`lake.release` 记录 market/curated 数据集的内容寻址 `release_id`、schema、日期范围、行数、checksum、父版本、代码版本、质量状态和 active 指针。日循环先登记 pending release 并把 curated release 绑定到 `factor.factor_run.release_id`；认证门禁通过后才原子切换 active，失败时旧 active 继续服务。`market.adjustment_factor.release_id` 记录复权版本血缘。
-4. 因子值：按运行批量写 Parquet 温层，控制面只保留定义、运行与摘要；API 从 DuckDB 分页查询。
-5. 财务/估值/另类数据（含未来新闻因子）和回测明细按相同 raw→curated→factor 模式重建。
-6. raw 不可变落地直接写本地 FS 的 `dataset/release/partition` 目录并记录 checksum；不引入 MinIO/Redis（见 §1.2）。
+4. （已完成 Phase 1）`market.daily_bar`、`raw.daily_bar`、`market.adjustment_factor`、`factor.factor_value` 已按 `trade_year/trade_month` 分区导出到 `data/warm/exported/<release_tag>/` 作为只读 Parquet 温层，并附 `manifest.json` 与 SHA-256。详见 [`20261021-1045-storage-split-phase1.md`](20261021-1045-storage-split-phase1.md)。本阶段不删除源表、不改应用读路径。
+5. （已完成 Phase 2）控制面 DuckDB 已瘦身至热窗口（约 90 天），4 张大表历史数据由 Parquet 温层承接；新增 `WarmLayerStore` 在内存 DuckDB 中把 Parquet 历史与 `ctrl` 热窗口合并为原 `schema.table` 视图，读路径无需改动。`daily_loop`、因子计算、低价超跌反弹回测均已验证通过。详见 [`20261021-1150-storage-split-phase2-warm-layer.md`](20261021-1150-storage-split-phase2-warm-layer.md)。
+6. （待 Phase 3）完全迁移写路径到 Parquet：`raw.daily_bar`、`factor.factor_value` 改为追加写入 Parquet staging 并注册 release；`market.daily_bar`、`market.adjustment_factor` 保留 DuckDB 近期滑动窗口用于幂等写入。当前写路径仍经 SQLAlchemy ORM 写入控制面热窗口，再由 `WarmLayerStore` 读取完整历史。
+7. 财务/估值/另类数据（含未来新闻因子）和回测明细按相同 raw→curated→factor 模式重建。
+8. raw 不可变落地直接写本地 FS 的 `dataset/release/partition` 目录并记录 checksum；不引入 MinIO/Redis（见 §1.2）。
 
 ## 6. 验收标准
 

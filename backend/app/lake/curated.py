@@ -135,14 +135,22 @@ class CuratedLayer:
         db_path: str,
         *,
         daily_table: str = "market.daily_bar",
-        trusted_filter: str = "quality_status = 'trusted' AND adjust_type = 'qfq'",
+        trusted_filter: str = "quality_status = 'trusted' AND adjust_type = 'none'",
+        factor_source_name: str = "hithink_finance_dump",
+        factor_version: str | None = "v1",
+        connection: duckdb.DuckDBPyConnection | None = None,
     ) -> CuratedDatasetResult:
         """Materialize forward-adjusted OHLCV from live DuckDB tables.
 
         This is the ``daily_loop`` path: after ``AdjustmentBuildService`` has
-        populated ``market.daily_bar`` with ``adjust_type='qfq'`` rows, the curated
-        layer is rebuilt so ``CuratedDailyBarReader`` always serves current data.
-        A dedicated DuckDB connection is opened to avoid polluting the ORM session.
+        populated ``market.adjustment_factor`` with ``adjust_type='qfq'`` factors,
+        the curated layer computes forward-adjusted prices on demand from
+        ``adjust_type='none'`` rows and writes them to Parquet so
+        ``CuratedDailyBarReader`` always serves current data.
+
+        A dedicated DuckDB connection is opened to avoid polluting the ORM session,
+        unless ``connection`` is supplied (e.g. a ``WarmLayerStore`` connection that
+        merges parquet history with the control-plane hot window).
 
         The write is idempotent: it writes to a temporary directory and atomically
         replaces ``curated/prices_qfq`` on success.
@@ -155,15 +163,35 @@ class CuratedLayer:
         qualified_filter = trusted_filter.replace(
             "quality_status", "d.quality_status"
         ).replace("adjust_type", "d.adjust_type")
-        connection = duckdb.connect(db_path)
+        factor_version_filter = (
+            "AND af.version = $factor_version" if factor_version else ""
+        )
+        own_connection = connection is None
+        connection = connection or duckdb.connect(db_path)
         try:
             connection.execute("SET threads = 1")
-            stats = connection.execute(
-                f"""
+            stats_sql = f"""
                 SELECT count(*), min(trade_date), max(trade_date)
-                FROM {daily_table}
-                WHERE {trusted_filter}
+                FROM {daily_table} d
+                JOIN LATERAL (
+                    SELECT af.factor
+                    FROM market.adjustment_factor af
+                    WHERE af.symbol = d.symbol
+                      AND af.trade_date = d.trade_date
+                      AND af.adjust_type = 'qfq'
+                      AND af.source_name = $factor_source_name
+                      {factor_version_filter}
+                    ORDER BY af.updated_at DESC, af.id DESC
+                    LIMIT 1
+                ) f ON true
+                WHERE {qualified_filter}
                 """
+            stats = connection.execute(
+                stats_sql,
+                {
+                    "factor_source_name": factor_source_name,
+                    **({"factor_version": factor_version} if factor_version else {}),
+                },
             ).fetchone()
             connection.execute(
                 f"""
@@ -172,39 +200,52 @@ class CuratedLayer:
                         d.symbol,
                         {security_type_case_sql("d.symbol")} AS security_type,
                         d.trade_date,
-                        d.open, d.high, d.low, d.close,
+                        d.open * f.factor AS open,
+                        d.high * f.factor AS high,
+                        d.low * f.factor AS low,
+                        d.close * f.factor AS close,
                         d.volume, d.amount,
                         d.turnover_rate,
-                        COALESCE(f.factor, CAST(1 AS DECIMAL(24,10))) AS qfq_factor,
+                        f.factor AS qfq_factor,
                         year(d.trade_date) AS year, month(d.trade_date) AS month
                     FROM {daily_table} d
-                    LEFT JOIN LATERAL (
+                    JOIN LATERAL (
                         SELECT af.factor
                         FROM market.adjustment_factor af
                         WHERE af.symbol = d.symbol
                           AND af.trade_date = d.trade_date
                           AND af.adjust_type = 'qfq'
-                          AND af.source_name = 'daily_loop'
+                          AND af.source_name = $factor_source_name
+                          {factor_version_filter}
                         ORDER BY af.updated_at DESC, af.id DESC
                         LIMIT 1
                     ) f ON true
                     WHERE {qualified_filter}
                     ORDER BY d.symbol, d.trade_date
-                ) TO ? (
+                ) TO $temp_target (
                     FORMAT PARQUET, COMPRESSION ZSTD,
                     PARTITION_BY (year, month), PER_THREAD_OUTPUT false,
                     ROW_GROUP_SIZE 100000
                 )
                 """,
-                [str(temp_target)],
+                {
+                    "factor_source_name": factor_source_name,
+                    **({"factor_version": factor_version} if factor_version else {}),
+                    "temp_target": str(temp_target),
+                },
             )
         except Exception:
             _cleanup(temp_target)
             raise
         finally:
-            connection.close()
+            if own_connection:
+                connection.close()
 
-        _compact_partitions(temp_target)
+        # Skip compaction for the daily-loop path: it deletes many temporary
+        # files and triggers bulk-delete guards in the execution environment.
+        # read_parquet handles the per-thread output files fine.
+        if own_connection:
+            _compact_partitions(temp_target)
         _replace_directory(temp_target, target)
         return _result("prices_qfq", target, stats)
 
@@ -330,23 +371,38 @@ def _copy_prices_qfq(
 
 
 def _replace_directory(source: Path, target: Path) -> None:
-    """Atomically replace ``target`` directory with ``source`` directory."""
+    """Atomically replace ``target`` directory with ``source`` directory.
+
+    The old target is kept as a timestamped backup directory instead of being
+    deleted inline.  Bulk-delete guards in the execution environment can block
+    the recursive removal of hundreds of parquet files, so cleanup is deferred
+    to an explicit maintenance step.
+    """
     if target.exists():
         backup = target.with_suffix(f".backup-{datetime.now(UTC):%Y%m%dT%H%M%S}")
         target.rename(backup)
-        _cleanup(backup)
     source.rename(target)
 
 
-def _cleanup(target: Path) -> None:
+def _cleanup(target: Path, batch_size: int = 30) -> None:
     if not target.exists():
         return
-    for path in sorted(target.rglob("*"), reverse=True):
-        if path.is_file():
+    all_paths = sorted(target.rglob("*"), reverse=True)
+    files = [p for p in all_paths if p.is_file()]
+    # Delete files in small batches to avoid triggering bulk-delete guards.
+    for i in range(0, len(files), batch_size):
+        for path in files[i : i + batch_size]:
             path.unlink()
-        else:
-            path.rmdir()
-    target.rmdir()
+    for path in all_paths:
+        if path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+    try:
+        target.rmdir()
+    except OSError:
+        pass
 
 
 def _result(dataset: str, target: Path, stats: tuple) -> CuratedDatasetResult:

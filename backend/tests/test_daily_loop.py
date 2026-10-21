@@ -359,8 +359,10 @@ def test_daily_loop_rebuilds_curated_when_enabled(
 
         return AdjustmentBuildResult(factor_rows=10, qfq_bar_rows=20, version="local")
 
-    def fake_build_prices_qfq_from_db(self: object, db_path: str) -> object:
-        curated_calls.append(db_path)
+    def fake_build_prices_qfq_from_db(
+        self: object, db_path: str, **kwargs: object
+    ) -> object:
+        curated_calls.append((db_path, kwargs))
         from app.lake.curated import CuratedDatasetResult
 
         return CuratedDatasetResult(
@@ -432,9 +434,11 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     assert result.curated_result is not None
     assert result.curated_result.row_count == 20
     assert len(rebuild_calls) == 1
-    assert rebuild_calls[0].get("source_name") == "daily_loop"
+    assert rebuild_calls[0].get("source_name") == "hithink_finance_dump"
     assert len(curated_calls) == 1
-    assert curated_calls[0].endswith(".duckdb")
+    assert curated_calls[0][0].endswith(".duckdb")
+    assert curated_calls[0][1].get("factor_source_name") == "hithink_finance_dump"
+    assert curated_calls[0][1].get("factor_version") == "local"
     assert job_log_repo.jobs[0].metadata_["curated_rebuilt"] is True
     assert job_log_repo.jobs[0].metadata_["adjustment_factor_rows"] == 10
 

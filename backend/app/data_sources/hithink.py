@@ -399,6 +399,67 @@ class HithinkFinanceDataSource:
             {"thscodes": ",".join(symbol.strip().upper() for symbol in symbols)},
         )
 
+    def fetch_auction_snapshot(
+        self,
+        *,
+        symbols: list[str],
+        stage: str = "final",
+    ) -> dict[str, Any]:
+        """集合竞价快照（含 float_market_cap，可作市值旁证）。
+
+        单次最多 100 个 thscode；stage 为 ``live`` 或 ``final``。
+        """
+        if not symbols:
+            raise ValueError("symbols is required")
+        if len(symbols) > 100:
+            raise ValueError("at most 100 symbols are allowed")
+        if stage not in ("live", "final"):
+            raise ValueError("stage must be 'live' or 'final'")
+        return self._get(
+            "/api/a-share/auction/snapshot",
+            {
+                "thscodes": ",".join(symbol.strip().upper() for symbol in symbols),
+                "stage": stage,
+            },
+        )
+
+    def fetch_capital_flow_snapshot(self, *, symbol: str) -> dict[str, Any]:
+        """主力资金实时快照（超大/大/中/小单净额）。
+
+        注意：官方文档标注该能力"暂未开放外部接入"，此处按契约实现，
+        权限开通后即可使用；未开通时抛出带业务 code 的 HithinkFinanceError。
+        """
+        return self._get(
+            "/api/a-share/capital-flow/snapshot",
+            {"thscode": symbol.strip().upper()},
+        )
+
+    def fetch_capital_flow_historical(
+        self,
+        *,
+        symbol: str,
+        interval: str,
+        start_ms: int,
+        end_ms: int,
+    ) -> dict[str, Any]:
+        """主力资金历史序列。interval 为 ``1m``（窗口 <= 7 自然日）或 ``1d``。
+
+        同 fetch_capital_flow_snapshot：按契约实现，待权限开放。
+        """
+        if interval not in ("1m", "1d"):
+            raise ValueError("interval must be '1m' or '1d'")
+        if end_ms < start_ms:
+            raise ValueError("end_ms must be >= start_ms")
+        return self._get(
+            "/api/a-share/capital-flow/historical",
+            {
+                "thscode": symbol.strip().upper(),
+                "interval": interval,
+                "start": start_ms,
+                "end": end_ms,
+            },
+        )
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         if not self.api_key:
             raise HithinkFinanceError("HITHINK_FINANCE_API_KEY is required")

@@ -257,7 +257,11 @@ class DailyBarRepository:
             if key not in {"symbol", "trade_date", "adjust_type"}
         }
         statement = statement.on_conflict_do_update(
-            index_elements=[DailyBar.symbol, DailyBar.trade_date, DailyBar.adjust_type],
+            index_elements=[
+                DailyBar.symbol,
+                DailyBar.trade_date,
+                DailyBar.adjust_type,
+            ],
             set_=update_columns,
             where=DailyBar.quality_status != "manual_fixed",
         )

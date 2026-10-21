@@ -25,6 +25,7 @@ from app.lake.curated import CuratedDatasetResult
 from app.repositories.lake import ReleaseRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.repositories.system import JobLogRepository
+from app.repositories.warm_layer import WarmLayerStore
 from app.scheduler.daily_sync import run_hithink_daily_sync
 from app.scheduler.factor_pipeline import FactorBatchResult, run_all_factors
 from app.services import HithinkDailySyncResult
@@ -215,7 +216,7 @@ def run_daily_loop(
                     )
                 adjustment = AdjustmentBuildService().rebuild_qfq(
                     db,
-                    source_name="daily_loop",
+                    source_name="hithink_finance_dump",
                     version=code_version,
                 )
                 db.commit()
@@ -243,7 +244,20 @@ def run_daily_loop(
     if settings.factor_reads_curated and factor_adjust_type == "qfq":
         try:
             db_path = str(Path(settings.metadata_db_path).resolve())
-            curated_result = CuratedLayer(DataLake()).build_prices_qfq_from_db(db_path)
+            # Use the warm-layer connection so that prices_qfq is rebuilt from
+            # the full parquet history plus the hot rows still in the control
+            # plane.  This keeps the control-plane DB small without losing the
+            # historical window required by research backtests.
+            warm_con = WarmLayerStore().connect(control_db_path=db_path, read_only=True)
+            try:
+                curated_result = CuratedLayer(DataLake()).build_prices_qfq_from_db(
+                    db_path,
+                    factor_source_name="hithink_finance_dump",
+                    factor_version=code_version,
+                    connection=warm_con,
+                )
+            finally:
+                warm_con.close()
             curated_manifest = ReleaseService.build_parquet_manifest(
                 Path(curated_result.path),
             )
@@ -514,14 +528,32 @@ def create_daily_loop_scheduler(
 
 
 def _compute_market_qfq_checksum(db: Session) -> str:
-    """Hash canonical QFQ rows in deterministic key order."""
+    """Hash canonical forward-adjusted rows in deterministic key order.
+
+    QFQ prices are no longer materialized in ``market.daily_bar``; they are
+    derived on demand from ``adjust_type='none'`` rows multiplied by the latest
+    ``daily_loop`` QFQ factor. The checksum therefore hashes the computed series
+    rather than stored qfq rows so that the release fingerprint remains stable.
+    """
     rows = db.execute(
         text("""
-            SELECT symbol, trade_date, open, high, low, close, volume, amount,
-                   turnover_rate, quality_status
-            FROM market.daily_bar
-            WHERE adjust_type = 'qfq'
-            ORDER BY symbol, trade_date
+            SELECT d.symbol, d.trade_date,
+                   d.open * f.factor, d.high * f.factor,
+                   d.low * f.factor, d.close * f.factor,
+                   d.volume, d.amount, d.turnover_rate, d.quality_status
+            FROM market.daily_bar d
+            JOIN LATERAL (
+                SELECT af.factor
+                FROM market.adjustment_factor af
+                WHERE af.symbol = d.symbol
+                  AND af.trade_date = d.trade_date
+                  AND af.adjust_type = 'qfq'
+                  AND af.source_name = 'daily_loop'
+                ORDER BY af.updated_at DESC, af.id DESC
+                LIMIT 1
+            ) f ON true
+            WHERE d.adjust_type = 'none'
+            ORDER BY d.symbol, d.trade_date
         """)
     )
     hasher = hashlib.sha256()
@@ -544,7 +576,7 @@ def _market_qfq_result(db: Session) -> _DatasetStats:
         text("""
             SELECT COUNT(*), MIN(trade_date), MAX(trade_date)
             FROM market.daily_bar
-            WHERE adjust_type = 'qfq'
+            WHERE adjust_type = 'none'
         """)
     ).one()
     return _DatasetStats(
@@ -612,15 +644,31 @@ def _gather_certification_metadata(
         meta["market_duplicate_groups"] = int(row or 0)
 
         # QFQ coverage
+        # QFQ rows are no longer materialized in market.daily_bar; they live as
+        # factors in market.adjustment_factor and as computed prices in the
+        # curated prices_qfq parquet. Gate the coverage via adjustment_factor.
+        qfq_source_name = "daily_loop"
+        qfq_version = code_version
         row = db.execute(
-            text("SELECT COUNT(*) FROM market.daily_bar WHERE adjust_type = 'qfq'"),
+            text("""
+                SELECT COUNT(*)
+                FROM market.adjustment_factor
+                WHERE adjust_type = 'qfq'
+                  AND source_name = :source_name
+                  AND version = :version
+            """),
+            {"source_name": qfq_source_name, "version": qfq_version},
         ).scalar()
         meta["qfq_rows"] = int(row or 0)
         row = db.execute(
-            text(
-                "SELECT MIN(trade_date), MAX(trade_date) "
-                "FROM market.daily_bar WHERE adjust_type = 'qfq'"
-            ),
+            text("""
+                SELECT MIN(trade_date), MAX(trade_date)
+                FROM market.adjustment_factor
+                WHERE adjust_type = 'qfq'
+                  AND source_name = :source_name
+                  AND version = :version
+            """),
+            {"source_name": qfq_source_name, "version": qfq_version},
         ).fetchone()
         if row:
             meta["qfq_min_date"] = str(row[0]) if row[0] else None
@@ -633,13 +681,16 @@ def _gather_certification_metadata(
             text("""
                 SELECT COUNT(*)
                 FROM market.daily_bar base
-                LEFT JOIN market.daily_bar qfq
-                  ON qfq.symbol = base.symbol
-                 AND qfq.trade_date = base.trade_date
-                 AND qfq.adjust_type = 'qfq'
+                LEFT JOIN market.adjustment_factor af
+                  ON af.symbol = base.symbol
+                 AND af.trade_date = base.trade_date
+                 AND af.adjust_type = 'qfq'
+                 AND af.source_name = :source_name
+                 AND af.version = :version
                 WHERE base.adjust_type = 'none'
-                  AND qfq.id IS NULL
+                  AND af.id IS NULL
             """),
+            {"source_name": qfq_source_name, "version": qfq_version},
         ).scalar()
         meta["qfq_missing_rows"] = int(row or 0)
         if meta["qfq_rows"] == 0 or meta["qfq_missing_rows"] > 0:

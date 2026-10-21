@@ -42,7 +42,11 @@ class Settings(BaseSettings):
     # materialized curated/prices_qfq Parquet instead of the ORM daily_bar table.
     # Only qfq is served by the curated reader; other adjust types still use the
     # ORM path regardless of this flag.
-    factor_reads_curated: bool = False
+    factor_reads_curated: bool = True
+
+    # Root directory for exported warm-layer Parquet files.  The split keeps the
+    # control-plane DuckDB small while large analytical tables live here.
+    warm_layer_root: str = "data/warm"
 
     eastmoney_timeout_seconds: int = 15
     eastmoney_retries: int = 2

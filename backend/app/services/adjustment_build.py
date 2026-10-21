@@ -35,11 +35,16 @@ class AdjustmentBuildService:
             "release_id": release_id,
         }
         try:
-            db.execute(text(_DELETE_FACTORS_SQL), params)
+            # Use upsert instead of DELETE+INSERT. DuckDB does not make rows
+            # deleted in the same transaction invisible to a subsequent INSERT
+            # into the same unique index, so an upsert avoids the resulting
+            # "duplicate key" errors while still refreshing every computed row.
             db.execute(text(_BUILD_FACTORS_SQL), params)
-            db.execute(text(_BUILD_QFQ_BARS_SQL), params)
             factor_rows = int(db.scalar(text(_COUNT_FACTORS_SQL), params) or 0)
-            qfq_bar_rows = int(db.scalar(text(_COUNT_QFQ_BARS_SQL), params) or 0)
+            # QFQ bars are no longer materialized into market.daily_bar.
+            # The curated layer computes forward-adjusted prices on demand from
+            # adjust_type='none' rows multiplied by these factors.
+            qfq_bar_rows = 0
             db.commit()
         except Exception:
             db.rollback()
@@ -51,13 +56,6 @@ class AdjustmentBuildService:
             release_id=release_id,
         )
 
-
-_DELETE_FACTORS_SQL = """
-DELETE FROM market.adjustment_factor
-WHERE source_name = :source_name
-  AND version = :version
-  AND adjust_type = 'qfq'
-"""
 
 _BUILD_FACTORS_SQL = """
 INSERT INTO market.adjustment_factor (
@@ -154,60 +152,12 @@ SELECT
     'trusted'
 FROM normalized
 WHERE backward_factor > 0 AND last_factor > 0
-"""
-
-_BUILD_QFQ_BARS_SQL = """
-INSERT INTO market.daily_bar (
-    symbol, security_type, trade_date, adjust_type,
-    open, high, low, close, volume, amount, turnover_rate,
-    source_name, source_count, quality_score, quality_status,
-    is_suspect, selected_raw_id
-)
-SELECT
-    d.symbol,
-    d.security_type,
-    d.trade_date,
-    'qfq',
-    d.open * f.factor,
-    d.high * f.factor,
-    d.low * f.factor,
-    d.close * f.factor,
-    d.volume,
-    d.amount,
-    d.turnover_rate,
-    :source_name || '_qfq',
-    d.source_count,
-    d.quality_score,
-    d.quality_status,
-    d.is_suspect,
-    d.selected_raw_id
-FROM market.daily_bar d
-JOIN market.adjustment_factor f
-  ON f.symbol = d.symbol
- AND f.trade_date = d.trade_date
- AND f.adjust_type = 'qfq'
- AND f.source_name = :source_name
- AND f.version = :version
-WHERE d.adjust_type = 'none'
-  AND (
-      CAST(:qfq_start_date AS date) IS NULL
-      OR d.trade_date >= CAST(:qfq_start_date AS date)
-  )
-ON CONFLICT (symbol, trade_date, adjust_type) DO UPDATE SET
-    security_type = EXCLUDED.security_type,
-    open = EXCLUDED.open,
-    high = EXCLUDED.high,
-    low = EXCLUDED.low,
-    close = EXCLUDED.close,
-    volume = EXCLUDED.volume,
-    amount = EXCLUDED.amount,
-    turnover_rate = EXCLUDED.turnover_rate,
-    source_name = EXCLUDED.source_name,
-    source_count = EXCLUDED.source_count,
-    quality_score = EXCLUDED.quality_score,
-    quality_status = EXCLUDED.quality_status,
-    is_suspect = EXCLUDED.is_suspect,
-    selected_raw_id = EXCLUDED.selected_raw_id
+ON CONFLICT (symbol, trade_date, adjust_type, source_name, version)
+DO UPDATE SET
+    factor = excluded.factor,
+    release_id = excluded.release_id,
+    quality_status = excluded.quality_status,
+    updated_at = now()
 """
 
 _COUNT_FACTORS_SQL = """
@@ -215,14 +165,4 @@ SELECT COUNT(*) FROM market.adjustment_factor
 WHERE source_name = :source_name
   AND version = :version
   AND adjust_type = 'qfq'
-"""
-
-_COUNT_QFQ_BARS_SQL = """
-SELECT COUNT(*) FROM market.daily_bar
-WHERE adjust_type = 'qfq'
-  AND source_name = :source_name || '_qfq'
-  AND (
-      CAST(:qfq_start_date AS date) IS NULL
-      OR trade_date >= CAST(:qfq_start_date AS date)
-  )
 """

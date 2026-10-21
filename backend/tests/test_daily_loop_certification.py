@@ -29,6 +29,22 @@ def _session_factory():
                 )
             """)
         )
+        connection.execute(
+            text("""
+                CREATE TABLE market.adjustment_factor (
+                    id BIGINT,
+                    symbol VARCHAR,
+                    trade_date DATE,
+                    adjust_type VARCHAR,
+                    factor DOUBLE,
+                    source_name VARCHAR,
+                    version VARCHAR,
+                    release_id VARCHAR,
+                    quality_status VARCHAR,
+                    updated_at TIMESTAMP
+                )
+            """)
+        )
     return sessionmaker(bind=engine), engine
 
 
@@ -39,8 +55,14 @@ def test_certification_gate_accepts_complete_qfq_coverage() -> None:
         db.execute(
             text("""
                 INSERT INTO market.daily_bar VALUES
-                    (1, '000001.SZ', :trade_date, 'none'),
-                    (2, '000001.SZ', :trade_date, 'qfq')
+                    (1, '000001.SZ', :trade_date, 'none')
+            """),
+            {"trade_date": target_date},
+        )
+        db.execute(
+            text("""
+                INSERT INTO market.adjustment_factor VALUES
+                    (1, '000001.SZ', :trade_date, 'qfq', 1.0, 'daily_loop', 'test', NULL, 'trusted', now())
             """),
             {"trade_date": target_date},
         )
