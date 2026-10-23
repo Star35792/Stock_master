@@ -62,7 +62,8 @@ def test_certification_gate_accepts_complete_qfq_coverage() -> None:
         db.execute(
             text("""
                 INSERT INTO market.adjustment_factor VALUES
-                    (1, '000001.SZ', :trade_date, 'qfq', 1.0, 'daily_loop', 'test', NULL, 'trusted', now())
+                    (1, '000001.SZ', :trade_date, 'qfq', 1.0, 'daily_loop',
+                     'test', NULL, 'trusted', now())
             """),
             {"trade_date": target_date},
         )

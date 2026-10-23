@@ -8,7 +8,6 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    Index,
     Integer,
     Numeric,
     Sequence,
