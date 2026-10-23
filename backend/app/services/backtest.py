@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -18,11 +18,13 @@ from app.backtest import (
     TargetWeightSignal,
     build_fee_model,
 )
+from app.config.settings import settings
 from app.repositories.market import (
     CorporateActionRepository,
     DailyBarRepository,
     TradingCalendarRepository,
 )
+from app.repositories.research_read import WarmResearchReadRepository
 from app.repositories.strategy import BacktestPerformanceRepository, BacktestRepository
 from app.schemas.common import Page
 from app.schemas.strategy import (
@@ -175,6 +177,9 @@ class DailyBacktestService:
         corporate_action_repository: CorporateActionRepository | None = None,
         trading_calendar_repository: TradingCalendarRepository | None = None,
         verification_session_factory: Callable[[Session], Any] | None = None,
+        research_read_source: str | None = None,
+        research_release_tag: str | None = None,
+        research_min_trading_days: int | None = None,
     ) -> None:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.backtest_repository = backtest_repository or BacktestRepository()
@@ -187,6 +192,120 @@ class DailyBacktestService:
         self.verification_session_factory = (
             verification_session_factory or _independent_verification_session
         )
+        # ``warm`` routes research reads through WarmLayerStore so the run can
+        # see the full Parquet history instead of the control-plane hot window.
+        self.research_read_source = research_read_source or settings.research_read_source
+        self.research_release_tag = (
+            research_release_tag
+            if research_release_tag is not None
+            else settings.research_release_tag
+        )
+        self.research_min_trading_days = (
+            research_min_trading_days
+            if research_min_trading_days is not None
+            else settings.research_min_trading_days
+        )
+
+    def _warm_read_repository(self) -> WarmResearchReadRepository:
+        """Open a warm-layer research read connection bound to a known release."""
+        from app.repositories.warm_layer import WarmLayerStore
+
+        store = WarmLayerStore()
+        release_tag = self.research_release_tag or store.latest_release_tag
+        if release_tag is None:
+            raise ValueError(
+                "no warm-layer release available; research reads require an "
+                "exported Parquet release"
+            )
+        # Partial releases record their parent; inherit it so tables and dates
+        # the release did not publish remain readable.
+        base_tag = store.base_release_tag_for(release_tag)
+        if base_tag:
+            store = WarmLayerStore(base_release_tag=base_tag)
+        # Parquet-only on purpose: the ORM session already holds a read-write
+        # handle on the same DuckDB file, and DuckDB refuses to attach the file a
+        # second time in that situation.  ``market.corporate_action`` and
+        # ``market.trading_calendar`` are not slimmed, so they keep being read
+        # through the ORM session where they are authoritative.
+        connection = store.connect(
+            release_tag=release_tag, read_only=True, attach_control=False
+        )
+        return WarmResearchReadRepository(connection)
+
+    @contextmanager
+    def _research_read(
+        self, db: Session, *, start_date: date, end_date: date
+    ) -> Iterator[tuple[Any, str]]:
+        """Yield ``(read_facade, scope_label)`` for research inputs.
+
+        In ``warm`` mode bars, corporate actions and the execution calendar all
+        come from one connection bound to one release.  Keeping them on the same
+        source matters: reading bars from Parquet while reading corporate
+        actions from the control plane would let the corporate-action ``reject``
+        gate miss historical events.
+        """
+        if self.research_read_source == "warm":
+            repository = self._warm_read_repository()
+            try:
+                total_days = repository.total_trading_days()
+                if total_days < self.research_min_trading_days:
+                    raise ValueError(
+                        "warm-layer release exposes only "
+                        f"{total_days} trading days, below the "
+                        f"{self.research_min_trading_days}-day minimum; refusing "
+                        "to run against a truncated release"
+                    )
+                exported_max = repository.max_exported_date(
+                    adjust_type=_EXECUTION_ADJUST_TYPE
+                )
+                if exported_max is not None and end_date > exported_max:
+                    raise ValueError(
+                        "backtest window ends after the warm-layer export "
+                        f"({end_date} > {exported_max}); re-export the warm "
+                        "layer or shorten the window, the control-plane hot "
+                        "window is not readable through this connection"
+                    )
+                yield _WarmReadFacade(repository, self, db), "warm_parquet_only"
+            finally:
+                repository.close()
+        else:
+            yield _OrmReadFacade(self, db), "orm_session"
+
+    @contextmanager
+    def _research_verify_read(
+        self, db: Session, *, start_date: date, end_date: date
+    ) -> Iterator[tuple[Any, str]]:
+        """Re-open the research inputs after the run for the drift check.
+
+        Warm mode re-opens a fresh connection (which re-reads Parquet), so the
+        scope is honestly reported as ``warm_release_reopen`` rather than
+        claiming an independent transactional session.
+        """
+        if self.research_read_source == "warm":
+            repository = self._warm_read_repository()
+            try:
+                exported_max = repository.max_exported_date(
+                    adjust_type=_EXECUTION_ADJUST_TYPE
+                )
+                if exported_max is not None and end_date > exported_max:
+                    raise ValueError(
+                        "backtest window ends after the warm-layer export "
+                        f"({end_date} > {exported_max}); re-export the warm "
+                        "layer or shorten the window, the control-plane hot "
+                        "window is not readable through this connection"
+                    )
+                yield _WarmReadFacade(repository, self, db), "warm_parquet_only"
+            finally:
+                repository.close()
+        else:
+            with self.verification_session_factory(db) as verification_db:
+                scope = (
+                    "independent_session"
+                    if verification_db is not db
+                    else "same_session_fallback"
+                )
+                yield _OrmReadFacade(self, verification_db), scope
+
 
     def run(
         self,
@@ -311,33 +430,27 @@ class DailyBacktestService:
             training_artifact_id=training_artifact_id,
         )
         try:
-            corporate_actions = (
-                self.corporate_action_repository.list_for_symbols_date_range(
-                    db,
-                    symbols=set(symbols),
+            with self._research_read(
+                db, start_date=start_date, end_date=end_date
+            ) as (reader, read_scope):
+                corporate_actions = reader.list_corporate_actions(
+                    symbols=symbols, start_date=start_date, end_date=end_date
+                )
+                if corporate_actions:
+                    raise ValueError(
+                        "backtest interval contains corporate actions; "
+                        "event accounting is not implemented"
+                    )
+                execution_bars = reader.list_daily_bars(
                     start_date=start_date,
                     end_date=end_date,
+                    adjust_type=_EXECUTION_ADJUST_TYPE,
+                    symbols=symbols,
+                    quality_status="trusted",
                 )
-            )
-            if corporate_actions:
-                raise ValueError(
-                    "backtest interval contains corporate actions; "
-                    "event accounting is not implemented"
+                execution_calendar = reader.load_execution_calendar(
+                    symbols=symbols, start_date=start_date, end_date=end_date
                 )
-            execution_bars = self.daily_bar_repository.list_for_factor_calculation(
-                db,
-                start_date=start_date,
-                end_date=end_date,
-                adjust_type=_EXECUTION_ADJUST_TYPE,
-                symbols=symbols,
-                quality_status="trusted",
-            )
-            execution_calendar = self._load_execution_calendar(
-                db,
-                symbols=symbols,
-                start_date=start_date,
-                end_date=end_date,
-            )
             snapshot_before = _build_market_snapshot(
                 bars=execution_bars,
                 corporate_actions=corporate_actions,
@@ -364,35 +477,24 @@ class DailyBacktestService:
                 signals=normalized_signals,
                 execution_calendar=execution_calendar,
             )
-            with self.verification_session_factory(db) as verification_db:
-                verification_scope = (
-                    "independent_session"
-                    if verification_db is not db
-                    else "same_session_fallback"
+            with self._research_verify_read(
+                db, start_date=start_date, end_date=end_date
+            ) as (
+                verification_reader,
+                verification_scope,
+            ):
+                corporate_actions_after = verification_reader.list_corporate_actions(
+                    symbols=symbols, start_date=start_date, end_date=end_date
                 )
-                corporate_actions_after = (
-                    self.corporate_action_repository.list_for_symbols_date_range(
-                        verification_db,
-                        symbols=set(symbols),
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                )
-                execution_bars_after = (
-                    self.daily_bar_repository.list_for_factor_calculation(
-                        verification_db,
-                        start_date=start_date,
-                        end_date=end_date,
-                        adjust_type=_EXECUTION_ADJUST_TYPE,
-                        symbols=symbols,
-                        quality_status="trusted",
-                    )
-                )
-                execution_calendar_after = self._load_execution_calendar(
-                    verification_db,
-                    symbols=set(symbols),
+                execution_bars_after = verification_reader.list_daily_bars(
                     start_date=start_date,
                     end_date=end_date,
+                    adjust_type=_EXECUTION_ADJUST_TYPE,
+                    symbols=symbols,
+                    quality_status="trusted",
+                )
+                execution_calendar_after = verification_reader.load_execution_calendar(
+                    symbols=symbols, start_date=start_date, end_date=end_date
                 )
             snapshot_after = _build_market_snapshot(
                 bars=execution_bars_after,
@@ -463,6 +565,118 @@ class DailyBacktestService:
             for symbol in exchange_symbols:
                 result[symbol] = dates
         return result
+
+
+class _ResearchReadFacade:
+    """Common read surface for research inputs regardless of backing store."""
+
+    def list_corporate_actions(
+        self, *, symbols: Iterable[str], start_date: date, end_date: date
+    ) -> list[Any]:
+        raise NotImplementedError
+
+    def list_daily_bars(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbols: list[str],
+        quality_status: str,
+    ) -> list[Any]:
+        raise NotImplementedError
+
+    def load_execution_calendar(
+        self, *, symbols: list[str], start_date: date, end_date: date
+    ) -> dict[str, list[date]]:
+        raise NotImplementedError
+
+
+class _WarmReadFacade(_ResearchReadFacade):
+    """Bars and factor values from Parquet; reference facts from the ORM.
+
+    Only price history lives in the slimmed warm layer.  Corporate actions and
+    the trading calendar are authoritative (and complete) in the control plane,
+    so they continue to be read through the session that owns the write handle.
+    """
+
+    def __init__(
+        self,
+        repository: WarmResearchReadRepository,
+        service: DailyBacktestService,
+        db: Session,
+    ) -> None:
+        self._repository = repository
+        self._orm = _OrmReadFacade(service, db)
+
+    def list_corporate_actions(
+        self, *, symbols: Iterable[str], start_date: date, end_date: date
+    ) -> list[Any]:
+        return self._orm.list_corporate_actions(
+            symbols=symbols, start_date=start_date, end_date=end_date
+        )
+
+    def list_daily_bars(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbols: list[str],
+        quality_status: str,
+    ) -> list[Any]:
+        return self._repository.list_daily_bars(
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            symbols=symbols,
+            quality_status=quality_status,
+        )
+
+    def load_execution_calendar(
+        self, *, symbols: list[str], start_date: date, end_date: date
+    ) -> dict[str, list[date]]:
+        return self._orm.load_execution_calendar(
+            symbols=symbols, start_date=start_date, end_date=end_date
+        )
+
+
+class _OrmReadFacade(_ResearchReadFacade):
+    def __init__(self, service: DailyBacktestService, db: Session) -> None:
+        self._service = service
+        self._db = db
+
+    def list_corporate_actions(
+        self, *, symbols: Iterable[str], start_date: date, end_date: date
+    ) -> list[Any]:
+        return self._service.corporate_action_repository.list_for_symbols_date_range(
+            self._db, symbols=set(symbols), start_date=start_date, end_date=end_date
+        )
+
+    def list_daily_bars(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbols: list[str],
+        quality_status: str,
+    ) -> list[Any]:
+        return self._service.daily_bar_repository.list_for_factor_calculation(
+            self._db,
+            start_date=start_date,
+            end_date=end_date,
+            adjust_type=adjust_type,
+            symbols=symbols,
+            quality_status=quality_status,
+        )
+
+    def load_execution_calendar(
+        self, *, symbols: list[str], start_date: date, end_date: date
+    ) -> dict[str, list[date]]:
+        return self._service._load_execution_calendar(
+            self._db, symbols=symbols, start_date=start_date, end_date=end_date
+        )
 
 
 def _build_market_snapshot(

@@ -261,6 +261,18 @@ V1 稳定后已经扩展出的能力：
 
 分层存储架构（DuckDB 单库承载控制面+事务+温层查询、本地 Parquet 温层、本地 FS 冷存；不引入 PostgreSQL/SQLite/MinIO/Redis）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`。`curated/prices_qfq` 已接入 `daily_loop`（`factor_reads_curated` 开关），`fundamentals_pit`、factor release 与完整 Parquet release 发布/校验仍属后续切片。
 
+### 10.1 研究读路径（2026-10-22 新增）
+
+回测与因子研究的**读**路径已经可以直接读温层 Parquet，**写路径仍然只走 ORM**，控制面不因研究读而变大。
+
+- `app/repositories/research_read.py` 的 `WarmResearchReadRepository` 是 ORM 仓库的只读孪生实现，暴露 `list_daily_bars` / `list_factor_values` / `load_execution_calendar` / `coverage` / `total_trading_days` / `max_exported_date` / `tradability_coverage`。日线读取时会用 `app/market/price_limit.py` 补齐 `limit_up` / `limit_down`（控制面这两列全为 NULL）。
+- `app/services/backtest.py` 与 `app/services/strategy_research.py` 通过 `_research_read()` / `_factor_read()` 上下文管理器切换数据源，`research_read_source=warm|control`。**单元测试固定用 `control`**（`tests/conftest.py` 设置 `RESEARCH_READ_SOURCE=control`），否则临时测试库无法自己 ATTACH 自己。
+- 两道 fail-closed 闸门：`research_min_trading_days`（默认 200，release 被截断时直接失败）与「窗口末日不得超过 `max_exported_date`」。不要为了让回测跑起来而调低它们。
+- 温层连接默认 `attach_control=False`，即纯 Parquet 连接，不 ATTACH 控制面文件——DuckDB 不允许同一文件被两个句柄打开（其中一个为读写）时报 `Unique file handle conflict`。`market.corporate_action` 与 `market.trading_calendar` 因此仍走 ORM（这两张表未被瘦身，持有完整历史）。
+- 子 release 只发布变更表，其余表通过 `WarmLayerStore.base_release_tag` 从父 release 继承，避免每次复制约 700 MB Parquet。
+
+涨跌停价格：`limit_up` / `limit_down` 不再依赖供应商字段，改由 `app/market/price_limit.py` 按板块从当日 `pre_close` 推导（主板 ±10%、创业板/科创板 ±20%、北交所 ±30%、B 股 ±10%，主板 ST 降为 ±5%，ROUND_HALF_UP 到分）。锚点必须是**当日自身的 `pre_close`**，不能用前一行的 `close`——除权除息日两者不相等。指数（`.SH` + `000` 前缀，如 `000300.SH`）不套用涨跌幅带。
+
 任何会进入策略、回测、组合和持仓推演的生产数据，仍应以经过质量校验和血缘追踪的 `market` / `factor` 层为准。
 
 API 启动后的日线维护由 `scheduler/auto_data_sync.py` 的后台线程执行，调用

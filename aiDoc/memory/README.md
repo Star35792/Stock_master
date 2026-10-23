@@ -26,3 +26,9 @@
 - 估值数据：Eastmoney clist 接口可免 cookie 批量取当前总市值/流通市值/PE/PB（f20/f21/f9/f23），但不支持指定历史日期；东方财富估值分析日期接口可返回指定交易日的 PE_TTM/PB_MRQ 等供应商记录，现仅采集到独立 raw 批次。历史接口不提供可认证的首次可得时间或修订版本，故回填尚不能用于历史全市场收益回测。Xueqiu kline 带历史 pe/pb/market_capital 但需 cookie，当前未配置。
 - **2026-10-21 拆分第二阶段完成**：`market.daily_bar`、`raw.daily_bar`、`market.adjustment_factor`、`factor.factor_value` 四张大表已完成控制面瘦身（`stock_master.duckdb` 从 4,397 MiB 降至 535 MiB，-87.8%），历史数据由 `data/warm/exported/` 中的 Parquet 温层承接。新增 `WarmLayerStore` 在内存 DuckDB 中合并 Parquet 历史与控制面热窗口，reader 无需改动 SQL 即可读到完整时间序列。`daily_loop`、因子计算、低价超跌反弹回测均已验证通过。
 - `market.daily_bar` 的 `UniqueConstraint` 已修正为 `(symbol, trade_date, adjust_type)`，`AdjustmentBuildService.rebuild_qfq` 已改为 `INSERT ... ON CONFLICT DO UPDATE` 以规避 DuckDB 同事务 DELETE 不可见问题。
+- **研究读路径默认走温层**（2026-10-22）：控制面 `market.daily_bar` 只有约 59 个交易日热窗口，任何跨年回测/IC 都必须读 `data/warm/exported/` 的 Parquet。改回测或研究读路径时，ORM 仓库与 `repositories/research_read.py` 这对孪生实现要同步改。
+- 温层连接不要 ATTACH 控制面 DuckDB：DuckDB 禁止同一文件被两个句柄打开（其一为读写）时报 `Unique file handle conflict`。用 `attach_control=False` 建纯 Parquet 连接，控制面读取继续走已打开的 ORM session。
+- DuckDB `corr()` 对退化分组返回 **NaN 而不是 NULL**，写进 `DECIMAL` 列会抛 `Conversion Error: Could not cast value nan`。任何 SQL 聚合结果写入定点列之前都要先过滤 NaN/inf。
+- 涨跌停价格不能用「涨跌幅≈10%」反推校验：当日收盘涨 10% 不等于收盘价等于涨停价。正确校验是不变式 `high <= limit_up` 且 `low >= limit_down`（剔除上市前 5 个交易日后真实违规率 0.092%）。推导锚点必须是当日自身的 `pre_close`，不能用前一行的 `close`（除权除息日两者不等）。
+- 因子方向不能靠直觉设定：本轮实测 7 个价量因子里 `momentum_20`/`momentum_60`/`liquidity_20` 的 RankIC 显著为负（IR 在 -0.26~-0.33），默认预设给它们「越高越好」导致回测亏损。任何因子进策略前先查 `factor.factor_profile` 的 RankIC 符号。
+- 日频换仓的 20 股等权组合会把毛收益吃光：本轮 `ic_aligned` 回测毛收益约 +4.6%，换手率 71、佣金 4.5 万（占初始资金 4.5%），净收益只剩 +0.08%。`rebalance_rule` 当前只支持 `daily`，降换手需要先实现非日频换仓。

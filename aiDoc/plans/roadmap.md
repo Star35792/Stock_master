@@ -20,6 +20,12 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 
 东方财富估值分析日期列表现可手工补采指定历史交易日，仅保存原始批次、完整响应和真实抓取时间。该补采不解锁初筛或回测；下一阶段先建立历史估值可得时间及与通用因子读取的隔离，再评估可信发布。
 
+**研究读路径已接入 Parquet 温层（2026-10-22）**。此前研究/回测读路径只走 ORM，只能看到控制面热窗口（约 59 个交易日），因此不可能产出任何跨年证据。现在 `DailyBacktestService` 与 `StrategyResearchService` 通过 `WarmResearchReadRepository` 读温层 Parquet，`research_read_source=warm|control` 可切换，`research_min_trading_days`（默认 200）与「窗口不得超过 Parquet 导出末日」两道 fail-closed 闸门防止静默读到被截断的 release。温层连接默认 `attach_control=False`（纯 Parquet），公司行为与交易日历仍走 ORM，规避 DuckDB 同一文件被读写句柄重复打开的 `Unique file handle conflict`。详见 `aiDoc/relations/trusted-daily-data-center.md`。
+
+**因子 IC 证据首次具备样本量（2026-10-22）**。`factor.factor_profile` 此前为空表，导致 `FactorPoolClassifierService` 把全部 71 个因子判为 `frozen`（要求 `min_trade_dates=200`）。现通过 `scripts/factors/backfill_warm_factors.py` 在温层上按 qfq 价格回填 7 个价量因子（`v2-qfq-2y`，2024-05-01~2026-04-30，484 个交易日 / 5,651 只证券 / 18,606,449 行），再用 `scripts/factors/compute_warm_factor_ic.py` 计算逐日 IC 与 RankIC 并落库 3,371 行。分级结果首次非全冻结：`volume_stability_20`（RankIC1 +0.0435，IR 0.60，正相关率 72.5%）与 `max_drawdown_20`（+0.0179）进入 `core`；其余 5 个因 IC 显著为负判为 `frozen`。注意 IC 计算**不受**回测的公司行为 reject 闸门约束（qfq 价格已含权息调整），因此这个窗口不剔除分红送转证券，比回测股票池更接近全市场。
+
+**因子方向与实测效应相反的偏差已定位（2026-10-22）**。第一批温层因子选股回测（run_id=12，2025-11-03~2026-04-30，top_n=20，等权满仓，`a_share_cost_v1`）总收益 **-4.63%**、年化 -9.54%、最大回撤 -18.59%、夏普 -0.361、换手率 55.0、佣金 36,498 元。原因是默认因子方向预设里 `momentum_20` / `momentum_60` / `liquidity_20` 设为「越高越好」，而实测 RankIC1 分别为 -0.0505（IR -0.33，正相关率仅 36.0%）、-0.0408、-0.0401，即方向与真实效应相反且并非噪声。按 IC 证据翻转这三个方向后重跑（run_id=13，`--spec-set ic_aligned`）总收益 **+0.079%**、最大回撤 -12.55%、夏普 +0.100，但换手率升到 71.1、佣金 45,067 元——**毛收益约 +4.6% 被交易成本几乎全额吃掉**。因此下一步的正确方向不是继续调因子权重，而是实现非日频换仓（`rebalance_rule` 当前硬编码只支持 `daily`）以降低换手；在实现之前，任何温层因子选股回测的净收益都不应表述为策略收益。
+
 当前处于 V6.1 只读运维工作台收口后、转向 V5 公共操作闭环的阶段。P0 估值数据接入（Eastmoney cookie-free）和因子批量管道基础设施已落地；P0-3 数据→因子日级闭环调度器已交付，`daily_loop` 按交易日串联 `daily_sync` 与 `factor_pipeline` 并写入 `system.job_log`，sync 失败时不再继续因子计算。就研究链路而言，V3 因子工厂已经扩展为较完整的可复用体系，V4 已具备因子选股回测创建、回测结果查询、绩效归因、批量运行、跨运行比较、样本外验证区间和滚动窗口规划等支撑 API；`out_of_sample` 会在 service 层强制训练期与测试期不重叠，并只读取、回测测试区间，合同记录显式测试边界、协议和窗口标识。滚动窗口当前仅供规划，训练、选参、窗口到运行的不可变绑定和训练产物血缘尚未落地，因此 `rolling` 执行 fail-closed，不能宣称已完成 walk-forward。
 
 已完成：
@@ -50,6 +56,8 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 数据获取困难是系统性问题：例如 HiThink 当前无法获取 `562820.SH` 集成电路ETF嘉实，需要用东方财富等补充源兜底。补充源不能绕过数据中心，必须先进入 `raw`，再经质量校验构建到 `market`。
 - V5.1 组合草案已接入风险预算（`PortfolioRiskBudget`）：行业权重上限、风格暴露、跟踪误差与组合波动率四类约束与组合约束同源，由 `PortfolioBuilder._apply_style_and_tracking_risk` 强制执行（先于组约束执行），风格代理因子来自 `market.valuation_snapshot` 与 `factor.factor_value`，组合收益率按单资产收益率加权汇总，超预算时等比例缩放并在 `PortfolioTarget.reasons` 记录 `style_budget` / `tracking_error_budget` / `volatility_budget`；`PortfolioPlanRead.style_risk` 与持久化 `plan.style_risk` 可回读风格暴露明细、跟踪误差、波动率与缺失基准标记。风格代理口径（size=ln 市值、value=-PB、momentum/volatility/liquidity=factor_value z-score）为显式研究假设，非完整风格模型。V5.2 readiness/净值/ADV/正式风险评估和 V5.3 短时确认/幂等模拟执行已形成公共闭环。执行固定 paper-only 和 local single-user，在内存全批预演通过后才单事务写入；确认、账户、订单、成交和执行批次可追溯，PostgreSQL 回滚与同键并发已在隔离库验证。真实成本、异步部分成交和外部券商对账不在本项目范围内，模拟盘只用于持仓推演与风险验证。
 - 本项目不连接券商、不做实盘自动化交易。真实账户只读适配器、券商回报对账、外部订单幂等状态机和 kill switch 均不在项目范围内，也不作为后续路线；模拟盘是终态的持仓推演工具，不是通向真实账户的过渡阶段。
+- **尚未补齐、本轮明确延期的数据缺口**（不要当作已完成）：`market.security_status_event` 停牌事件表已建表但仍为 **0 行**，停牌只能靠「当日无 bar」推断，与真实停牌无法区分；`market.security_industry_history` 行业时点标签仍为 **0 行**，因此**行业中性化在拿到时点标签前不可信**，本轮所有回测与 IC 均未使用它。这两项与「公司行为事件会计」一起构成下一轮数据补齐的硬缺口。
+- 涨跌停价格不再依赖供应商字段：`limit_up` / `limit_down` 在控制面 `market.daily_bar` 的 325,774 行里全为 NULL，改由 `app/market/price_limit.py` 按板块（主板 ±10%、创业板/科创板 ±20%、北交所 ±30%、B 股 ±10%；主板 ST 降为 ±5%）从当日 `pre_close` 推导。以不变式 `high <= limit_up` 且 `low >= limit_down` 对真实数据校验，剔除上市前 5 个交易日后违规率 0.092%，残差来自 `pre_close` 本身的数据质量离群值。指数（如 `000300.SH`、`000001.SH`）不套用涨跌幅带。
 - 新增上层因子多为代理变量：财务因子已按公告日生效（`report_date < trade_date`，运行元数据显式声明公告日语义与消费的报表修订哈希），报告修订版本化（`fundamental.financial_statement_revision`），金融行业证券从通用结构因子中剔除（行业专属指标待专门数据源），行业因子按 `market.security_industry_history` 时点标签生效（无历史时回退当前标签并显式记录）；历史行业分类数据源与行业专属财务指标仍待接入。
 
 ## V1 可信日线数据中心

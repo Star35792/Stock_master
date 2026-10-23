@@ -1,5 +1,7 @@
 import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -7,8 +9,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config.settings import settings
 from app.repositories.factor import FactorValueRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
+from app.repositories.research_read import WarmResearchReadRepository
 from app.repositories.strategy import TrainingArtifactRepository
 from app.schemas.strategy import RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
@@ -40,6 +44,80 @@ class StrategyResearchService:
         self.training_artifact_repository = (
             training_artifact_repository or TrainingArtifactRepository()
         )
+        # Research reads follow the same source policy as the backtest service,
+        # otherwise the strategy would still be limited to the control-plane
+        # hot window even though history lives in the warm layer. ``getattr``
+        # keeps stand-in services used by tests working.
+        self.research_read_source = (
+            getattr(backtest_service, "research_read_source", None)
+            or settings.research_read_source
+        )
+        self.research_release_tag = (
+            getattr(backtest_service, "research_release_tag", None)
+            or settings.research_release_tag
+        )
+        self.research_min_trading_days = (
+            getattr(backtest_service, "research_min_trading_days", None)
+            or settings.research_min_trading_days
+        )
+
+    @contextmanager
+    def _factor_read(self, db: Session) -> Iterator[Any]:
+        """Yield a factor-row reader bound to the configured research source.
+
+        Warm mode also validates that the bound release still carries its full
+        history; a release that silently lost its history would otherwise make
+        every factor look like it has no observations.
+        """
+        if self.research_read_source == "warm":
+            from app.repositories.warm_layer import WarmLayerStore
+
+            store = WarmLayerStore()
+            release_tag = self.research_release_tag or store.latest_release_tag
+            if release_tag is None:
+                raise ValueError(
+                    "no warm-layer release available; research reads require an "
+                    "exported Parquet release"
+                )
+            base_tag = store.base_release_tag_for(release_tag)
+            if base_tag:
+                store = WarmLayerStore(base_release_tag=base_tag)
+            reader = WarmResearchReadRepository(
+                store.connect(
+                    release_tag=release_tag,
+                    read_only=True,
+                    attach_control=False,
+                )
+            )
+            try:
+                total_days = reader.total_trading_days()
+                minimum = self.research_min_trading_days
+                if total_days < minimum:
+                    raise ValueError(
+                        f"warm-layer release exposes only {total_days} trading "
+                        f"days, below the {minimum}-day minimum; refusing to "
+                        "read factors from a truncated release"
+                    )
+                yield reader.list_factor_values
+            finally:
+                reader.close()
+            return
+
+        def read_factor_rows(
+            factor_name: str,
+            factor_version: str,
+            start_date: date,
+            end_date: date,
+        ) -> Any:
+            return self.factor_value_repository.list_for_cross_section(
+                db,
+                factor_name=factor_name,
+                factor_version=factor_version,
+                start_date=start_date,
+                end_date=end_date,
+            )
+
+        yield read_factor_rows
 
     def generate_rolling_windows(
         self,
@@ -113,18 +191,18 @@ class StrategyResearchService:
         start_date: date,
         end_date: date,
     ) -> dict[FactorScoreSpec, list[SimpleNamespace]]:
-        factor_rows = {
-            spec: self._normalize_factor_rows(
-                self.factor_value_repository.list_for_cross_section(
-                    db,
-                    factor_name=spec.factor_name,
-                    factor_version=spec.factor_version,
-                    start_date=start_date,
-                    end_date=end_date,
+        with self._factor_read(db) as read_factor_rows:
+            factor_rows = {
+                spec: self._normalize_factor_rows(
+                    read_factor_rows(
+                        factor_name=spec.factor_name,
+                        factor_version=spec.factor_version,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
                 )
-            )
-            for spec in factor_specs
-        }
+                for spec in factor_specs
+            }
         for spec, rows in factor_rows.items():
             if not rows:
                 raise ValueError(

@@ -1,0 +1,39 @@
+{
+  "run_id": 12,
+  "window": [
+    "2025-11-03",
+    "2026-04-30"
+  ],
+  "top_n": 20,
+  "factors": [
+    "momentum_20",
+    "momentum_60",
+    "volatility_20",
+    "downside_volatility_20",
+    "max_drawdown_20",
+    "liquidity_20",
+    "volume_stability_20"
+  ],
+  "factor_version": "v1-qfq",
+  "research_read_source": "warm",
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation"
+  ],
+  "performance": {
+    "total_return": "-0.0462592353",
+    "annualized_return": "-0.09543301685989691",
+    "maximum_drawdown": "-0.1859074123530951320107039848",
+    "annualized_volatility": "0.2135051031951971456463045526",
+    "sharpe_ratio": "-0.3608899879943103757577182846",
+    "turnover_rate": "55.02047063832297953397994382",
+    "total_commission": "36497.926514",
+    "daily_win_rate": "0.5126050420168067226890756303",
+    "calmar_ratio": "-0.5133362658969206317994732105",
+    "profit_loss_ratio": "0.8855614988744944138630516662"
+  }
+}

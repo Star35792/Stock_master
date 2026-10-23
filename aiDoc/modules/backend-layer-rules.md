@@ -20,6 +20,8 @@ models / database
 - Model 层只定义 ORM 表结构和关系。
 - Alembic 负责 schema 变更。
 - DataSource 只负责获取和初步解析外部数据，不直接写 `market`。
+- 温层只读仓库（`repositories/research_read.py`）与 ORM 仓库是**孪生实现**：同一份查询语义必须有两条路径，`research_read_source=warm` 走温层、`control` 走 ORM。新增回测/研究读取能力时两条都要改，不能只改一条；两条路径返回的列名、排序和过滤语义必须一致（例如 `list_factor_values` 都按 `trade_date, symbol` 排序）。
+- 研究读路径的**写操作仍然只走 ORM**。温层 Parquet 只由离线脚本发布，service 层不得写 Parquet。
 
 ## 金融数据规则
 

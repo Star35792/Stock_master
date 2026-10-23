@@ -31,7 +31,8 @@
 | 产品定位、投资者评估、量化工具愿景 | `aiDoc/strategy/product-investment-assessment.md` | `aiDoc/strategy/quantitative-tool-vision.md` |
 | 价格与价值匹配、安全边际研究及假设历史回测 | [策略定义](strategy/20260922-1314-price-value-margin-strategy.md) | `aiDoc/research/decision-factor-framework.md` |
 | 选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |
-| 研究产出修复与因子证据 | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) | `aiDoc/plans/roadmap.md` |
+| 研究产出修复与因子证据 | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) | `aiDoc/plans/roadmap.md`、[温层因子回填与 IC 证据](data/20261023-0247-warm-factor-ic-evidence.md) |
+| 温层因子回填、IC 证据与回测口径 | [温层因子回填与 IC 证据](data/20261023-0247-warm-factor-ic-evidence.md) | `aiDoc/relations/trusted-daily-data-center.md` 第 10.1 节 |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
 | 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | `aiDoc/plans/decision-review-protocol.md`、本文件长期协作机制小节 |
 

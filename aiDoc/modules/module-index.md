@@ -16,7 +16,9 @@
 | `strategies` | 策略研究模板 |
 | `strategies.price_value` / `services.price_value_research` | 纯 Decimal FCFE 情景计算及只读研究编排；消费可信行情与显式用户假设，不认证历史财务、不生成交易信号 |
 | `backtest.price_value` / `services.price_value_backtest` | 单股加现金的版本化假设历史模拟；复用 FCFE 与费用计算，可信未复权行情及交易日历驱动收盘信号、次日开盘成交和持续退出；仅保存 `strategy.backtest_*` 研究事实与合同，不创建 paper/真实订单、不认证历史时点 |
-| `portfolio` | 组合构建内核 |
+| `portfolio` | 组合构建内核；`portfolio/defaults.py` 是风险预算默认值的唯一来源（可由 settings 覆盖） |
+| `market` | `price_limit.py` 按板块从 `pre_close` 推导涨跌停价；`utils/symbol.py` 提供 symbol→交易所解析 |
+| `repositories.research_read` | 温层 Parquet 只读仓库（ORM 仓库的孪生实现），供回测/研究读路径使用 |
 | `risk` | 下单前风控内核 |
 | `trade` | 本地模拟推演执行与持仓记录（BrokerAdapter 仅隔离本地模拟回报） |
 

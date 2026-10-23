@@ -16,6 +16,11 @@ from pathlib import Path
 # test suite never opens data/stock_master.duckdb.
 _test_db_root = Path(tempfile.mkdtemp(prefix="stock-master-tests-"))
 os.environ["METADATA_DB_PATH"] = str(_test_db_root / "session.duckdb")
+# The default research read path is the Parquet warm layer. Unit tests exercise
+# the control-plane ORM semantics (and cannot self-ATTACH the temp DuckDB file),
+# so they pin the control source here instead of touching every service call
+# site. Tests that cover the warm path set ``research_read_source`` explicitly.
+os.environ["RESEARCH_READ_SOURCE"] = "control"
 # API tests must never launch vendor downloads using a developer's .env key.
 os.environ["AUTO_DATA_SYNC_ENABLED"] = "false"
 atexit.register(shutil.rmtree, _test_db_root, ignore_errors=True)
