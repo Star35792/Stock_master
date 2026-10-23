@@ -100,12 +100,14 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 交付：
 
 - 基于 `market.security + market.trading_calendar + market.daily_bar` 检测缺失日线。
+- 新增 `market.security_status_event` 表，记录每日交易状态（正常、停牌、ST、*ST、退市整理、未上市、已退市）。
+- 缺失检测结合 `market.security_status_event`：真实停牌/退市/未上市不生成 `MISSING_BAR`，状态正常但无 bar 才生成。
 - 支持 symbol、security_type、exchange、adjust_type 和日期范围过滤。
 
 下一步增强：
 
-- 增加停牌状态表或停牌事件表，区分“真实停牌”和“数据缺失”。
 - 增加同步后自动巡检，把缺失结果写入 `system.data_quality_issue`。
+- 对接 HiThink / 其他来源的停牌状态字段，自动写入 `market.security_status_event`。
 - 对指数、ETF、股票分别配置缺失容忍规则。
 
 阶段门：

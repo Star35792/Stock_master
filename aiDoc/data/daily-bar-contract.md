@@ -4,6 +4,8 @@
 
 估值研究补充交易状态字段：`limit_up / limit_down` 为同币种、同日期未复权限价；`is_suspended` 为停牌标志；`special_treatment_status` 为历史特殊处理状态，普通状态用 `normal` 或 `none`。字段随选定 raw 行保留至 market，不从低价或涨跌幅推断。旧行限价与特殊处理状态为 NULL，停牌标志沿用 false 默认值；默认值不构成历史可交易认证，价格价值回测缺少限价或明确普通状态时拒绝运行。DuckDB 初始化兼容桥幂等补列且不覆盖已有值；来源适配器的自动补采仍需后续接入。
 
+**停牌数据边界（2026-10-22 收紧）**：`market.daily_bar` 只保存可交易日行情。停牌证券在停牌日**不应**出现 `market.daily_bar` 记录；`is_suspended` 在 market 层应恒为 `false`。停牌、ST、*ST、退市整理、未上市、已退市等状态由独立的 `market.security_status_event` 表记录，作为区分“真实停牌”与“数据缺失”的事实源。下游选股、回测、模拟推演应优先通过该状态表判断证券可交易性，而不是通过 `daily_bar.is_suspended`。
+
 ## 1. 适用范围
 
 首批覆盖：
@@ -162,14 +164,15 @@ Python 清洗和校验阶段如涉及精确比较，应使用 `Decimal` 或明�
 进入 `market.daily_bar` 的记录至少满足：
 
 1. `symbol` 非空且能在 `market.security` 中找到。
-2. `trade_date` 是对应交易所交易日，或者有明确停牌/特殊处理说明。
+2. `trade_date` 是对应交易所交易日；停牌日、未上市日、已退市日、非交易日均不得进入。
 3. `adjust_type` 属于允许枚举。
 4. `open`、`high`、`low`、`close` 非空且大于 0。
 5. `high >= open`、`high >= close`、`high >= low`。
 6. `low <= open`、`low <= close`、`low <= high`。
-7. `volume` 和 `amount` 不得为负。
+7. `volume` 和 `amount` 不得为负；停牌日无 bar，因此不存在“停牌日成交量为零”的 market 记录。
 8. 若 `pre_close` 存在，则 `change_amount` 和 `pct_change` 应可解释。
 9. 若存在多源冲突且超过阈值，不应自动标记为 `trusted`。
+10. `is_suspended` 必须为 `false`；任何来源标记为停牌的 raw 记录不得直接进入 market，应导入 `market.security_status_event` 并生成质量问题。
 
 ## 9. raw 与 market 的字段差异
 

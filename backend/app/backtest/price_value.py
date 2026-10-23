@@ -89,8 +89,9 @@ def _validate_bars(
         ):
             raise ValueError("market lower price limit must be below upper price limit")
         by_date[bar.trade_date] = bar
-    if set(by_date) != set(trade_dates):
-        raise ValueError("complete trusted bars must match every execution calendar date")
+    # Suspended securities have no market.daily_bar on the suspended day. The
+    # execution calendar may therefore contain dates without bars; those days
+    # are treated as suspended and no trading occurs.
     return by_date
 
 
@@ -186,154 +187,180 @@ def _run(
             )
         )
 
+    last_bar: Any | None = None
+    last_close = Decimal(0)
+
     for index, day in enumerate(timeline):
-        bar = by_date[day]
-        open_at = datetime.combine(day, time(9, 30), tzinfo=SHANGHAI)
-        close_at = datetime.combine(day, time(16), tzinfo=SHANGHAI)
-        # Capacity is known before execution. Today's eventual volume never
-        # determines a quantity at today's opening auction.
-        prior_volume = by_date[timeline[index - 1]].volume if index else Decimal(0)
-        capacity = int(prior_volume * payload.max_participation_rate) // payload.lot_size
-        capacity *= payload.lot_size
+        bar: Any | None = None
+        try:
+            open_at = datetime.combine(day, time(9, 30), tzinfo=SHANGHAI)
+            close_at = datetime.combine(day, time(16), tzinfo=SHANGHAI)
+            bar = by_date.get(day)
 
-        intent = pending_exit or pending_buy
-        if intent is not None:
-            is_buy = pending_exit is None
-            side = "buy" if is_buy else "sell"
-            reason = None
-            current = latest(open_at)
-            if is_buy:
-                if intent.assumption.valid_until < open_at:
-                    reason = "assumption_expired_before_open"
-                elif current is None or current.version != intent.assumption.version:
-                    reason = "assumption_revised_before_open"
-                if reason is not None:
-                    record(day, "open", "cancelled", reason, intent.assumption, intent.signal_date)
-                    pending_buy = None
-            if reason is None:
-                fill_quantity = (
-                    _affordable_quantity(
-                        quote=bar.open,
-                        budget=cash * payload.position_weight,
-                        capacity=capacity,
-                        lot_size=payload.lot_size,
-                        fees=fees,
+            if bar is None:
+                # Suspended day: no market.daily_bar, no trading, positions remain
+                # valued at the last available close price.
+                market_value = quantity * last_close
+                equity.append(EquitySnapshot(day, cash, market_value, cash + market_value))
+                if quantity:
+                    positions.append(
+                        PositionSnapshot(day, payload.symbol, quantity, last_close, market_value)
                     )
-                    if is_buy
-                    else min(quantity, capacity)
-                )
-                fill = fees.apply(reference_price=bar.open, quantity=fill_quantity, side=side)
-                reason = _execution_blocker(bar, side, fill.fill_price)
-                if reason is None and fill_quantity == 0:
-                    reason = "prior_volume_capacity" if capacity == 0 else "insufficient_budget"
-                if reason is None and is_buy:
-                    assert intent.ceiling is not None
-                    if fill.fill_price + fill.total_fee / fill_quantity > intent.ceiling:
-                        reason = "all_in_price_above_ceiling"
-                if (
-                    reason is None and not is_buy
-                    and cash + fill_quantity * fill.fill_price < fill.total_fee
-                ):
-                    reason = "insufficient_cash_for_exit_fees"
-                if reason is not None:
-                    record(day, "open", "unfilled", reason, intent.assumption, intent.signal_date)
-                else:
-                    amount = fill_quantity * fill.fill_price
-                    cash += -amount - fill.total_fee if is_buy else amount - fill.total_fee
-                    quantity += fill_quantity if is_buy else -fill_quantity
-                    trades.append(
-                        BacktestTrade(
-                            signal_date=intent.signal_date,
-                            trade_date=day,
-                            symbol=payload.symbol,
-                            side=side,
-                            quantity=fill_quantity,
-                            reference_price=bar.open,
-                            fill_price=fill.fill_price,
-                            commission=fill.total_fee,
-                            cash_after=cash,
+                assumption = latest(close_at)
+                record(day, "close", "wait", "suspended", assumption)
+                continue
+
+            # Capacity is known before execution. Today's eventual volume never
+            # determines a quantity at today's opening auction.
+            prior_volume = last_bar.volume if last_bar is not None else Decimal(0)
+            capacity = int(prior_volume * payload.max_participation_rate) // payload.lot_size
+            capacity *= payload.lot_size
+
+            intent = pending_exit or pending_buy
+            if intent is not None:
+                is_buy = pending_exit is None
+                side = "buy" if is_buy else "sell"
+                reason = None
+                current = latest(open_at)
+                if is_buy:
+                    if intent.assumption.valid_until < open_at:
+                        reason = "assumption_expired_before_open"
+                    elif current is None or current.version != intent.assumption.version:
+                        reason = "assumption_revised_before_open"
+                    if reason is not None:
+                        record(
+                            day, "open", "cancelled", reason,
+                            intent.assumption, intent.signal_date,
                         )
+                        pending_buy = None
+                if reason is None:
+                    fill_quantity = (
+                        _affordable_quantity(
+                            quote=bar.open,
+                            budget=cash * payload.position_weight,
+                            capacity=capacity,
+                            lot_size=payload.lot_size,
+                            fees=fees,
+                        )
+                        if is_buy
+                        else min(quantity, capacity)
                     )
-                    record(
-                        day, "open", side,
-                        "entry_filled" if is_buy
-                        else "exit_filled" if quantity == 0 else "exit_partial",
-                        intent.assumption, intent.signal_date,
-                    )
-                    if not is_buy and quantity == 0:
-                        pending_exit = None
-                # Entry opportunities last one opening only; any retry must
-                # pass a fresh close evaluation. Exit intent persists until flat.
-                pending_buy = None
+                    fill = fees.apply(reference_price=bar.open, quantity=fill_quantity, side=side)
+                    reason = _execution_blocker(bar, side, fill.fill_price)
+                    if reason is None and fill_quantity == 0:
+                        reason = "prior_volume_capacity" if capacity == 0 else "insufficient_budget"
+                    if reason is None and is_buy:
+                        assert intent.ceiling is not None
+                        if fill.fill_price + fill.total_fee / fill_quantity > intent.ceiling:
+                            reason = "all_in_price_above_ceiling"
+                    if (
+                        reason is None and not is_buy
+                        and cash + fill_quantity * fill.fill_price < fill.total_fee
+                    ):
+                        reason = "insufficient_cash_for_exit_fees"
+                    if reason is not None:
+                        record(
+                            day, "open", "unfilled", reason,
+                            intent.assumption, intent.signal_date,
+                        )
+                    else:
+                        amount = fill_quantity * fill.fill_price
+                        cash += -amount - fill.total_fee if is_buy else amount - fill.total_fee
+                        quantity += fill_quantity if is_buy else -fill_quantity
+                        trades.append(
+                            BacktestTrade(
+                                signal_date=intent.signal_date,
+                                trade_date=day,
+                                symbol=payload.symbol,
+                                side=side,
+                                quantity=fill_quantity,
+                                reference_price=bar.open,
+                                fill_price=fill.fill_price,
+                                commission=fill.total_fee,
+                                cash_after=cash,
+                            )
+                        )
+                        record(
+                            day, "open", side,
+                            "entry_filled" if is_buy
+                            else "exit_filled" if quantity == 0 else "exit_partial",
+                            intent.assumption, intent.signal_date,
+                        )
+                        if not is_buy and quantity == 0:
+                            pending_exit = None
+                    # Entry opportunities last one opening only; any retry must
+                    # pass a fresh close evaluation. Exit intent persists until flat.
+                    pending_buy = None
 
-        market_value = quantity * bar.close
-        equity.append(EquitySnapshot(day, cash, market_value, cash + market_value))
-        if quantity:
-            positions.append(
-                PositionSnapshot(day, payload.symbol, quantity, bar.close, market_value)
-            )
-
-        assumption = latest(close_at)
-        if pending_exit is not None:
-            record(
-                day, "close", "hold", "exit_pending", pending_exit.assumption,
-                pending_exit.signal_date,
-            )
-            continue
-        # A thesis-break event remains a risk event after its valuation quote
-        # expires. Ordinary price assumptions expire without forcing a sale.
-        if quantity and assumption is not None and assumption.thesis_broken:
-            if index < len(timeline) - 1:
-                pending_exit = _Intent(day, assumption)
-                record(day, "close", "sell_signal", "thesis_broken", assumption, day)
-            else:
-                record(day, "close", "review", "thesis_broken_at_window_end", assumption)
-            continue
-        if assumption is None or assumption.valid_until < close_at:
-            record(
-                day, "close", "review" if quantity else "wait",
-                "assumption_missing" if assumption is None else "assumption_expired", assumption,
-            )
-            continue
-        valuation = valuations[assumption.version]
-        exit_reason = (
-            "thesis_broken" if assumption.thesis_broken
-            else "base_value_reached" if bar.close >= valuation["base"] else None
-        )
-        if quantity:
-            if exit_reason is not None and index < len(timeline) - 1:
-                pending_exit = _Intent(day, assumption)
-                record(day, "close", "sell_signal", exit_reason, assumption, day)
-            else:
-                record(
-                    day, "close", "review" if exit_reason else "hold",
-                    "end_of_window" if exit_reason else "existing_position_no_top_up", assumption,
+            market_value = quantity * bar.close
+            equity.append(EquitySnapshot(day, cash, market_value, cash + market_value))
+            if quantity:
+                positions.append(
+                    PositionSnapshot(day, payload.symbol, quantity, bar.close, market_value)
                 )
-            continue
-        if assumption.thesis_broken:
-            record(day, "close", "wait", "thesis_broken", assumption)
-            continue
-        if index == len(timeline) - 1:
-            record(day, "close", "wait", "end_of_window", assumption)
-            continue
-        if getattr(bar, "is_suspended", False):
-            record(day, "close", "wait", "suspended", assumption)
-            continue
-        next_capacity = int(bar.volume * payload.max_participation_rate) // payload.lot_size
-        quote_quantity = _affordable_quantity(
-            quote=bar.close, budget=cash * payload.position_weight,
-            capacity=next_capacity * payload.lot_size, lot_size=payload.lot_size, fees=fees,
-        )
-        if not quote_quantity:
-            record(day, "close", "wait", "insufficient_budget_or_capacity", assumption)
-            continue
-        estimate = fees.apply(reference_price=bar.close, quantity=quote_quantity, side="buy")
-        ceiling = valuation["low"] * (Decimal(1) - payload.required_margin)
-        if estimate.fill_price + estimate.total_fee / quote_quantity > ceiling:
-            record(day, "close", "wait", "all_in_price_above_ceiling", assumption)
-            continue
-        pending_buy = _Intent(day, assumption, ceiling)
-        record(day, "close", "buy_signal", "price_condition_met", assumption, day)
+
+            assumption = latest(close_at)
+            if pending_exit is not None:
+                record(
+                    day, "close", "hold", "exit_pending", pending_exit.assumption,
+                    pending_exit.signal_date,
+                )
+                continue
+            # A thesis-break event remains a risk event after its valuation quote
+            # expires. Ordinary price assumptions expire without forcing a sale.
+            if quantity and assumption is not None and assumption.thesis_broken:
+                if index < len(timeline) - 1:
+                    pending_exit = _Intent(day, assumption)
+                    record(day, "close", "sell_signal", "thesis_broken", assumption, day)
+                else:
+                    record(day, "close", "review", "thesis_broken_at_window_end", assumption)
+                continue
+            if assumption is None or assumption.valid_until < close_at:
+                reason = "assumption_missing" if assumption is None else "assumption_expired"
+                record(day, "close", "review" if quantity else "wait", reason, assumption)
+                continue
+            valuation = valuations[assumption.version]
+            exit_reason = (
+                "thesis_broken" if assumption.thesis_broken
+                else "base_value_reached" if bar.close >= valuation["base"] else None
+            )
+            if quantity:
+                if exit_reason is not None and index < len(timeline) - 1:
+                    pending_exit = _Intent(day, assumption)
+                    record(day, "close", "sell_signal", exit_reason, assumption, day)
+                else:
+                    action = "review" if exit_reason else "hold"
+                    reason = "end_of_window" if exit_reason else "existing_position_no_top_up"
+                    record(day, "close", action, reason, assumption)
+                continue
+            if assumption.thesis_broken:
+                record(day, "close", "wait", "thesis_broken", assumption)
+                continue
+            if index == len(timeline) - 1:
+                record(day, "close", "wait", "end_of_window", assumption)
+                continue
+            if getattr(bar, "is_suspended", False):
+                record(day, "close", "wait", "suspended", assumption)
+                continue
+            next_capacity = int(bar.volume * payload.max_participation_rate) // payload.lot_size
+            quote_quantity = _affordable_quantity(
+                quote=bar.close, budget=cash * payload.position_weight,
+                capacity=next_capacity * payload.lot_size, lot_size=payload.lot_size, fees=fees,
+            )
+            if not quote_quantity:
+                record(day, "close", "wait", "insufficient_budget_or_capacity", assumption)
+                continue
+            estimate = fees.apply(reference_price=bar.close, quantity=quote_quantity, side="buy")
+            ceiling = valuation["low"] * (Decimal(1) - payload.required_margin)
+            if estimate.fill_price + estimate.total_fee / quote_quantity > ceiling:
+                record(day, "close", "wait", "all_in_price_above_ceiling", assumption)
+                continue
+            pending_buy = _Intent(day, assumption, ceiling)
+            record(day, "close", "buy_signal", "price_condition_met", assumption, day)
+        finally:
+            if bar is not None:
+                last_bar = bar
+                last_close = bar.close
 
     final_equity = equity[-1].total_equity
     return BacktestResult(

@@ -125,19 +125,40 @@ def test_reaching_base_creates_following_session_exit():
 
 
 def test_partial_exit_and_suspension_keep_original_exit_intent():
+    # DAYS[3] is suspended and therefore has no market.daily_bar. The exit
+    # intent generated on DAYS[2] executes partially on DAYS[3] (capacity 100),
+    # is skipped on the suspended day, and resumes on DAYS[4].
     bars = [
         _bar(DAYS[0]),
         _bar(DAYS[1], close=Decimal("12"), volume=Decimal("1000")),
         _bar(DAYS[2], "12", volume=Decimal("1000")),
-        _bar(DAYS[3], "12", is_suspended=True),
         _bar(DAYS[4], "12"),
     ]
     result, decisions = _run(bars=bars)
-    assert [(item.side, item.quantity) for item in result.trades] == [
-        ("buy", 1600), ("sell", 100), ("sell", 1500),
+    assert [(item.side, item.quantity, item.trade_date) for item in result.trades] == [
+        ("buy", 1600, DAYS[1]), ("sell", 100, DAYS[2]), ("sell", 100, DAYS[4]),
     ]
-    assert all(item.signal_date == DAYS[1] for item in result.trades[1:])
-    assert any(item.reason == "suspended" and item.phase == "open" for item in decisions)
+    # The exit signal is generated on DAYS[1] when close reaches base value.
+    assert result.trades[1].signal_date == DAYS[1]
+    assert result.trades[2].signal_date == DAYS[1]
+    suspended = [item for item in decisions if item.reason == "suspended"]
+    assert len(suspended) == 1
+    assert suspended[0].phase == "close"
+    assert suspended[0].trade_date == DAYS[3]
+
+
+def test_suspended_day_without_bar_preserves_position_at_last_close():
+    # Open gap-up but still below the ceiling so the buy fills; close at 12
+    # establishes the position value carried through the suspension.
+    bars = [_bar(DAYS[0]), _bar(DAYS[1], close=Decimal("12")), _bar(DAYS[4], "12")]
+    result, decisions = _run(bars=bars)
+    suspended_days = [item.trade_date for item in decisions if item.reason == "suspended"]
+    assert suspended_days == [DAYS[2], DAYS[3]]
+    # Position is held through the suspension and valued at the last traded close.
+    suspended_equity = [row for row in result.equity_curve if row.trade_date in suspended_days]
+    assert all(row.market_value == Decimal("19200") for row in suspended_equity)
+    suspended_positions = [row for row in result.positions if row.trade_date in suspended_days]
+    assert all(row.market_value == Decimal("19200") for row in suspended_positions)
 
 
 def test_buy_capacity_uses_previous_volume_only():
@@ -242,12 +263,10 @@ def test_unaffordable_exit_costs_never_create_negative_cash():
     assert any(item.reason == "insufficient_cash_for_exit_fees" for item in decisions)
 
 
-@pytest.mark.parametrize("problem", ["missing", "duplicate", "nonfinite", "wrong_symbol"])
+@pytest.mark.parametrize("problem", ["duplicate", "nonfinite", "wrong_symbol"])
 def test_invalid_market_slice_is_rejected(problem):
     bars = [_bar(day) for day in DAYS]
-    if problem == "missing":
-        bars.pop()
-    elif problem == "duplicate":
+    if problem == "duplicate":
         bars.append(bars[0])
     elif problem == "nonfinite":
         bars[0].close = Decimal("NaN")
@@ -255,6 +274,13 @@ def test_invalid_market_slice_is_rejected(problem):
         bars[0].symbol = "000001.SZ"
     with pytest.raises(ValueError):
         _run(bars=bars)
+
+
+def test_missing_last_bar_is_treated_as_suspension():
+    bars = [_bar(day) for day in DAYS[:-1]]
+    result, decisions = _run(bars=bars)
+    assert all(item.trade_date != DAYS[-1] for item in result.trades)
+    assert any(item.reason == "suspended" and item.trade_date == DAYS[-1] for item in decisions)
 
 
 def test_input_order_does_not_change_result():

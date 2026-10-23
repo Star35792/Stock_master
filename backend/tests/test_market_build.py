@@ -278,3 +278,26 @@ def test_market_build_keeps_warning_candidate_as_suspect() -> None:
         "TURNOVER_INCONSISTENT",
     }
     assert db.committed is True
+
+
+def test_market_build_rejects_suspended_raw_bar() -> None:
+    row = _raw_bar(is_suspended=True)
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    issue_repository = FakeIssueRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([row], row),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=issue_repository,  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.trusted_count == 0
+    assert result.rejected_count == 1
+    assert result.issue_count == 1
+    assert market_repository.calls == []
+    assert issue_repository.calls[0]["issue_type"] == "SUSPENDED_BAR_REJECTED"
+    assert db.committed is True

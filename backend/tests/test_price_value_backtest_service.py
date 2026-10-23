@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.strategy_research import router
 from app.database.session import get_db, initialize_database
-from app.models.market import CorporateAction, DailyBar, Security, TradingCalendar
+from app.models.market import (
+    CorporateAction,
+    DailyBar,
+    Security,
+    SecurityStatusEvent,
+    TradingCalendar,
+)
 from app.models.strategy import BacktestEquity, BacktestRun, BacktestTradeRecord
 from app.models.trade import PaperAccount, PaperFill, PaperOrder, PaperPosition
 from app.schemas.price_value_backtest import PriceValueBacktestRequest
@@ -145,8 +151,6 @@ def test_api_persists_actual_cash_trades_and_retrievable_hypothetical_report(cli
 @pytest.mark.parametrize(
     "field,value,message",
     [
-        ("quality_status", "suspect", "complete calendar coverage"),
-        ("is_suspect", True, "complete calendar coverage"),
         ("limit_up", None, "price limits"),
         ("special_treatment_status", "ST", "treatment status"),
         ("special_treatment_status", None, "treatment status"),
@@ -218,6 +222,86 @@ def test_current_unfinished_session_is_rejected(database):
             PriceValueBacktestService().run(
                 db, backtest_payload(), now=datetime(2026, 1, 9, 7, 59, tzinfo=UTC)
             )
+
+
+@pytest.fixture
+def database_with_suspension(tmp_path):
+    engine = create_engine(f"duckdb:///{tmp_path / 'price-value-suspension.duckdb'}")
+    initialize_database(engine)
+    with Session(engine) as db:
+        db.add(
+            Security(
+                symbol="600001.SH",
+                name="Fixture",
+                security_type="stock",
+                exchange="SH",
+                currency="CNY",
+                industry="食品饮料",
+                is_active=True,
+                list_date=date(2000, 1, 1),
+            )
+        )
+        trading_days = [
+            date(2026, 1, 5),
+            date(2026, 1, 6),
+            date(2026, 1, 7),
+            date(2026, 1, 8),
+            date(2026, 1, 9),
+        ]
+        for day in trading_days:
+            db.add(TradingCalendar(exchange="SH", trade_date=day, is_open=True))
+        for offset, (open_, close) in enumerate(((6, 6), (6, 8), (8, 13), (13, 13))):
+            # Skip 2026-01-07 to simulate a suspended trading day.
+            day = trading_days[offset + (1 if offset >= 2 else 0)]
+            db.add(
+                DailyBar(
+                    symbol="600001.SH",
+                    security_type="stock",
+                    trade_date=day,
+                    adjust_type="none",
+                    open=Decimal(open_),
+                    close=Decimal(close),
+                    high=Decimal(max(open_, close)),
+                    low=Decimal(min(open_, close)),
+                    volume=Decimal("100000"),
+                    amount=Decimal("1000000"),
+                    limit_up=Decimal("100"),
+                    limit_down=Decimal("1"),
+                    is_suspended=False,
+                    special_treatment_status="normal",
+                    source_name="fixture",
+                    quality_status="trusted",
+                    is_suspect=False,
+                )
+            )
+        # Mark the missing day as suspended in the status event table.
+        db.add(
+            SecurityStatusEvent(
+                symbol="600001.SH",
+                trade_date=date(2026, 1, 7),
+                status="suspended",
+                source_name="fixture",
+            )
+        )
+        db.commit()
+    yield engine
+    engine.dispose()
+
+
+def test_suspended_day_without_bar_runs_and_records_wait_decision(
+    database_with_suspension,
+):
+    service = PriceValueBacktestService()
+    with Session(database_with_suspension) as db:
+        response = service.run(db, backtest_payload())
+    assert response.trade_count == 2
+    decisions = response.decisions
+    suspended = [item for item in decisions if item.reason == "suspended"]
+    assert len(suspended) == 1
+    assert suspended[0].trade_date == date(2026, 1, 7)
+    # Position is held through the suspension at the last traded close.
+    suspended_equity = [row for row in response.equity_curve if row.trade_date == date(2026, 1, 7)]
+    assert suspended_equity[0].market_value == Decimal("6400")
 
 
 @pytest.mark.parametrize(

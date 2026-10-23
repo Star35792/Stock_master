@@ -8,6 +8,7 @@ from app.repositories.market.security import SecurityRepository
 from app.repositories.market.security_industry_history import (
     SecurityIndustryHistoryRepository,
 )
+from app.repositories.market.security_status_event import SecurityStatusEventRepository
 from app.repositories.market.trading_calendar import TradingCalendarRepository
 from app.repositories.market.valuation_snapshot import ValuationSnapshotRepository
 
@@ -20,6 +21,7 @@ __all__ = [
     "ManualCorrectionRepository",
     "SecurityIndustryHistoryRepository",
     "SecurityRepository",
+    "SecurityStatusEventRepository",
     "TradingCalendarRepository",
     "ValuationSnapshotRepository",
 ]

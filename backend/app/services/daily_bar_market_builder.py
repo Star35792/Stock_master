@@ -255,6 +255,19 @@ def _validate_candidate(
             }
         )
 
+    if getattr(candidate, "is_suspended", False):
+        issues.append(
+            {
+                **base,
+                "issue_type": "SUSPENDED_BAR_REJECTED",
+                "severity": "error",
+                "description": (
+                    "suspended-day raw bar must not enter market.daily_bar; "
+                    "ingest suspension status into market.security_status_event instead"
+                ),
+            }
+        )
+
     prices = {
         "open": candidate.open,
         "high": candidate.high,

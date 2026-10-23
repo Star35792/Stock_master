@@ -10,6 +10,7 @@ from app.models.market import (
     IndexConstituentSnapshot,
     ManualCorrection,
     Security,
+    SecurityStatusEvent,
     TradingCalendar,
     ValuationSnapshot,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "RiskCheck",
     "RiskCheckOrder",
     "Security",
+    "SecurityStatusEvent",
     "TrainingArtifact",
     "TradingCalendar",
     "ValuationSnapshot",

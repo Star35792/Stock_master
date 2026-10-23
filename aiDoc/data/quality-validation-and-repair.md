@@ -91,6 +91,8 @@ amount >= 0
 
 如果成交量为 0 但价格变化明显，应标记为可疑。
 
+由于停牌日不进入 `market.daily_bar`，market 层不存在“停牌日成交量为零”的记录；raw 层来源若返回停牌记录，应导入 `market.security_status_event`，不在此处重复判断。
+
 问题类型：
 
 ```text
@@ -104,13 +106,15 @@ AMOUNT_INVALID
 
 - `trade_date` 应出现在对应交易所交易日历中。
 - 非交易日出现成交数据，应标记异常。
-- 交易日缺少数据，需要结合停牌状态判断。
+- 交易日缺少数据，需要结合 `market.security_status_event` 判断：若该日状态为 `suspended`、`delisting`、`unlisted`、`delisted` 等，则为正常无 bar；否则生成 `MISSING_BAR`。
+- 任何来源标记为停牌的 raw 记录不得直接进入 `market.daily_bar`，应生成 `SUSPENDED_BAR_REJECTED` 并导入 `market.security_status_event`。
 
 问题类型：
 
 ```text
 CALENDAR_MISMATCH
 MISSING_BAR
+SUSPENDED_BAR_REJECTED
 ```
 
 ### 4.5 涨跌幅异常

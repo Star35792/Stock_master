@@ -133,9 +133,13 @@ class PriceValueBacktestService:
             quality_status="trusted",
         )
         bars = [SimpleNamespace(**{key: getattr(row, key) for key in BAR_FIELDS}) for row in rows]
-        if [bar.trade_date for bar in bars] != days:
+        bar_dates = {bar.trade_date for bar in bars}
+        if len(bar_dates) != len(bars):
+            raise ValueError("duplicate trusted unadjusted bar")
+        if any(bar.is_suspended for bar in bars):
             raise ValueError(
-                "missing or duplicate trusted unadjusted bar; complete calendar coverage required"
+                "market.daily_bar must not contain suspended-day bars; "
+                "use market.security_status_event for suspension status"
             )
         for bar in bars:
             if (

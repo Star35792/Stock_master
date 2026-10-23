@@ -45,12 +45,14 @@ A 股特殊交易约束：
    - 跌停价计算：普通股票为前收盘 × 0.90，ST/*ST 为前收盘 × 0.95。
 
 3. **停牌日无行情**
-   - 停牌证券当日无 `market.daily_bar`。
+   - 停牌证券当日无 `market.daily_bar`；`market.daily_bar.is_suspended` 在 market 层应恒为 `false`。
+   - 停牌、ST、*ST、退市整理、未上市、已退市等状态由 `market.security_status_event` 记录。
    - 信号已持仓证券在停牌日仍按最新收盘价估值，但不可交易。
+   - 价格价值回测等要求连续 execution calendar 的策略必须允许停牌日无 bar，并在该日产生 `wait/suspended` 决策。
 
 4. **ST/*ST 状态**
-   - 需要 `market.security` 或新表记录每日 ST/*ST/退市整理状态。
-   - 影响涨跌停幅度。
+   - 由 `market.security_status_event` 记录每日 ST/*ST/退市整理状态。
+   - 影响涨跌停幅度；选股 universe 构建时直接过滤。
 
 5. **最小交易单位**
    -  already via `lot_size`，保留。
@@ -66,6 +68,8 @@ A 股特殊交易约束：
   - `special_treatment_status`: str | None（标记 ST/*ST 等状态，供后续扩展）
   - `pre_close`: Decimal（已有）
 - `raw.daily_bar` 同步新增以上字段， market build 从候选 raw bar 透传。
+- `market.security_status_event` 记录每日交易状态，区分真实停牌与数据缺失。
+- 来源若携带停牌/状态信息，写入 `market.security_status_event`，不进入 `market.daily_bar`。
 - `app/backtest/tradability.py` 提供 `AShareTradabilityPolicy`：
   - 停牌日不可买卖；
   - 开盘价 ≥ 涨停价时不可买入；
