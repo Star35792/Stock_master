@@ -1,0 +1,66 @@
+{
+  "start_date": "2025-11-03",
+  "end_date": "2026-04-30",
+  "top_n": 20,
+  "spec_set": "ic_aligned",
+  "exchange": "SH",
+  "training_days": 40,
+  "test_days": 40,
+  "step_days": 40,
+  "rebalance_rule": "every_n_trading_days",
+  "rebalance_interval": 20,
+  "portfolio_constraints": {
+    "max_symbol_weight": "0.20",
+    "max_industry_weight": "0.40",
+    "cash_reserve_rate": "0.05",
+    "security_type_budgets": null
+  },
+  "factor_version": "v1-qfq",
+  "research_read_source": "warm",
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation",
+    "training_window_does_not_select_parameters",
+    "every_n_anchor_restarts_per_window"
+  ],
+  "windows": [
+    {
+      "window_id": "rolling:SH:2025-11-03:2025-12-26:2025-12-29:2026-03-04",
+      "test_window": [
+        "2025-12-29",
+        "2026-03-04"
+      ],
+      "run_id": 21,
+      "total_return": "0.0483121741",
+      "maximum_drawdown": "-0.0457641918830846442478558262",
+      "turnover_rate": "2.672155671617198764733111982",
+      "total_commission": "1487.041099",
+      "sharpe_ratio": "2.375523392641862913658035004"
+    },
+    {
+      "window_id": "rolling:SH:2025-12-29:2026-03-04:2026-03-05:2026-04-30",
+      "test_window": [
+        "2026-03-05",
+        "2026-04-30"
+      ],
+      "run_id": 22,
+      "total_return": "0.068666817",
+      "maximum_drawdown": "-0.0925695895332022777985612184",
+      "turnover_rate": "2.704128181781139169641992843",
+      "total_commission": "1445.612631",
+      "sharpe_ratio": "1.924304348736352873527955948"
+    }
+  ],
+  "summary": {
+    "window_count": 2,
+    "positive_windows": 2,
+    "mean_return": "0.05848949555",
+    "min_return": "0.0483121741",
+    "max_return": "0.068666817",
+    "worst_drawdown": "-0.0925695895332022777985612184"
+  }
+}

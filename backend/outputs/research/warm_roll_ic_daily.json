@@ -1,0 +1,61 @@
+{
+  "start_date": "2025-11-03",
+  "end_date": "2026-04-30",
+  "top_n": 20,
+  "spec_set": "ic_aligned",
+  "exchange": "SH",
+  "training_days": 40,
+  "test_days": 40,
+  "step_days": 40,
+  "rebalance_rule": "daily",
+  "rebalance_interval": 20,
+  "portfolio_constraints": null,
+  "factor_version": "v1-qfq",
+  "research_read_source": "warm",
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation",
+    "training_window_does_not_select_parameters",
+    "every_n_anchor_restarts_per_window"
+  ],
+  "windows": [
+    {
+      "window_id": "rolling:SH:2025-11-03:2025-12-26:2025-12-29:2026-03-04",
+      "test_window": [
+        "2025-12-29",
+        "2026-03-04"
+      ],
+      "run_id": 19,
+      "total_return": "0.0268266609",
+      "maximum_drawdown": "-0.0532232212546009692583806482",
+      "turnover_rate": "22.21730001438615757403150887",
+      "total_commission": "14734.677943",
+      "sharpe_ratio": "1.292946228928184349246495671"
+    },
+    {
+      "window_id": "rolling:SH:2025-12-29:2026-03-04:2026-03-05:2026-04-30",
+      "test_window": [
+        "2026-03-05",
+        "2026-04-30"
+      ],
+      "run_id": 20,
+      "total_return": "-0.0048292716",
+      "maximum_drawdown": "-0.1083577004232766333413032872",
+      "turnover_rate": "24.81159834134494839348320868",
+      "total_commission": "15299.713826",
+      "sharpe_ratio": "-0.009375589791850293726095163532"
+    }
+  ],
+  "summary": {
+    "window_count": 2,
+    "positive_windows": 1,
+    "mean_return": "0.01099869465",
+    "min_return": "-0.0048292716",
+    "max_return": "0.0268266609",
+    "worst_drawdown": "-0.1083577004232766333413032872"
+  }
+}
