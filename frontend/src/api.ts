@@ -8,6 +8,7 @@ import type {
   FactorDefinition,
   FactorProfile,
   PaperAccount,
+  BacktestFinalHoldings,
   PaperPerformance,
   PaperPositions,
   PortfolioPlan,
@@ -518,4 +519,17 @@ export async function fetchPortfolioPlanDrift(
     throw new Error(payload?.detail ?? `Plan drift failed with ${response.status}`);
   }
   return response.json() as Promise<PortfolioPlanDrift>;
+}
+
+export async function fetchBacktestFinalHoldings(
+  runId: number,
+): Promise<BacktestFinalHoldings> {
+  const response = await fetch(`/api/v1/backtests/runs/${runId}/final-holdings`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Backtest holdings failed with ${response.status}`);
+  }
+  return response.json() as Promise<BacktestFinalHoldings>;
 }

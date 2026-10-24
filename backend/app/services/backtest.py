@@ -33,6 +33,8 @@ from app.schemas.strategy import (
     BacktestComparisonItem,
     BacktestDriftRead,
     BacktestEquityRead,
+    BacktestFinalHoldingRead,
+    BacktestFinalHoldingsRead,
     BacktestPerformanceRead,
     BacktestPositionRead,
     BacktestRunRead,
@@ -981,6 +983,68 @@ class BacktestQueryService:
     def get_run(self, db: Session, *, run_id: int) -> BacktestRunRead | None:
         run = self.backtest_repository.get_run(db, run_id=run_id)
         return None if run is None else BacktestRunRead.model_validate(run)
+
+    def get_final_holdings(
+        self,
+        db: Session,
+        *,
+        run_id: int,
+        research_db: Session | None = None,
+        security_repository: Any | None = None,
+    ) -> BacktestFinalHoldingsRead | None:
+        """Final-day book of a finished run, as a plan-prefill source.
+
+        Artifacts come from the research database; industry/type/name lookups
+        stay on the main database's ``market.security`` (current labels, same
+        approximation as the backtest constraint path).
+        """
+        artifacts_db = research_db if research_db is not None else db
+        run = self.backtest_repository.get_run(artifacts_db, run_id=run_id)
+        if run is None:
+            return None
+        if run.status != "success":
+            raise ValueError("backtest run must be successful")
+        positions = self.backtest_repository.latest_positions(artifacts_db, run_id=run_id)
+        equity = self.backtest_repository.latest_equity(artifacts_db, run_id=run_id)
+        as_of = equity.trade_date if equity is not None else run.end_date
+        total_equity = (
+            equity.total_equity if equity is not None else run.final_equity or Decimal()
+        )
+        cash = equity.cash if equity is not None else Decimal()
+        from app.repositories.market import SecurityRepository
+
+        repository = security_repository or SecurityRepository()
+        profiles = {
+            security.symbol.upper(): security
+            for security in repository.get_many(
+                db, symbols={row.symbol for row in positions}
+            )
+        }
+        holdings: list[BacktestFinalHoldingRead] = []
+        for row in positions:
+            security = profiles.get(row.symbol.upper())
+            weight = (
+                row.market_value / total_equity if total_equity > 0 else Decimal()
+            )
+            holdings.append(
+                BacktestFinalHoldingRead(
+                    symbol=row.symbol,
+                    name=security.name if security else None,
+                    industry=security.industry if security else None,
+                    security_type=security.security_type if security else None,
+                    quantity=row.quantity,
+                    close=row.close,
+                    market_value=row.market_value,
+                    weight=weight.quantize(Decimal("0.0000000001")),
+                )
+            )
+        return BacktestFinalHoldingsRead(
+            run_id=run_id,
+            as_of_date=as_of,
+            cash=cash,
+            total_equity=total_equity,
+            holdings=holdings,
+        )
 
     def list_trades(
         self,

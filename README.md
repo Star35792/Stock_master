@@ -159,6 +159,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 - 全市场相对估值初筛：`GET /api/v1/strategy-research/price-value/screen/latest`、`GET /api/v1/strategy-research/price-value/profit-status`
 - 回测运行：`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`.../trades`、`.../equity`、`.../positions`、`.../performance`（strategy 产物存独立 `data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
 - 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
+- 回测最终持仓（组合草案预填源）：`GET /api/v1/backtests/runs/{run_id}/final-holdings`
 
 ### 组合、风控与模拟盘
 

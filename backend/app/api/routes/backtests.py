@@ -16,6 +16,7 @@ from app.schemas.strategy import (
     BacktestDriftRead,
     BacktestDriftRequest,
     BacktestEquityRead,
+    BacktestFinalHoldingsRead,
     BacktestPerformanceAnalyzeRequest,
     BacktestPerformanceRead,
     BacktestPositionRead,
@@ -214,6 +215,29 @@ def get_backtest_performance(
     if performance is None:
         _raise_not_found("backtest performance not found")
     return performance
+
+
+@router.get("/runs/{run_id}/final-holdings", response_model=BacktestFinalHoldingsRead)
+def get_backtest_final_holdings(
+    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
+    run_id: int,
+) -> BacktestFinalHoldingsRead:
+    """Final trading day holdings of a finished run (plan-prefill source)."""
+    try:
+        result = service.get_final_holdings(
+            db,
+            run_id=run_id,
+            research_db=research_db,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    if result is None:
+        _raise_not_found("backtest run not found")
+    return result
 
 
 @router.get("/runs/{run_id}/benchmark", response_model=BacktestBenchmarkRead)

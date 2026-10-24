@@ -11,6 +11,7 @@ import {
   fetchPortfolioRiskReadiness,
   fetchPaperExecutionApproval,
   fetchPaperExecutionByApproval,
+  fetchBacktestFinalHoldings,
   fetchPositionBookHoldings,
   fetchPositionBooks,
   executePaperApproval,
@@ -58,6 +59,41 @@ const form = reactive<PortfolioPlanCreateRequest>({
 const isPrefilling = ref(false);
 const prefillBooks = ref<PositionBook[]>([]);
 const prefillBookId = ref<number | null>(null);
+const prefillRunId = ref("");
+const isPrefillingFromRun = ref(false);
+
+async function prefillFromBacktestRun() {
+  const runId = Number(prefillRunId.value);
+  if (!Number.isFinite(runId) || runId <= 0) {
+    errorMessage.value = "请输入有效的回测 run ID。";
+    return;
+  }
+  isPrefillingFromRun.value = true;
+  errorMessage.value = null;
+  try {
+    const report = await fetchBacktestFinalHoldings(runId);
+    if (report.holdings.length === 0) {
+      errorMessage.value = `回测 #${runId} 最优交易日没有持仓快照，无法预填。`;
+      return;
+    }
+    form.assets = report.holdings.map((row) => ({
+      symbol: row.symbol,
+      security_type: row.security_type === "etf" ? "etf" : "stock",
+      industry: row.industry ?? "",
+      price: row.close,
+      current_quantity: 0,
+      requested_weight: String(Number(row.weight)),
+      lot_size: 100,
+    }));
+    // 与账本预填同理：现金填回测期末现金，避免与已预填的目标权重双计。
+    form.cash = String(Number(report.cash));
+    form.name = `预填自回测 #${runId}（截至 ${report.as_of_date}）`;
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "回测持仓预填失败";
+  } finally {
+    isPrefillingFromRun.value = false;
+  }
+}
 
 async function loadPrefillBooks() {
   try {
@@ -513,8 +549,17 @@ const reasonLabels: Record<string, string> = {
                   {{ book.name }}
                 </option>
               </select>
+              <input
+                v-model="prefillRunId"
+                inputmode="numeric"
+                placeholder="回测 run ID"
+                class="prefill-run-input"
+              />
               <button type="button" class="secondary-action" :disabled="isPrefilling" @click="prefillFromPositionBook">
                 {{ isPrefilling ? "预填中…" : "从持仓账本预填" }}
+              </button>
+              <button type="button" class="secondary-action" :disabled="isPrefillingFromRun" @click="prefillFromBacktestRun">
+                {{ isPrefillingFromRun ? "预填中…" : "从回测持仓预填" }}
               </button>
               <button type="button" class="secondary-action" @click="form.assets.push(newAsset())">
                 <Plus :size="16" />增加标的

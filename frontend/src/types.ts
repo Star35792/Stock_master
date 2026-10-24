@@ -693,3 +693,22 @@ export interface PortfolioPlanDrift {
   summary: PortfolioDriftSummary;
   rows: PortfolioDriftRow[];
 }
+
+export interface BacktestFinalHolding {
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  security_type: string | null;
+  quantity: number;
+  close: string;
+  market_value: string;
+  weight: string;
+}
+
+export interface BacktestFinalHoldings {
+  run_id: number;
+  as_of_date: string;
+  cash: string;
+  total_equity: string;
+  holdings: BacktestFinalHolding[];
+}

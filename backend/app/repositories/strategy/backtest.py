@@ -220,3 +220,41 @@ class BacktestRepository:
         run.error_message = error_message
         run.finished_at = db.scalar(select(func.now()))
         db.add(run)
+
+    def latest_positions(
+        self,
+        db: Session,
+        *,
+        run_id: int,
+    ) -> list[BacktestPosition]:
+        """Position rows of the run's final trading day, symbol-ordered."""
+        latest_date = db.scalar(
+            select(func.max(BacktestPosition.trade_date)).where(
+                BacktestPosition.run_id == run_id
+            )
+        )
+        if latest_date is None:
+            return []
+        return list(
+            db.scalars(
+                select(BacktestPosition)
+                .where(
+                    BacktestPosition.run_id == run_id,
+                    BacktestPosition.trade_date == latest_date,
+                )
+                .order_by(BacktestPosition.symbol)
+            )
+        )
+
+    def latest_equity(
+        self,
+        db: Session,
+        *,
+        run_id: int,
+    ) -> BacktestEquity | None:
+        return db.scalar(
+            select(BacktestEquity)
+            .where(BacktestEquity.run_id == run_id)
+            .order_by(BacktestEquity.trade_date.desc())
+            .limit(1)
+        )

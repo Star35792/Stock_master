@@ -1298,3 +1298,14 @@ pre {
   background: #fff;
   color: #101828;
 }
+
+.prefill-run-input {
+  width: 120px;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: #101828;
+}

@@ -276,3 +276,94 @@ def test_backtest_query_service_rejects_incomparable_drift_runs() -> None:
         assert "not comparable with baseline 1: 2" in str(exc)
     else:
         raise AssertionError("runs with different data versions must be rejected")
+
+
+def test_final_holdings_reads_last_day_and_computes_weights(monkeypatch) -> None:
+    from datetime import date
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.services.backtest import BacktestQueryService
+
+    service = BacktestQueryService()
+    run = SimpleNamespace(
+        id=14,
+        status="success",
+        end_date=date(2026, 4, 30),
+        final_equity=Decimal("1120000"),
+    )
+    equity = SimpleNamespace(
+        trade_date=date(2026, 4, 30),
+        cash=Decimal("62000"),
+        total_equity=Decimal("1120000"),
+    )
+    positions = [
+        SimpleNamespace(
+            symbol="AAA.SH",
+            quantity=2000,
+            close=Decimal("10"),
+            market_value=Decimal("20000"),
+        ),
+        SimpleNamespace(
+            symbol="BBB.SZ",
+            quantity=1000,
+            close=Decimal("20"),
+            market_value=Decimal("20000"),
+        ),
+    ]
+    monkeypatch.setattr(
+        service.backtest_repository, "get_run", lambda db, *, run_id: run
+    )
+    monkeypatch.setattr(
+        service.backtest_repository,
+        "latest_equity",
+        lambda db, *, run_id: equity,
+    )
+    monkeypatch.setattr(
+        service.backtest_repository,
+        "latest_positions",
+        lambda db, *, run_id: positions,
+    )
+
+    class FakeSecurityRepository:
+        def get_many(self, db, *, symbols):
+            return [
+                SimpleNamespace(
+                    symbol=symbol,
+                    name=f"证券{symbol}",
+                    industry="银行",
+                    security_type="stock",
+                )
+                for symbol in sorted(symbols)
+            ]
+
+    report = service.get_final_holdings(
+        object(),
+        run_id=14,
+        research_db=object(),
+        security_repository=FakeSecurityRepository(),
+    )
+
+    assert report is not None
+    assert report.as_of_date == date(2026, 4, 30)
+    assert report.cash == Decimal("62000")
+    assert report.total_equity == Decimal("1120000")
+    assert [row.symbol for row in report.holdings] == ["AAA.SH", "BBB.SZ"]
+    assert report.holdings[0].weight == Decimal("0.0178571429")
+    assert report.holdings[0].industry == "银行"
+
+
+def test_final_holdings_rejects_failed_run() -> None:
+    import pytest
+
+    from app.services.backtest import BacktestQueryService
+
+    service = BacktestQueryService()
+    monkey_run = SimpleNamespace(id=1, status="failed")
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        service.backtest_repository, "get_run", lambda db, *, run_id: monkey_run
+    )
+    with pytest.raises(ValueError, match="successful"):
+        service.get_final_holdings(object(), run_id=1)
+    monkeypatch.undo()

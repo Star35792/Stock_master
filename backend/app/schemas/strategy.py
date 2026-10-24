@@ -353,3 +353,22 @@ class BacktestDriftRead(BaseModel):
     return_spread: Decimal
     drawdown_spread: Decimal
     drift_detected: bool
+
+
+class BacktestFinalHoldingRead(BaseModel):
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    security_type: str | None = None
+    quantity: int
+    close: Decimal
+    market_value: Decimal
+    weight: Decimal
+
+
+class BacktestFinalHoldingsRead(BaseModel):
+    run_id: int
+    as_of_date: date
+    cash: Decimal
+    total_equity: Decimal
+    holdings: list[BacktestFinalHoldingRead]
