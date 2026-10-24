@@ -50,6 +50,21 @@ class PaperEquitySnapshotRepository:
             .limit(1)
         )
 
+    def list_snapshots(
+        self,
+        db: Session,
+        *,
+        account_id: int,
+    ) -> list[PaperAccountEquitySnapshot]:
+        """Append-only snapshot series in ascending valuation_date order."""
+        return list(
+            db.scalars(
+                select(PaperAccountEquitySnapshot)
+                .where(PaperAccountEquitySnapshot.account_id == account_id)
+                .order_by(PaperAccountEquitySnapshot.valuation_date, PaperAccountEquitySnapshot.id)
+            )
+        )
+
     def get_with_components(
         self,
         db: Session,

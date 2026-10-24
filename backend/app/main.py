@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.api import api_router
 from app.api.routes import health_router
 from app.config.settings import settings
+from app.database.positions_session import initialize_positions_database
 from app.database.session import initialize_database
 from app.scheduler.auto_data_sync import AutoDataSyncWorker
 from app.scheduler.price_value_input_prep import PriceValueInputPrepWorker
@@ -14,6 +15,7 @@ from app.scheduler.price_value_screen import PriceValueScreenWorker
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
+    initialize_positions_database()
     worker = AutoDataSyncWorker(settings)
     input_worker = PriceValueInputPrepWorker(settings)
     screen_worker = PriceValueScreenWorker(settings)

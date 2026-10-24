@@ -211,3 +211,35 @@ class PortfolioRiskReadinessRead(BaseModel):
     market_snapshot_hash: str
     checks: list[PortfolioReadinessCheck]
     blockers: list[PortfolioReadinessCheck]
+
+
+class PortfolioDriftRowRead(BaseModel):
+    symbol: str
+    industry: str | None = None
+    security_type: str | None = None
+    target_weight: Decimal
+    current_weight: Decimal
+    drift: Decimal
+    direction: Literal["buy", "sell", "hold"]
+    current_quantity: int
+    target_quantity: int | None
+    reasons: list[str] = []
+
+
+class PortfolioDriftSummaryRead(BaseModel):
+    max_abs_drift: Decimal
+    off_threshold_count: int
+    cash_weight: Decimal
+    cash_target_weight: Decimal
+
+
+class PortfolioPlanDriftRead(BaseModel):
+    plan_id: int
+    source: Literal["position_book", "paper_account"]
+    source_id: int
+    source_name: str | None = None
+    threshold: Decimal
+    price_as_of: date | None
+    total_equity: Decimal
+    summary: PortfolioDriftSummaryRead
+    rows: list[PortfolioDriftRowRead]

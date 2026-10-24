@@ -109,6 +109,8 @@
    - `GET /paper-accounts/{id}/equity`
    - `GET /paper-accounts/{id}/performance`
 
+   2026-10-23 进展：positions 与 performance 已落地（绑定可信行情估值与权益快照序列，见 `roadmap.md` V5.4）；equity 端点由既有 equity-snapshots 承担。同时先于本阶段交付了手工记账的真实持仓账本（独立 SQLite）与草案偏离检测——这是「比较当前持仓与目标持仓」步骤的数据基础。阶段 2 其余交付（再平衡触发服务、组合计划生成、模拟推演全自动运行）未启动，阶段门不勾选。
+
 ### 阶段门
 
 - [ ] 连续 3 个月全自动模拟推演运行

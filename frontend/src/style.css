@@ -1282,3 +1282,9 @@ pre {
     overflow-x: auto;
   }
 }
+
+.asset-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

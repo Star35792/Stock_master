@@ -530,3 +530,166 @@ export interface PaperExecution {
   access_scope: "local_single_user";
   orders: PaperExecutionOrder[];
 }
+
+export interface PositionBook {
+  id: number;
+  name: string;
+  cash: string;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PositionTrade {
+  id: number;
+  symbol: string;
+  side: "buy" | "sell";
+  quantity: number;
+  price: string;
+  fee: string;
+  trade_date: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface PositionConcentration {
+  position_count: number;
+  hhi: string;
+  top5_weight: string;
+  max_symbol_weight: string;
+}
+
+export interface PositionIndustryExposure {
+  industry: string;
+  market_value: string;
+  weight: string;
+  symbol_count: number;
+}
+
+export interface PositionHolding {
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  security_type: string | null;
+  exchange: string | null;
+  quantity: number;
+  average_cost: string;
+  cost_basis: string;
+  price: string | null;
+  price_as_of: string | null;
+  price_quality_status: string | null;
+  price_stale: boolean;
+  sequence_anomaly: boolean;
+  market_value: string;
+  unrealized_pnl: string | null;
+  unrealized_pnl_pct: string | null;
+  realized_pnl: string;
+  weight: string;
+}
+
+export interface PositionBookHoldings {
+  book_id: number;
+  book_name: string;
+  price_as_of: string | null;
+  price_stale: boolean;
+  sequence_anomaly: boolean;
+  cash: string;
+  positions_market_value: string;
+  total_equity: string;
+  realized_pnl: string;
+  concentration: PositionConcentration;
+  industry_exposure: PositionIndustryExposure[];
+  holdings: PositionHolding[];
+}
+
+export interface PaperPositionRow {
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  security_type: string | null;
+  exchange: string | null;
+  quantity: number;
+  average_cost: string;
+  price: string | null;
+  price_as_of: string | null;
+  price_quality_status: string | null;
+  price_stale: boolean;
+  market_value: string;
+  unrealized_pnl: string | null;
+  unrealized_pnl_pct: string | null;
+  weight: string;
+}
+
+export interface PaperPositions {
+  account_id: number;
+  price_as_of: string | null;
+  price_stale: boolean;
+  cash_balance: string;
+  positions_market_value: string;
+  total_equity: string;
+  concentration: PositionConcentration;
+  industry_exposure: PositionIndustryExposure[];
+  holdings: PaperPositionRow[];
+}
+
+export interface PaperPerformancePoint {
+  valuation_date: string;
+  cash_balance: string;
+  positions_market_value: string;
+  total_equity: string;
+  drawdown: string;
+  history_status: string;
+}
+
+export interface PaperPerformanceSummary {
+  observation_count: number;
+  monitoring_start_date: string | null;
+  first_valuation_date: string | null;
+  last_valuation_date: string | null;
+  latest_total_equity: string;
+  high_watermark: string;
+  max_drawdown: string;
+  cumulative_return: string | null;
+  annualized_return: string | null;
+  approximate: boolean;
+  daily_volatility: string | null;
+  volatility_approximate: boolean;
+}
+
+export interface PaperPerformance {
+  account_id: number;
+  summary: PaperPerformanceSummary;
+  curve: PaperPerformancePoint[];
+}
+
+export interface PortfolioDriftRow {
+  symbol: string;
+  industry: string | null;
+  security_type: string | null;
+  target_weight: string;
+  current_weight: string;
+  drift: string;
+  direction: "buy" | "sell" | "hold";
+  current_quantity: number;
+  target_quantity: number | null;
+  reasons: string[];
+}
+
+export interface PortfolioDriftSummary {
+  max_abs_drift: string;
+  off_threshold_count: number;
+  cash_weight: string;
+  cash_target_weight: string;
+}
+
+export interface PortfolioPlanDrift {
+  plan_id: number;
+  source: "position_book" | "paper_account";
+  source_id: number;
+  source_name: string | null;
+  threshold: string;
+  price_as_of: string | null;
+  total_equity: string;
+  summary: PortfolioDriftSummary;
+  rows: PortfolioDriftRow[];
+}

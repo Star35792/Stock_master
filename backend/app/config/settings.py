@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     metadata_db_path: str = "data/stock_master.duckdb"
 
+    # Real-position ledger lives in its own lightweight SQLite file. All other
+    # domains (raw/market/factor/.../trade) stay in the single DuckDB database;
+    # see aiDoc/relations for the storage boundary decision.
+    positions_db_path: str = "data/positions.db"
+
     akshare_timeout_seconds: int = 30
 
     hithink_finance_api_key: str | None = Field(default=None, repr=False)
@@ -93,6 +98,10 @@ class Settings(BaseSettings):
     @cached_property
     def database_url(self) -> str:
         return f"duckdb:///{self.metadata_db_path}"
+
+    @cached_property
+    def positions_database_url(self) -> str:
+        return f"sqlite:///{self.positions_db_path}"
 
 
 settings = Settings()

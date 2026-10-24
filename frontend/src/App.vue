@@ -8,6 +8,7 @@ import {
   LineChart,
   ServerCog,
   ShieldCheck,
+  Wallet,
 } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
@@ -122,6 +123,7 @@ const navItems = [
   { id: "factors", label: "因子", icon: BarChart3 },
   { id: "price-value", label: "估值研究", icon: LineChart },
   { id: "backtests", label: "回测", icon: LineChart },
+  { id: "positions", label: "持仓分析", icon: Wallet },
   { id: "portfolio", label: "组合草案", icon: ClipboardList },
   { id: "paper", label: "模拟盘", icon: BriefcaseBusiness },
   { id: "operations", label: "运维", icon: ServerCog },

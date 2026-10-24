@@ -8,11 +8,16 @@ import {
   LockKeyhole,
   ShieldCheck,
 } from "@lucide/vue";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
-import { fetchPaperAccounts } from "../api";
+import {
+  fetchPaperAccountPerformance,
+  fetchPaperAccountPositions,
+  fetchPaperAccounts,
+} from "../api";
 import PortfolioPlanSection from "../components/operations/PortfolioPlanSection.vue";
-import type { PaperAccount } from "../types";
+import { formatDate, formatNumber, formatPercent } from "../components/operations/formatters";
+import type { PaperAccount, PaperPerformance, PaperPositions } from "../types";
 
 type WorkflowStep = {
   id: number;
@@ -72,6 +77,39 @@ async function loadAccounts() {
 }
 
 onMounted(() => void loadAccounts());
+
+const paperPositions = ref<PaperPositions | null>(null);
+const paperPerformance = ref<PaperPerformance | null>(null);
+const positionsLoading = ref(false);
+const positionsError = ref<string | null>(null);
+
+async function loadPaperAnalysis() {
+  const id = Number(accountId.value);
+  if (!Number.isFinite(id) || id <= 0) {
+    paperPositions.value = null;
+    paperPerformance.value = null;
+    return;
+  }
+  positionsLoading.value = true;
+  positionsError.value = null;
+  try {
+    [paperPositions.value, paperPerformance.value] = await Promise.all([
+      fetchPaperAccountPositions(id),
+      fetchPaperAccountPerformance(id),
+    ]);
+  } catch (error) {
+    positionsError.value = error instanceof Error ? error.message : "模拟盘持仓读取失败";
+  } finally {
+    positionsLoading.value = false;
+  }
+}
+
+watch(accountId, () => void loadPaperAnalysis());
+
+function pnlTone(value: string | null): string {
+  if (value === null) return "";
+  return Number(value) > 0 ? "tone-loss" : Number(value) < 0 ? "tone-gain" : "";
+}
 </script>
 
 <template>
@@ -166,6 +204,77 @@ onMounted(() => void loadAccounts());
         :write-enabled="canWrite"
         @busy-change="tradingBusy = $event"
       />
+    </section>
+
+    <section v-if="accountId" class="paper-analysis" aria-label="模拟盘持仓与绩效">
+      <div class="analysis-heading">
+        <div>
+          <span class="section-kicker">持仓分析</span>
+          <h2>模拟账户持仓与净值绩效</h2>
+        </div>
+        <button class="analysis-refresh" type="button" :disabled="positionsLoading" @click="loadPaperAnalysis">
+          {{ positionsLoading ? "读取中…" : "刷新" }}
+        </button>
+      </div>
+      <p v-if="positionsError" class="page-alert page-alert--error" role="alert">
+        <CircleAlert :size="17" />{{ positionsError }}
+      </p>
+
+      <div v-if="paperPositions" class="analysis-metrics">
+        <div class="analysis-metric">
+          <span>总权益</span>
+          <strong>{{ formatNumber(paperPositions.total_equity) }}</strong>
+          <small>现金 {{ formatNumber(paperPositions.cash_balance) }} · 持仓 {{ formatNumber(paperPositions.positions_market_value) }}</small>
+        </div>
+        <div class="analysis-metric">
+          <span>估值基准</span>
+          <strong>{{ paperPositions.price_as_of ? formatDate(paperPositions.price_as_of) : "无可信价" }}</strong>
+          <small>{{ paperPositions.price_stale ? "存在缺价持仓，按成本估值" : "最新可信未复权收盘价" }}</small>
+        </div>
+        <div class="analysis-metric">
+          <span>集中度</span>
+          <strong>HHI {{ formatPercent(paperPositions.concentration.hhi) }}</strong>
+          <small>Top5 {{ formatPercent(paperPositions.concentration.top5_weight) }} · 最大单票 {{ formatPercent(paperPositions.concentration.max_symbol_weight) }}</small>
+        </div>
+        <div v-if="paperPerformance" class="analysis-metric">
+          <span>累计收益 / 最大回撤</span>
+          <strong>
+            {{ paperPerformance.summary.cumulative_return === null ? "-" : formatPercent(paperPerformance.summary.cumulative_return) }}
+            /
+            {{ formatPercent(paperPerformance.summary.max_drawdown) }}
+          </strong>
+          <small>
+            快照 {{ paperPerformance.summary.observation_count }} 个
+            <template v-if="paperPerformance.summary.approximate">（含缺口，近似值）</template>
+          </small>
+        </div>
+      </div>
+
+      <div v-if="paperPositions && paperPositions.holdings.length > 0" class="analysis-table">
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th><th>名称</th><th>行业</th><th>数量</th><th>成本</th>
+              <th>现价</th><th>市值</th><th>浮盈</th><th>收益率</th><th>权重</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in paperPositions.holdings" :key="row.symbol">
+              <td>{{ row.symbol }}</td>
+              <td>{{ row.name ?? "-" }}</td>
+              <td>{{ row.industry ?? "-" }}</td>
+              <td>{{ formatNumber(row.quantity) }}</td>
+              <td>{{ formatNumber(row.average_cost) }}</td>
+              <td>{{ row.price === null ? "-" : formatNumber(row.price) }}</td>
+              <td>{{ formatNumber(row.market_value) }}</td>
+              <td :class="pnlTone(row.unrealized_pnl)">{{ row.unrealized_pnl === null ? "-" : formatNumber(row.unrealized_pnl) }}</td>
+              <td :class="pnlTone(row.unrealized_pnl_pct)">{{ row.unrealized_pnl_pct === null ? "-" : formatPercent(row.unrealized_pnl_pct) }}</td>
+              <td>{{ formatPercent(row.weight) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else-if="paperPositions && !positionsLoading" class="analysis-empty">当前模拟账户暂无持仓。</p>
     </section>
   </main>
 </template>
@@ -265,5 +374,124 @@ select { width: 100%; min-height: 40px; border: 1px solid #cbd5e1; border-radius
   .workflow-step { min-height: 60px; }
   .workflow-arrow { display: none; }
   .stage-status { white-space: normal; }
+}
+
+.paper-analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.analysis-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analysis-heading h2 {
+  margin: 2px 0 0;
+  font-size: 17px;
+}
+
+.analysis-refresh {
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.analysis-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.analysis-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.analysis-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.analysis-metric span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.analysis-metric strong {
+  font-size: 16px;
+}
+
+.analysis-metric small {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.analysis-table {
+  overflow-x: auto;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+}
+
+.analysis-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analysis-table th,
+.analysis-table td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.analysis-table th:first-child,
+.analysis-table td:first-child,
+.analysis-table th:nth-child(2),
+.analysis-table td:nth-child(2),
+.analysis-table th:nth-child(3),
+.analysis-table td:nth-child(3) {
+  text-align: left;
+}
+
+.analysis-table th {
+  font-size: 12px;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.analysis-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.analysis-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* A 股口径：红涨绿跌 */
+.tone-loss {
+  color: #dc2626;
+}
+
+.tone-gain {
+  color: #16a34a;
 }
 </style>

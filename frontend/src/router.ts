@@ -4,7 +4,7 @@ import WorkspaceRoutePage from "./pages/WorkspaceRoutePage.vue";
 
 const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/overview" },
-  ...["overview", "market", "factors", "price-value", "backtests", "portfolio", "paper", "quality", "operations", "alerts", "failures"].map(
+  ...["overview", "market", "factors", "price-value", "backtests", "positions", "portfolio", "paper", "quality", "operations", "alerts", "failures"].map(
     (name): RouteRecordRaw => ({ path: `/${name}`, name, component: WorkspaceRoutePage, props: { page: name } }),
   ),
   { path: "/:pathMatch(.*)*", redirect: "/overview" },

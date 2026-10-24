@@ -16,6 +16,7 @@ import type {
 } from "../types";
 import FactorPage from "./FactorPage.vue";
 import PaperTradingPage from "./PaperTradingPage.vue";
+import PositionsPage from "./PositionsPage.vue";
 import PriceValuePage from "./PriceValuePage.vue";
 
 const MarketPage = defineAsyncComponent(() => import("./MarketPage.vue"));
@@ -55,6 +56,7 @@ defineEmits<{ selectFailure: [type: FailureType, item: FailureItem] }>();
   <QualitySection v-else-if="page === 'quality'" :data-quality="overview.data_quality" />
   <FactorPage v-else-if="page === 'factors'" />
   <PriceValuePage v-else-if="page === 'price-value'" />
+  <PositionsPage v-else-if="page === 'positions'" />
   <RunTablesSection
     v-else-if="page === 'backtests'"
     :backtests="overview.backtests"

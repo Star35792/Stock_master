@@ -29,6 +29,47 @@ class DailyBarRepository:
             .limit(1)
         )
 
+    def list_latest_consumable_by_symbols(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        adjust_type: str,
+    ) -> list[DailyBar]:
+        """Batch version of ``get_latest_consumable`` for read-only analysis.
+
+        One trusted/manual-fixed, non-suspect bar per symbol via a window
+        function, so a holdings view does not issue one query per symbol.
+        (The single-symbol paged variant is ``list_latest_consumable`` below.)
+        """
+        if not symbols:
+            return []
+        ranked = (
+            select(
+                DailyBar.id.label("bar_id"),
+                func.row_number()
+                .over(
+                    partition_by=DailyBar.symbol,
+                    order_by=(desc(DailyBar.trade_date), desc(DailyBar.id)),
+                )
+                .label("rn"),
+            )
+            .where(
+                DailyBar.symbol.in_(symbols),
+                DailyBar.adjust_type == adjust_type,
+                DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+                DailyBar.is_suspect.is_(False),
+            )
+            .subquery()
+        )
+        return list(
+            db.scalars(
+                select(DailyBar)
+                .join(ranked, DailyBar.id == ranked.c.bar_id)
+                .where(ranked.c.rn == 1)
+            )
+        )
+
     def count_trusted_by_date(
         self,
         db: Session,

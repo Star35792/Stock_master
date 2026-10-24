@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, Path, status
 
 from app.api.dependencies import DatabaseSession
+from app.schemas.position_analysis import PaperPerformanceRead, PaperPositionsRead
 from app.schemas.trade import (
     PaperAccountRead,
     PaperEquitySnapshotCreateRequest,
@@ -20,15 +21,39 @@ from app.services.paper_ledger_audit import (
     PaperLedgerAccountNotFound,
     PaperLedgerAuditService,
 )
+from app.services.position_analysis import PaperPositionAnalysisService
 
 router = APIRouter(prefix="/paper-accounts", tags=["paper-accounts"])
 service = PaperEquitySnapshotService()
 audit_service = PaperLedgerAuditService()
+analysis_service = PaperPositionAnalysisService()
 
 
 @router.get("", response_model=list[PaperAccountRead])
 def list_paper_accounts(db: DatabaseSession) -> list[PaperAccountRead]:
     return service.list_accounts(db)
+
+
+@router.get("/{account_id}/positions", response_model=PaperPositionsRead)
+def get_paper_account_positions(
+    db: DatabaseSession,
+    account_id: Annotated[int, Path(gt=0)],
+) -> PaperPositionsRead:
+    try:
+        return analysis_service.get_positions(db, account_id=account_id)
+    except PaperAccountNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/{account_id}/performance", response_model=PaperPerformanceRead)
+def get_paper_account_performance(
+    db: DatabaseSession,
+    account_id: Annotated[int, Path(gt=0)],
+) -> PaperPerformanceRead:
+    try:
+        return analysis_service.get_performance(db, account_id=account_id)
+    except PaperAccountNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get(

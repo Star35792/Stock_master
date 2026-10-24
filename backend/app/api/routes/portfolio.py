@@ -1,12 +1,14 @@
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
-from app.api.dependencies import DatabaseSession
+from app.api.dependencies import DatabaseSession, PositionsDatabaseSession
 from app.config.settings import settings
 from app.portfolio import PortfolioAsset, PortfolioConstraints, PortfolioRiskBudget
 from app.schemas.portfolio import (
     PortfolioPlanCreateRequest,
+    PortfolioPlanDriftRead,
     PortfolioPlanRead,
     PortfolioRiskReadinessRead,
 )
@@ -15,11 +17,16 @@ from app.services.portfolio import (
     PortfolioConstructionService,
     PortfolioIdempotencyConflict,
 )
+from app.services.portfolio_drift import (
+    PortfolioDriftService,
+    PortfolioDriftValidationError,
+)
 from app.services.portfolio_readiness import (
     PaperAccountNotFound,
     PortfolioPlanNotFound,
     PortfolioRiskReadinessService,
 )
+from app.services.position_book import PositionBookNotFound
 from app.services.risk_evaluation import (
     BoundRiskEvaluationService,
     RiskEvaluationConflict,
@@ -31,6 +38,7 @@ router = APIRouter(prefix="/portfolio/plans", tags=["portfolio"])
 service = PortfolioConstructionService()
 readiness_service = PortfolioRiskReadinessService()
 risk_evaluation_service = BoundRiskEvaluationService()
+drift_service = PortfolioDriftService()
 
 
 @router.post("", response_model=PortfolioPlanRead, status_code=status.HTTP_201_CREATED)
@@ -122,6 +130,34 @@ def get_portfolio_risk_readiness(
         )
     except (PortfolioPlanNotFound, PaperAccountNotFound) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/{plan_id}/drift", response_model=PortfolioPlanDriftRead)
+def get_portfolio_plan_drift(
+    db: DatabaseSession,
+    positions_db: PositionsDatabaseSession,
+    plan_id: int,
+    position_book_id: Annotated[int | None, Query(gt=0)] = None,
+    paper_account_id: Annotated[int | None, Query(gt=0)] = None,
+    threshold: Annotated[Decimal, Query(gt=0, le=1)] = Decimal("0.02"),
+) -> PortfolioPlanDriftRead:
+    """Compare plan target weights with actual holdings (real book or paper)."""
+    try:
+        return drift_service.get_drift(
+            db,
+            positions_db,
+            plan_id=plan_id,
+            position_book_id=position_book_id,
+            paper_account_id=paper_account_id,
+            threshold=threshold,
+        )
+    except (PortfolioPlanNotFound, PaperAccountNotFound) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (PortfolioDriftValidationError, PositionBookNotFound) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post(

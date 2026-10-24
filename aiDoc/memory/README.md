@@ -32,3 +32,5 @@
 - 涨跌停价格不能用「涨跌幅≈10%」反推校验：当日收盘涨 10% 不等于收盘价等于涨停价。正确校验是不变式 `high <= limit_up` 且 `low >= limit_down`（剔除上市前 5 个交易日后真实违规率 0.092%）。推导锚点必须是当日自身的 `pre_close`，不能用前一行的 `close`（除权除息日两者不等）。
 - 因子方向不能靠直觉设定：本轮实测 7 个价量因子里 `momentum_20`/`momentum_60`/`liquidity_20` 的 RankIC 显著为负（IR 在 -0.26~-0.33），默认预设给它们「越高越好」导致回测亏损。任何因子进策略前先查 `factor.factor_profile` 的 RankIC 符号。
 - 日频换仓的 20 股等权组合会把毛收益吃光：本轮 `ic_aligned` 回测毛收益约 +4.6%，换手率 71、佣金 4.5 万（占初始资金 4.5%），净收益只剩 +0.08%。`rebalance_rule` 当前只支持 `daily`，降换手需要先实现非日频换仓。
+- **duckdb-engine 的 `:memory:` 是按线程隔离的 SingletonThreadPool**：conftest 里建的内存 DuckDB schema/表只存在于创建它的线程；TestClient 会在 anyio 工作线程处理请求，请求内发真实 DuckDB SQL 会拿到全新的空库并报 `Catalog Error: schema does not exist`。既有 API 测试全靠 monkeypatch 路由 service 才没踩到；新增要在请求线程里真查 DuckDB 的 API 测试时，同样 monkeypatch 仓储或显式使用线程绑定方案（2026-10-23 持仓账本 API 测试踩坑）。
+- 真实持仓账本（`positions` 域）自 2026-10-23 起存独立 SQLite `data/positions.db`：这是用户明确的存储决策、唯一 DuckDB 例外（ADR：`aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）。SQLite 金额列用整数 quants（0.0001 元）满足定点规则；账本服务 `add_trade` 需要同时拿 SQLite 会话（写流水）和 DuckDB 会话（查证券主数据），双库参数不要混用。

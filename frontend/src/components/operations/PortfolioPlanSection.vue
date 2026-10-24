@@ -11,6 +11,8 @@ import {
   fetchPortfolioRiskReadiness,
   fetchPaperExecutionApproval,
   fetchPaperExecutionByApproval,
+  fetchPositionBookHoldings,
+  fetchPositionBooks,
   executePaperApproval,
   revokePaperExecutionApproval,
 } from "../../api";
@@ -51,6 +53,44 @@ const form = reactive<PortfolioPlanCreateRequest>({
     security_type_budgets: {},
   },
 });
+
+const isPrefilling = ref(false);
+
+async function prefillFromPositionBook() {
+  isPrefilling.value = true;
+  errorMessage.value = null;
+  try {
+    const books = await fetchPositionBooks();
+    if (books.length === 0) {
+      errorMessage.value = "还没有持仓账本，请先在「持仓分析」页创建账本并记账。";
+      return;
+    }
+    const book = books[0];
+    const holdings = await fetchPositionBookHoldings(book.id);
+    const priced = holdings.holdings.filter((row) => row.price !== null);
+    if (priced.length === 0) {
+      errorMessage.value = `账本「${book.name}」没有可信价持仓，无法预填草案。`;
+      return;
+    }
+    form.assets = priced.map((row) => ({
+      symbol: row.symbol,
+      security_type: row.security_type === "etf" ? "etf" : "stock",
+      industry: row.industry ?? "",
+      price: row.price ?? "0",
+      current_quantity: row.quantity,
+      requested_weight: String(Number(row.weight)),
+      lot_size: 100,
+    }));
+    // 草案的现金字段必须填账本现金本身：组合总权益由 cash + Σ现价×当前数量
+    // 推导（见 builder），当前数量已预填，若填 total_equity 会双计持仓市值。
+    form.cash = String(Number(holdings.cash));
+    form.name = `预填自账本「${book.name}」`;
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "持仓账本预填失败";
+  } finally {
+    isPrefilling.value = false;
+  }
+}
 
 const plan = ref<PortfolioPlan | null>(null);
 const lookupId = ref("");
@@ -444,9 +484,14 @@ const reasonLabels: Record<string, string> = {
         <div class="asset-editor">
           <div class="asset-editor-header">
             <strong>手工标的快照</strong>
-            <button type="button" class="secondary-action" @click="form.assets.push(newAsset())">
-              <Plus :size="16" />增加标的
-            </button>
+            <div class="asset-editor-actions">
+              <button type="button" class="secondary-action" :disabled="isPrefilling" @click="prefillFromPositionBook">
+                {{ isPrefilling ? "预填中…" : "从持仓账本预填" }}
+              </button>
+              <button type="button" class="secondary-action" @click="form.assets.push(newAsset())">
+                <Plus :size="16" />增加标的
+              </button>
+            </div>
           </div>
           <div v-for="(asset, index) in form.assets" :key="index" class="asset-row">
             <label>代码<input v-model.trim="asset.symbol" required maxlength="20" /></label>

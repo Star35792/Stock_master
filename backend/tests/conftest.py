@@ -16,6 +16,9 @@ from pathlib import Path
 # test suite never opens data/stock_master.duckdb.
 _test_db_root = Path(tempfile.mkdtemp(prefix="stock-master-tests-"))
 os.environ["METADATA_DB_PATH"] = str(_test_db_root / "session.duckdb")
+# The real-position ledger engine is created at import time too; point it at the
+# same temp root so tests never touch data/positions.db.
+os.environ["POSITIONS_DB_PATH"] = str(_test_db_root / "positions.db")
 # The default research read path is the Parquet warm layer. Unit tests exercise
 # the control-plane ORM semantics (and cannot self-ATTACH the temp DuckDB file),
 # so they pin the control source here instead of touching every service call
@@ -27,8 +30,11 @@ atexit.register(shutil.rmtree, _test_db_root, ignore_errors=True)
 
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.database.base import Base  # noqa: E402
+from app.database.positions_base import PositionsBase  # noqa: E402
+from app.database.positions_session import get_positions_db  # noqa: E402
 from app.database.session import SCHEMAS, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -50,3 +56,24 @@ def _override_get_db():
 
 
 app.dependency_overrides[get_db] = _override_get_db
+
+# Shared in-memory SQLite for the real-position ledger; StaticPool keeps every
+# session on the same connection so the memory database actually persists.
+_positions_engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+PositionsBase.metadata.create_all(_positions_engine)
+_PositionsSessionLocal = sessionmaker(bind=_positions_engine, expire_on_commit=False)
+
+
+def _override_get_positions_db():
+    db = _PositionsSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+app.dependency_overrides[get_positions_db] = _override_get_positions_db

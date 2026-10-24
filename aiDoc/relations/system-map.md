@@ -16,6 +16,7 @@
 ## 事实源边界
 
 - DuckDB 是当前唯一业务事实存储，本地 Parquet 保存 curated 温层数据集。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
+- 唯一例外：手工记账的真实持仓账本存独立 SQLite `data/positions.db`（`positions` 域，2026-10-23 决策，见 [ADR](20261023-1925-position-ledger-sqlite.md)）；账本持仓的估值价格仍取 DuckDB `market` 可信层，持仓与盈亏由流水重放推导、不落库。
 - `raw` 保存来源、批次、原始 payload 和异常数据。
 - `market` 是可信消费层。
 - `factor` 保存可复现的因子定义、运行和值。

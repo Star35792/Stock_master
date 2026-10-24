@@ -522,6 +522,7 @@ V1 暂不引入以下设计：
 - `fundamental.*`：财务报表与指标。
 - `market.alternative_data_snapshot`、`market.index_constituent_snapshot` 和 `market.valuation_snapshot`：另类数据、指数成分和估值快照。
 - `lake.release`：按 `dataset + checksum` 生成内容寻址 `release_id`，记录 schema 版本、日期范围、行数、父 release、代码版本、质量状态、文件 manifest 和 active 指针。`factor.factor_run.release_id` 绑定因子输入 release，`market.adjustment_factor.release_id` 绑定复权血缘。现有 DuckDB 由启动/日循环入口执行幂等兼容升级，为这两个既有表补充 nullable `release_id`；新表仍由 SQLAlchemy metadata 创建。
+- `positions`（独立 SQLite，`data/positions.db`）：手工记账的真实持仓账本，是唯一存放在 DuckDB 之外的域（决策见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）。`position_book` 记账本名与现金（`cash_quants` 整数最小单位 0.0001 元，满足定点要求），`position_trade` 记买卖流水（side/quantity/price_quants/fee_quants/trade_date/幂等键）。持仓数量、平均成本与已实现盈亏由流水按 `(trade_date, id)` 重放推导，不落库；估值价格取 DuckDB `market` 可信层，缺价时按成本估值并标记 `price_stale`。卖出校验净持仓非负，删除流水后重放校验不产生负持仓。
 
 仍暂不创建或不作为当前主线：
 

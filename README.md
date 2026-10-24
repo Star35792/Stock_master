@@ -162,12 +162,14 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 
 ### 组合、风控与模拟盘
 
-路由文件：`portfolio.py`、`paper_accounts.py`、`approvals.py`
+路由文件：`portfolio.py`、`paper_accounts.py`、`approvals.py`、`position_books.py`
 
 - 组合草案：`POST /api/v1/portfolio/plans`（需 `Idempotency-Key`）、`GET /api/v1/portfolio/plans/{plan_id}`、`GET /api/v1/portfolio/plans/{plan_id}/risk-readiness`
+- 草案偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=&threshold=`（只读建议，不生成订单）
 - 正式风控评估：`POST /api/v1/portfolio/plans/{plan_id}/risk-evaluations`（需 `Idempotency-Key`）
-- Paper 账户：`GET /api/v1/paper-accounts`、`GET /api/v1/paper-accounts/{account_id}/ledger-audit`
+- Paper 账户：`GET /api/v1/paper-accounts`、`GET /api/v1/paper-accounts/{account_id}/ledger-audit`、`GET /api/v1/paper-accounts/{account_id}/positions`、`GET /api/v1/paper-accounts/{account_id}/performance`
 - 净值快照：`POST /api/v1/paper-accounts/{account_id}/equity-snapshots`（需 `Idempotency-Key`）、`GET /api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}`
+- 真实持仓账本（独立 SQLite，手工记账）：`GET/POST /api/v1/position-books`、`PATCH /api/v1/position-books/{book_id}`、`GET /api/v1/position-books/{book_id}/holdings`、`GET /api/v1/position-books/{book_id}/trades`、`POST /api/v1/position-books/{book_id}/trades`（需 `Idempotency-Key`）、`DELETE /api/v1/position-books/{book_id}/trades/{trade_id}`
 - 人工确认：`POST /api/v1/risk-evaluations/{risk_check_id}/confirmations`、`GET /api/v1/paper-execution-approvals/{approval_id}`、`POST /api/v1/paper-execution-approvals/{approval_id}/revoke`
 - 模拟执行：`POST /api/v1/paper-execution-approvals/{approval_id}/executions`、`GET /api/v1/paper-executions/{execution_id}`
 

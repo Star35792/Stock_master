@@ -8,9 +8,15 @@ import type {
   FactorDefinition,
   FactorProfile,
   PaperAccount,
+  PaperPerformance,
+  PaperPositions,
   PortfolioPlan,
   PortfolioPlanCreateRequest,
+  PortfolioPlanDrift,
   PortfolioRiskReadiness,
+  PositionBook,
+  PositionBookHoldings,
+  PositionTrade,
   PaperEquitySnapshot,
   PaperExecutionApproval,
   PaperExecution,
@@ -355,4 +361,161 @@ export async function fetchPaperExecutionByApproval(
     throw new Error(payload?.detail ?? `Paper execution request failed with ${response.status}`);
   }
   return response.json() as Promise<PaperExecution>;
+}
+
+export async function fetchPositionBooks(): Promise<PositionBook[]> {
+  const response = await fetch("/api/v1/position-books", {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position book list failed with ${response.status}`);
+  }
+  return response.json() as Promise<PositionBook[]>;
+}
+
+export async function createPositionBook(payload: {
+  name: string;
+  cash?: string;
+  note?: string | null;
+}): Promise<PositionBook> {
+  const response = await fetch("/api/v1/position-books", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position book creation failed with ${response.status}`);
+  }
+  return response.json() as Promise<PositionBook>;
+}
+
+export async function updatePositionBook(
+  bookId: number,
+  payload: { name?: string; cash?: string; note?: string | null },
+): Promise<PositionBook> {
+  const response = await fetch(`/api/v1/position-books/${bookId}`, {
+    method: "PATCH",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position book update failed with ${response.status}`);
+  }
+  return response.json() as Promise<PositionBook>;
+}
+
+export async function fetchPositionBookHoldings(bookId: number): Promise<PositionBookHoldings> {
+  const response = await fetch(`/api/v1/position-books/${bookId}/holdings`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position holdings failed with ${response.status}`);
+  }
+  return response.json() as Promise<PositionBookHoldings>;
+}
+
+export async function fetchPositionTrades(bookId: number): Promise<PositionTrade[]> {
+  const response = await fetch(`/api/v1/position-books/${bookId}/trades`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position trades failed with ${response.status}`);
+  }
+  return response.json() as Promise<PositionTrade[]>;
+}
+
+export async function createPositionTrade(
+  bookId: number,
+  payload: {
+    side: "buy" | "sell";
+    symbol: string;
+    quantity: number;
+    price: string;
+    fee?: string;
+    trade_date: string;
+    note?: string | null;
+  },
+  idempotencyKey: string,
+): Promise<PositionTrade> {
+  const response = await fetch(`/api/v1/position-books/${bookId}/trades`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position trade failed with ${response.status}`);
+  }
+  return response.json() as Promise<PositionTrade>;
+}
+
+export async function deletePositionTrade(bookId: number, tradeId: number): Promise<void> {
+  const response = await fetch(`/api/v1/position-books/${bookId}/trades/${tradeId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Position trade deletion failed with ${response.status}`);
+  }
+}
+
+export async function fetchPaperAccountPositions(accountId: number): Promise<PaperPositions> {
+  const response = await fetch(`/api/v1/paper-accounts/${accountId}/positions`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Paper positions failed with ${response.status}`);
+  }
+  return response.json() as Promise<PaperPositions>;
+}
+
+export async function fetchPaperAccountPerformance(accountId: number): Promise<PaperPerformance> {
+  const response = await fetch(`/api/v1/paper-accounts/${accountId}/performance`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Paper performance failed with ${response.status}`);
+  }
+  return response.json() as Promise<PaperPerformance>;
+}
+
+export async function fetchPortfolioPlanDrift(
+  planId: number,
+  source: { positionBookId?: number; paperAccountId?: number; threshold?: string },
+): Promise<PortfolioPlanDrift> {
+  const params = new URLSearchParams();
+  if (source.positionBookId !== undefined) {
+    params.set("position_book_id", String(source.positionBookId));
+  }
+  if (source.paperAccountId !== undefined) {
+    params.set("paper_account_id", String(source.paperAccountId));
+  }
+  if (source.threshold !== undefined) {
+    params.set("threshold", source.threshold);
+  }
+  const response = await fetch(`/api/v1/portfolio/plans/${planId}/drift?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Plan drift failed with ${response.status}`);
+  }
+  return response.json() as Promise<PortfolioPlanDrift>;
 }
