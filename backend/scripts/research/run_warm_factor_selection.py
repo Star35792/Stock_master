@@ -122,6 +122,20 @@ PRICE_VOLUME_WIDE_SPECS = [
 ]
 SPEC_SETS["price_volume_wide"] = PRICE_VOLUME_WIDE_SPECS
 
+#: 扩展候选池：13 个基础价量因子 + 温层新回填的 3 个因子
+#: （abnormal_volume_pressure / beta_60 / residual_volatility_60，市场收益口径
+#: 见 ``backfill_warm_factors.py``：等权 stock/etf 日收益，指数剔除）。
+#: 方向先验：residual_volatility_60 沿用平台注册默认（越低越好）；
+#: abnormal_volume_pressure 与 beta_60 平台未注册默认方向，此处显式撰写
+#: （量能压力取高、beta 取低——低beta异象先验），不是全样本 IC 知识；
+#: ≥60 开市日的训练窗允许按逐窗证据翻转。
+PRICE_VOLUME_WIDE_EXT_SPECS = PRICE_VOLUME_WIDE_SPECS + [
+    ("abnormal_volume_pressure", Decimal("1"), True),
+    ("beta_60", Decimal("1"), False),
+    ("residual_volatility_60", Decimal("1"), False),
+]
+SPEC_SETS["price_volume_wide_ext"] = PRICE_VOLUME_WIDE_EXT_SPECS
+
 FACTOR_LIMITATIONS = [
     "corporate_action_event_accounting_not_implemented",
     "universe_excludes_symbols_with_corporate_actions_in_window",
@@ -342,7 +356,9 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
         for key, value in payload["performance"].items():
             print(f"  {key}: {value}")
         if args.out:
-            Path(args.out).write_text(
+            out_path = Path(args.out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             print(f"\n已落盘: {args.out}")

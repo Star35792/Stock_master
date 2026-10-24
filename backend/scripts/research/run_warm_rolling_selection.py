@@ -321,7 +321,9 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             "summary": summary,
         }
         if args.out:
-            Path(args.out).write_text(
+            out_path = Path(args.out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             print(f"\n已落盘: {args.out}")

@@ -5,10 +5,10 @@ Why this script exists
 
 The control plane only holds a hot window of ``market.daily_bar``, so the ORM
 factor services cannot compute factor values for 2025 (or any earlier) dates --
-they simply do not see the input rows.  This script computes the seven purely
-price-derived factors directly in DuckDB SQL over the curated ``prices_qfq``
-Parquet layer (full history) and publishes them as a **partial warm-layer
-release**.
+they simply do not see the input rows.  This script computes purely
+price/volume-derived factors directly in DuckDB SQL over the curated
+``prices_qfq`` Parquet layer (full history) and publishes them as a **partial
+warm-layer release**.
 
 A partial release only contains ``factor/factor_value``; every other table and
 every untouched date is inherited from ``--parent-release`` through
@@ -25,6 +25,22 @@ Factor semantics (aligned with ``app/services/basic_price_volume_factors.py``)
 * ``max_drawdown_20``: worst (close / trailing running peak - 1) in 20 bars
 * ``liquidity_20`` : mean ``amount`` over 20 bars
 * ``volume_stability_20``: negative coefficient of variation of ``volume``
+* ``abnormal_volume_pressure``: volume / mean(previous 20 volumes) - 1
+* ``beta_60``      : 60-return beta to the market return
+* ``residual_volatility_60``: population stddev of 60-return residuals
+  ``ret - beta_60 * market_ret`` over the same trailing 60 returns
+
+Market return (``beta_60`` / ``residual_volatility_60``): equal-weight mean of
+per-symbol daily returns over ``stock``/``etf`` rows of the curated slice.
+Indexes are excluded on purpose -- they are instruments, not members of the
+market portfolio.  This is a documented warm-layer 口径: the ORM helper
+``_market_returns_by_date`` uses whatever ``security_type`` set the run
+processed, so the two are not byte-identical.
+
+``turnover_percentile_120`` is NOT computable here: the current curated
+``prices_qfq`` release stores ``turnover_rate`` as all-NULL, so there is no
+history to rank against.  Backfill it only after a curated release carries
+turnover history.
 
 Signals use forward-adjusted (qfq) prices so dividend ex-dates do not appear as
 artificial drawdowns.  Execution still uses unadjusted prices
@@ -72,6 +88,9 @@ EXTENDED_FACTORS = (
     "volatility_5",
     "ma_gap_5",
     "volume_chg_1d",
+    "abnormal_volume_pressure",
+    "beta_60",
+    "residual_volatility_60",
 )
 
 KNOWN_FACTORS = DEFAULT_FACTORS + EXTENDED_FACTORS
@@ -93,6 +112,14 @@ _WINDOW_CLAUSE = """
         trailing_20 AS (
             PARTITION BY symbol ORDER BY trade_date
             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+        ),
+        prev_20_excl AS (
+            PARTITION BY symbol ORDER BY trade_date
+            ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
+        ),
+        trailing_60r AS (
+            PARTITION BY symbol ORDER BY trade_date
+            ROWS BETWEEN 59 PRECEDING AND CURRENT ROW
         )
 """
 
@@ -189,6 +216,19 @@ def _resolve_incomplete_symbols(prices_glob: str, start_date: date, end_date: da
     return [row[0] for row in rows]
 
 
+# Factor values are fixed-point to match ``factor.factor_value.value``
+# (``Numeric(24, 10)``); storing them as DOUBLE would break the project rule
+# that core financial figures never live in floating point.
+_NULL_DOUBLE = "NULL::DECIMAL(24,10)"
+
+#: Security types that participate in the equal-weight market return used by
+#: ``beta_60`` / ``residual_volatility_60``.  Indexes are excluded: they are
+#: instruments, not members of the market portfolio.
+_MARKET_RETURN_TYPES = "('stock', 'etf')"
+
+_BETA_WINDOW = 60
+
+
 def _metrics_sql(factors: list[str]) -> str:
     """Build the wide per-symbol metric table for the requested factors."""
     wanted = set(factors)
@@ -226,11 +266,92 @@ def _metrics_sql(factors: list[str]) -> str:
         "volume_stability_20",
     )
     ma_5 = pick("ma_gap_5", "avg(close) OVER trailing_5 AS ma_avg_5", "ma_avg_5")
+    avp = pick(
+        "abnormal_volume_pressure",
+        # count guard: DuckDB clamps window frames at the partition boundary,
+        # so require the full 20 previous volumes like the ORM does
+        "CASE WHEN count(*) OVER prev_20_excl = 20 THEN "
+        "volume / NULLIF(avg(volume) OVER prev_20_excl, 0) - 1 END "
+        "AS abnormal_volume_pressure",
+        "abnormal_volume_pressure",
+    )
+
+    # Population-moment beta over the trailing 60 returns:
+    # cov(x, y) / var(y) with cov = sum_xy - sum_x*sum_y/n and
+    # var = sum_yy - sum_y^2/n (the /n cancels in the ratio).
+    beta_expr = (
+        "CASE WHEN n_rows = 60 AND n_x = 60 AND n_y = 60 THEN "
+        "(sum_xy - sum_x * sum_y / 60) "
+        "/ NULLIF(sum_yy - sum_y * sum_y / 60, 0) END"
+    )
+    if "beta_60" not in wanted:
+        beta_expr = _NULL_DOUBLE
+
+    needs_market = bool(wanted & {"beta_60", "residual_volatility_60"})
+    market_ctes = ""
+    source_table = "numbered"
+    beta_sums = ""
+    beta_layer = ""
+    if needs_market:
+        market_ctes = f"""
+            , market_ret AS (
+                SELECT trade_date, avg(ret) AS mkt_ret
+                FROM numbered
+                WHERE security_type IN {_MARKET_RETURN_TYPES}
+                GROUP BY trade_date
+            )
+            , joined AS (
+                SELECT n.*, m.mkt_ret
+                FROM numbered n LEFT JOIN market_ret m USING (trade_date)
+            )"""
+        source_table = "joined"
+        # One pass of trailing-60 sums feeds both beta and the residual
+        # volatility expansion below.  n_rows guards the partial-window
+        # boundary: n_x/n_y force every symbol and market return in the frame
+        # to be present, mirroring the ORM fail-closed None.
+        beta_sums = """
+            SUM(ret) OVER trailing_60r AS sum_x,
+            SUM(mkt_ret) OVER trailing_60r AS sum_y,
+            SUM(ret * mkt_ret) OVER trailing_60r AS sum_xy,
+            SUM(mkt_ret * mkt_ret) OVER trailing_60r AS sum_yy,
+            SUM(ret * ret) OVER trailing_60r AS sum_xx,
+            COUNT(ret) OVER trailing_60r AS n_x,
+            COUNT(mkt_ret) OVER trailing_60r AS n_y,
+            COUNT(*) OVER trailing_60r AS n_rows
+        """
+        beta_layer = f"""
+            , sums AS (
+                SELECT *,
+                {beta_sums}
+                FROM {source_table}
+                {_WINDOW_CLAUSE}
+            )
+            , scored AS (
+                SELECT *, {beta_expr} AS beta_60 FROM sums
+            )"""
+
+    # Residual volatility: population stddev of (ret - beta*mkt_ret) over the
+    # same trailing 60 returns, expanded around the window sums so the single
+    # trailing_60r pass suffices:
+    #   mean_res = (sum_x - b*sum_y)/n
+    #   var_res  = (sum_xx - 2b*sum_xy + b^2*sum_yy)/n - mean_res^2
+    # beta_60 IS NOT NULL implies the window guard already passed, so the sums
+    # here are complete.
+    residual_expr = (
+        "CASE WHEN beta_60 IS NOT NULL THEN sqrt(greatest( "
+        "(sum_xx - 2 * beta_60 * sum_xy + beta_60 * beta_60 * sum_yy) / 60 "
+        "- ((sum_x - beta_60 * sum_y) / 60) "
+        "* ((sum_x - beta_60 * sum_y) / 60), 0)) END"
+    )
+    if "residual_volatility_60" not in wanted:
+        residual_expr = _NULL_DOUBLE
+
     return f"""
         CREATE OR REPLACE TEMP TABLE metrics AS
         WITH lags AS (
             SELECT
                 symbol,
+                security_type,
                 trade_date,
                 close,
                 volume,
@@ -247,7 +368,8 @@ def _metrics_sql(factors: list[str]) -> str:
         numbered AS (
             SELECT *, close / NULLIF(close_prev, 0) - 1 AS ret
             FROM lags
-        )
+        ){market_ctes}
+        {beta_layer}
         SELECT
             symbol,
             trade_date,
@@ -264,8 +386,11 @@ def _metrics_sql(factors: list[str]) -> str:
             {drawdown},
             {liquidity},
             {stability},
-            {ma_5}
-        FROM numbered
+            {ma_5},
+            {avp},
+            {"beta_60" if "beta_60" in wanted else _NULL_DOUBLE + " AS beta_60"},
+            {residual_expr} AS residual_volatility_60
+        FROM {'scored' if needs_market else 'numbered'}
         {_WINDOW_CLAUSE}
     """
 
@@ -286,6 +411,9 @@ def _unpivot_sql(factors: list[str]) -> str:
         "ma_gap_5": "close / NULLIF(ma_avg_5, 0) - 1",
         "volume_chg_1d": "volume / NULLIF(volume_prev, 0) - 1",
         "volume_stability_20": "volume_stability_20",
+        "abnormal_volume_pressure": "abnormal_volume_pressure",
+        "beta_60": "beta_60",
+        "residual_volatility_60": "residual_volatility_60",
     }
     selects = "\nUNION ALL\n".join(
         f"SELECT symbol, trade_date, '{name}' AS factor_name, "
@@ -365,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     con.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE base AS
-        SELECT symbol, trade_date, close, volume, amount
+        SELECT symbol, security_type, trade_date, close, volume, amount
         FROM read_parquet('{prices_glob}', hive_partitioning=true)
         WHERE trade_date BETWEEN DATE '{warmup_date}'
           AND DATE '{args.end_date}'
