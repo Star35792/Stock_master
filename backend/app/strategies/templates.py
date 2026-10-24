@@ -1,4 +1,5 @@
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -192,9 +193,12 @@ class CrossSectionSelectionStrategy:
         *,
         frame: StrategyFactorFrame,
         security_types: dict[str, str],
+        decision_dates: Sequence[date] | None = None,
     ) -> list[TargetWeightSignal]:
         return self.decide_history(
-            frame=frame, security_types=security_types
+            frame=frame,
+            security_types=security_types,
+            decision_dates=decision_dates,
         ).signals
 
     def decide_history(
@@ -202,10 +206,27 @@ class CrossSectionSelectionStrategy:
         *,
         frame: StrategyFactorFrame,
         security_types: dict[str, str],
+        decision_dates: Sequence[date] | None = None,
     ) -> CrossSectionDecision:
+        """Decide on every observation date, or on the given subset only.
+
+        ``decision_dates`` carries the rebalance calendar for non-daily
+        rebalancing: the previous-selection chain then advances rebalance day
+        by rebalance day, so exits land on the retained days instead of being
+        emitted (and lost) on filtered-out days in between.
+        """
+        resolved_dates: Sequence[date] = frame.observation_dates
+        if decision_dates is not None:
+            unknown = sorted(set(decision_dates) - set(frame.observation_dates))
+            if unknown:
+                raise ValueError(
+                    "decision dates must be factor observation dates: "
+                    + ", ".join(day.isoformat() for day in unknown)
+                )
+            resolved_dates = sorted(set(decision_dates))
         decisions: list[CrossSectionDecision] = []
         previous_symbols: set[str] = set()
-        for as_of_date in frame.observation_dates:
+        for as_of_date in resolved_dates:
             daily = self.decide(
                 frame=frame.for_date(as_of_date),
                 security_types=security_types,

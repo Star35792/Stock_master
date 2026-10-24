@@ -614,3 +614,210 @@ def test_strategy_research_service_rejects_artifact_hash_mismatch() -> None:
             code_version="abc123",
             data_version="market-qfq-20260720",
         )
+
+
+def test_weekly_rebalance_filters_signals_to_last_open_date_of_week() -> None:
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="weekly-smoke",
+        factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+        top_n=1,
+        rebalance_rule="weekly",
+        allowed_security_types={"stock"},
+        start_date=date(2026, 1, 5),
+        end_date=date(2026, 1, 12),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc",
+        data_version="dv",
+    )
+
+    signals = backtest_service.kwargs["signals"]
+    # Fake calendar: 2026-01-05..09 is ISO week 2 (last open 01-09),
+    # 2026-01-12 starts week 3 (last open within window is 01-12 itself).
+    assert sorted({signal.signal_date for signal in signals}) == [
+        date(2026, 1, 9),
+        date(2026, 1, 12),
+    ]
+    contract = backtest_service.kwargs["research_contract"]
+    assert contract["rebalance_rule"] == "weekly"
+    assert contract["rebalance_interval"] == 1
+    assert contract["portfolio_constraints"] is None
+
+
+def test_every_n_trading_days_rebalance_keeps_every_nth_signal_date() -> None:
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="every-5d-smoke",
+        factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+        top_n=1,
+        rebalance_rule="every_n_trading_days",
+        rebalance_interval=5,
+        allowed_security_types={"stock"},
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 14),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc",
+        data_version="dv",
+    )
+
+    signals = backtest_service.kwargs["signals"]
+    # Fake calendar open dates from 01-02, every 5th: 01-02, 01-09.
+    assert sorted({signal.signal_date for signal in signals}) == [
+        date(2026, 1, 2),
+        date(2026, 1, 9),
+    ]
+    contract = backtest_service.kwargs["research_contract"]
+    assert contract["rebalance_interval"] == 5
+
+
+def test_rebalance_interval_rejected_for_non_every_n_rules() -> None:
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        backtest_service=FakeBacktestService(),
+    )
+
+    with pytest.raises(ValueError, match="rebalance_interval"):
+        service.run_factor_selection(
+            object(),
+            name="bad-interval",
+            factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+            top_n=1,
+            rebalance_rule="weekly",
+            rebalance_interval=3,
+            allowed_security_types={"stock"},
+            start_date=date(2026, 1, 5),
+            end_date=date(2026, 1, 12),
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc",
+            data_version="dv",
+        )
+
+
+class _RotatingFactorRepository(FakeFactorValueRepository):
+    """Factor values that flip the top-ranked symbol mid-window.
+
+    BBB leads in ISO week 2 (01-05..09); AAA leads in week 3 (01-12..16).
+    A weekly strategy must therefore sell BBB and buy AAA on 01-12.
+    """
+
+    def _rows_for_range(self, start_date, end_date, base_value, run_id):
+        rows: list[SimpleNamespace] = []
+        week_three_start = date(2026, 1, 12)
+        for trade_date in self._CALENDAR:
+            if not start_date <= trade_date <= end_date:
+                continue
+            bbb = Decimal("2") if trade_date < week_three_start else Decimal("1")
+            rows.append(
+                SimpleNamespace(
+                    trade_date=trade_date, symbol="AAA",
+                    value=Decimal("1") if trade_date < week_three_start else Decimal("3"),
+                    run_id=run_id,
+                )
+            )
+            rows.append(
+                SimpleNamespace(
+                    trade_date=trade_date, symbol="BBB", value=bbb, run_id=run_id,
+                )
+            )
+        return rows
+
+
+def test_weekly_rebalance_emits_exit_signal_on_retained_day() -> None:
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=_RotatingFactorRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="weekly-rotation",
+        factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+        top_n=1,
+        rebalance_rule="weekly",
+        allowed_security_types={"stock"},
+        start_date=date(2026, 1, 5),
+        end_date=date(2026, 1, 16),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc",
+        data_version="dv",
+    )
+
+    signals = backtest_service.kwargs["signals"]
+    by_date: dict[date, dict[str, Decimal]] = {}
+    for signal in signals:
+        by_date.setdefault(signal.signal_date, {})[signal.symbol] = signal.target_weight
+    # Only the last open date of each ISO week carries signals.
+    assert sorted(by_date) == [date(2026, 1, 9), date(2026, 1, 16)]
+    # Week 2 holds BBB; week 3 must rotate to AAA *and* exit BBB on the
+    # retained day — the regression that produced zombie holdings.
+    assert by_date[date(2026, 1, 9)] == {"BBB": Decimal("1")}
+    assert by_date[date(2026, 1, 16)] == {"AAA": Decimal("1"), "BBB": Decimal("0")}
+
+
+def test_rolling_rejects_non_daily_rebalance_for_non_sh_exchange() -> None:
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        backtest_service=FakeBacktestService(),
+    )
+
+    with pytest.raises(ValueError, match="exchange=SH"):
+        service.run_rolling_factor_selection(
+            object(),
+            exchange="HK",
+            start_date=date(2026, 1, 2),
+            end_date=date(2026, 1, 16),
+            training_days=3,
+            test_days=2,
+            step_days=2,
+            name="hk-weekly",
+            factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+            top_n=1,
+            rebalance_rule="weekly",
+            allowed_security_types={"stock"},
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc",
+            data_version="dv",
+        )

@@ -367,3 +367,90 @@ def test_backtest_blocks_all_trades_when_suspended() -> None:
     )
 
     assert not any(trade.trade_date == date(2026, 7, 2) for trade in result.trades)
+
+
+def _run_with_constraints(
+    *,
+    symbols_weights: list[tuple[str, str, str]],
+    constraints_kwargs: dict,
+    profiles: dict[str, tuple[str, str]] | None = None,
+):
+    """Run a one-shot rebalance (signal 7/1 -> execute 7/2) with constraints.
+
+    ``symbols_weights`` entries are (symbol, open price, requested weight).
+    """
+    symbols = [symbol for symbol, _, _ in symbols_weights]
+    bars = []
+    for trade_day in (date(2026, 7, 1), date(2026, 7, 2)):
+        for symbol, open_, _ in symbols_weights:
+            bars.append(_bar(trade_day, symbol, open_, open_))
+    signals = [
+        TargetWeightSignal(date(2026, 7, 1), symbol, Decimal(weight))
+        for symbol, _, weight in symbols_weights
+    ]
+    from app.portfolio import PortfolioConstraints
+
+    engine = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"),
+        portfolio_constraints=PortfolioConstraints(**constraints_kwargs),
+        security_profiles=profiles or {
+            symbol: ("stock", "银行") for symbol, _, _ in symbols_weights
+        },
+    )
+    return engine.run(bars=bars, signals=signals, execution_calendar=_calendar(*symbols))
+
+
+def test_engine_constraints_cap_symbol_weight() -> None:
+    # 50% target with a 20% cap and no other limit buys 20% of equity.
+    result = _run_with_constraints(
+        symbols_weights=[("AAA", "10", "0.5")],
+        constraints_kwargs={
+            "max_symbol_weight": Decimal("0.20"),
+            "max_industry_weight": Decimal("1"),
+            "cash_reserve_rate": Decimal("0"),
+        },
+    )
+    trades = [trade for trade in result.trades if trade.symbol == "AAA"]
+    assert sum(trade.quantity for trade in trades) == 2000
+
+
+def test_engine_constraints_enforce_industry_budget() -> None:
+    # Two same-industry names at 30% each with a 40% industry cap get scaled
+    # down to 20% each (proportional), regardless of the 100% symbol cap.
+    result = _run_with_constraints(
+        symbols_weights=[("AAA", "10", "0.3"), ("BBB", "20", "0.3")],
+        constraints_kwargs={
+            "max_symbol_weight": Decimal("1"),
+            "max_industry_weight": Decimal("0.40"),
+            "cash_reserve_rate": Decimal("0"),
+        },
+    )
+    quantities = {trade.symbol: trade.quantity for trade in result.trades}
+    # 20% of 100k at price 10 -> 2000 shares; at price 20 -> 1000 shares.
+    assert quantities == {"AAA": 2000, "BBB": 1000}
+
+
+def test_engine_constraints_reserve_cash_across_targets() -> None:
+    # 100% requested weight with a 10% cash reserve only invests 90%.
+    result = _run_with_constraints(
+        symbols_weights=[("AAA", "10", "1")],
+        constraints_kwargs={
+            "max_symbol_weight": Decimal("1"),
+            "max_industry_weight": Decimal("1"),
+            "cash_reserve_rate": Decimal("0.10"),
+        },
+    )
+    assert sum(trade.quantity for trade in result.trades) == 9000
+
+
+def test_engine_without_constraints_keeps_legacy_behaviour() -> None:
+    # Constraint-free engine path is untouched when constraints are None:
+    # a 50% target buys 50% of equity exactly as before.
+    engine = DailyEventBacktestEngine(initial_cash=Decimal("100000"))
+    assert engine.portfolio_constraints is None
+    result = engine.run(
+        bars=[_bar(day, "AAA", "10", "10") for day in _calendar("AAA")["AAA"]],
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA", Decimal("0.5"))],
+        execution_calendar=_calendar("AAA"),
+    )
+    assert sum(trade.quantity for trade in result.trades) == 5000

@@ -21,6 +21,8 @@ _COMPARABLE_PARAMETER_KEYS = (
     "top_n",
     "signal_lag",
     "rebalance_rule",
+    "rebalance_interval",
+    "portfolio_constraints",
     "holding_period",
     "benchmark",
     "allowed_security_types",

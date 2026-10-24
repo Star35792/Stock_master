@@ -19,6 +19,7 @@ from app.backtest import (
     build_fee_model,
 )
 from app.config.settings import settings
+from app.portfolio import PortfolioConstraints
 from app.repositories.market import (
     CorporateActionRepository,
     DailyBarRepository,
@@ -330,6 +331,8 @@ class DailyBacktestService:
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
         training_artifact_id: int | None = None,
+        portfolio_constraints: PortfolioConstraints | None = None,
+        security_profiles: dict[str, tuple[str, str]] | None = None,
     ) -> PersistedBacktestResult:
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
@@ -472,6 +475,8 @@ class DailyBacktestService:
                 initial_cash=initial_cash,
                 lot_size=lot_size,
                 fee_model=fee_model,
+                portfolio_constraints=portfolio_constraints,
+                security_profiles=security_profiles,
             ).run(
                 bars=execution_bars,
                 signals=normalized_signals,

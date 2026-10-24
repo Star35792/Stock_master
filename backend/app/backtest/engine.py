@@ -11,6 +11,7 @@ from app.backtest.fees import (
     build_fee_model,
 )
 from app.backtest.tradability import AShareTradabilityPolicy
+from app.portfolio import PortfolioAsset, PortfolioBuilder, PortfolioConstraints
 
 ENGINE_VERSION = "daily_event_v2"
 
@@ -72,6 +73,8 @@ class DailyEventBacktestEngine:
         lot_size: int = 100,
         fee_model: FeeModel | None = None,
         tradability_policy: AShareTradabilityPolicy | None = None,
+        portfolio_constraints: PortfolioConstraints | None = None,
+        security_profiles: dict[str, tuple[str, str]] | None = None,
     ) -> None:
         if initial_cash <= 0:
             raise ValueError("initial_cash must be positive")
@@ -92,6 +95,13 @@ class DailyEventBacktestEngine:
                 slippage_bps=slippage_bps,
             )
         self.tradability_policy = tradability_policy or AShareTradabilityPolicy()
+        # Optional same-source portfolio construction: when set, every
+        # execution day's pending targets go through PortfolioBuilder so the
+        # backtest honours the same symbol/industry/type/cash constraints as
+        # the paper path. Profiles map symbol -> (security_type, industry).
+        self.portfolio_constraints = portfolio_constraints
+        self.security_profiles = security_profiles or {}
+        self.portfolio_builder = PortfolioBuilder() if portfolio_constraints else None
 
     def run(
         self,
@@ -183,6 +193,15 @@ class DailyEventBacktestEngine:
                 raise ValueError(
                     "missing trusted execution bar on scheduled trade date "
                     f"{trade_date.isoformat()}: {', '.join(missing_execution_bars)}"
+                )
+            if self.portfolio_constraints is not None and executable:
+                executable = self._apply_portfolio_constraints(
+                    executable=executable,
+                    daily_bars=daily_bars,
+                    opening_equity=opening_equity,
+                    cash=cash,
+                    quantities=quantities,
+                    last_close=last_close,
                 )
             orders = []
             for symbol, (signal_date, target_weight, _) in executable.items():
@@ -302,6 +321,70 @@ class DailyEventBacktestEngine:
             positions=positions,
             equity_curve=equity_curve,
         )
+
+    def _apply_portfolio_constraints(
+        self,
+        *,
+        executable: dict[str, tuple[date, Decimal, date]],
+        daily_bars: dict[str, Any],
+        opening_equity: Decimal,
+        cash: Decimal,
+        quantities: dict[str, int],
+        last_close: dict[str, Decimal],
+    ) -> dict[str, tuple[date, Decimal, date]]:
+        """Re-weigh one execution day's targets through PortfolioBuilder.
+
+        Held symbols not in the day's targets are passed with a zero
+        requested weight so the builder sees the full book (and can scale the
+        rest against the real total equity); held names missing both an
+        execution-day bar and a last close cannot be valued and are skipped.
+        """
+        assets: list[PortfolioAsset] = []
+        covered: set[str] = set()
+        for symbol in sorted(set(executable) | {s for s, q in quantities.items() if q > 0}):
+            bar = daily_bars.get(symbol)
+            price = bar.open if bar is not None else last_close.get(symbol)
+            if price is None or price <= 0:
+                continue
+            security_type, industry = self.security_profiles.get(symbol, ("stock", "unknown"))
+            requested = (
+                executable[symbol][1] if symbol in executable else Decimal()
+            )
+            assets.append(
+                PortfolioAsset(
+                    symbol=symbol,
+                    security_type=security_type,
+                    industry=industry,
+                    price=price,
+                    current_quantity=quantities.get(symbol, 0),
+                    requested_weight=requested,
+                    lot_size=self.lot_size,
+                )
+            )
+            covered.add(symbol)
+        if not assets:
+            return executable
+        assert self.portfolio_builder is not None
+        plan = self.portfolio_builder.build(
+            assets=assets,
+            cash=cash,
+            constraints=self.portfolio_constraints,
+        )
+        final_weights = {target.symbol: target.final_weight for target in plan.targets}
+        constrained: dict[str, tuple[date, Decimal, date]] = {}
+        for symbol, target in executable.items():
+            if symbol not in covered or symbol not in final_weights:
+                continue
+            signal_date, _, scheduled = target
+            # final_weight is derived from builder quantities; convert back to
+            # a weight against the engine's opening equity so downstream lot
+            # sizing and affordability stay on the engine's own accounting.
+            constrained[symbol] = (
+                signal_date,
+                final_weights[symbol] if opening_equity > 0 else Decimal(),
+                scheduled,
+            )
+        return constrained
 
     def _affordable_quantity(
         self,

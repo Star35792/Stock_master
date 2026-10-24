@@ -152,7 +152,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 
 - `POST /api/v1/strategy-research/rolling-windows`
 - `POST /api/v1/strategy-research/rolling-backtests`
-- `POST /api/v1/strategy-research/factor-selection/backtests`
+- `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源）
 - `POST /api/v1/strategy-research/factor-selection/backtests/batch`
 - 价格价值研究：`POST /api/v1/strategy-research/price-value/evaluate`
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`

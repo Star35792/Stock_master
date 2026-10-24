@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.dependencies import DatabaseSession
+from app.portfolio import PortfolioConstraints
 from app.schemas.price_value import PriceValueRequest
 from app.schemas.price_value_backtest import PriceValueBacktestRequest, PriceValueBacktestResponse
 from app.schemas.price_value_result import PriceValueResult
 from app.schemas.strategy import (
+    BacktestPortfolioConstraintsRequest,
     BatchFactorSelectionBacktestItem,
     BatchFactorSelectionBacktestRequest,
     FactorSelectionBacktestRequest,
@@ -25,6 +27,19 @@ service = StrategyResearchService()
 price_value_service = PriceValueResearchService()
 price_value_backtest_service = PriceValueBacktestService()
 price_value_screen_service = PriceValueScreenService()
+
+
+def _to_portfolio_constraints(
+    request: BacktestPortfolioConstraintsRequest | None,
+) -> PortfolioConstraints | None:
+    if request is None:
+        return None
+    return PortfolioConstraints(
+        max_symbol_weight=request.max_symbol_weight,
+        max_industry_weight=request.max_industry_weight,
+        cash_reserve_rate=request.cash_reserve_rate,
+        security_type_budgets=request.security_type_budgets,
+    )
 
 
 @router.get("/price-value/screen/latest")
@@ -177,6 +192,10 @@ def run_factor_selection_backtest(
             signal_lag=payload.signal_lag,
             rebalance_rule=payload.rebalance_rule,
             holding_period=payload.holding_period,
+            rebalance_interval=payload.rebalance_interval,
+            portfolio_constraints=_to_portfolio_constraints(
+                payload.portfolio_constraints
+            ),
             benchmark=payload.benchmark,
             allowed_security_types=set(payload.allowed_security_types),
             coverage_ratio=payload.coverage_ratio,
@@ -264,6 +283,10 @@ def run_rolling_factor_selection_backtests(
             signal_lag=payload.signal_lag,
             rebalance_rule=payload.rebalance_rule,
             holding_period=payload.holding_period,
+            rebalance_interval=payload.rebalance_interval,
+            portfolio_constraints=_to_portfolio_constraints(
+                payload.portfolio_constraints
+            ),
             benchmark=payload.benchmark,
             allowed_security_types=set(payload.allowed_security_types),
             coverage_ratio=payload.coverage_ratio,

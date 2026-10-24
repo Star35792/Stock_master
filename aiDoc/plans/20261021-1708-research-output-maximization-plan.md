@@ -101,8 +101,8 @@
 
 | # | 动作 | 说明 |
 |---|---|---|
-| P3-1 | 回测路径接 PortfolioBuilder | 让 `strategy_research` 复用行业上限、风格预算、单标的上限，使回测与 paper 链路约束同源 |
-| P3-2 | 支持多日调仓 | 解除 `rebalance_rule='daily'` 硬编码。低价超跌反弹 20 日调仓已证明优于日频，但平台跑不了 |
+| P3-1 | 回测路径接 PortfolioBuilder | **2026-10-23 已完成首个切片**：`FactorSelectionBacktestRequest`/`RollingFactorSelectionBacktestRequest` 新增可选 `portfolio_constraints`（单标的上限/行业上限/现金留存率/证券类型预算），引擎每个执行日将到期目标连当前持仓一起过 `PortfolioBuilder`（proportional 缩放），回测与 paper 链路约束同源；行业标签暂用 `market.security` 当前值（时点历史见 P2-3），风格/TE/波动率预算仍只在 paper 路径（需因子历史 join） |
+| P3-2 | 支持多日调仓 | **2026-10-23 已完成（含 T2 评审修复）**：`rebalance_rule` 支持 `daily/weekly/monthly/every_n_trading_days`（后者配 `rebalance_interval`，如 20 交易日）。调仓日以 `decision_dates` 传入策略决策层（`previous_symbols` 沿调仓链传递），**不是**事后过滤信号——首版事后过滤会丢失周期内退出信号形成僵尸持仓（T2 评审 P0，已修复并有换股回归测试锁定）；T+1 执行语义不变；非日频仅支持 SH 交易所（HK 显式拒绝，待按所实现调仓日历）；research contract 与可比参数键同步落盘 |
 | P3-3 | 分层回测入口 | 引擎层支持 quantile 组合，替代当前仅诊断层的分层统计 |
 | P3-4 | 平台内训练选参 | `training_artifact` 表已建但 0 行，内容目前只是训练期因子快照 |
 | P3-5 | 组合收益曲线 | 多窗口拼接需计入换手切换成本（`hard-gates-execution-plan.md:147` 已标 P1 未关闭） |

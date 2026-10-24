@@ -9,7 +9,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.backtest.rebalance import select_rebalance_dates
 from app.config.settings import settings
+from app.portfolio import PortfolioConstraints
 from app.repositories.factor import FactorValueRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.repositories.research_read import WarmResearchReadRepository
@@ -315,6 +317,8 @@ class StrategyResearchService:
         signal_lag: int,
         rebalance_rule: str,
         holding_period: int,
+        rebalance_interval: int = 1,
+        portfolio_constraints: PortfolioConstraints | None = None,
         benchmark: str | None,
         allowed_security_types: set[str],
         coverage_ratio: Decimal | None,
@@ -351,8 +355,12 @@ class StrategyResearchService:
         )
         if signal_lag != 1:
             raise ValueError("only signal_lag=1 is supported")
-        if rebalance_rule != "daily":
-            raise ValueError("only rebalance_rule=daily is supported")
+        if rebalance_interval < 1:
+            raise ValueError("rebalance_interval must be >= 1")
+        if rebalance_rule != "every_n_trading_days" and rebalance_interval != 1:
+            raise ValueError(
+                "rebalance_interval only applies to rebalance_rule=every_n_trading_days"
+            )
         if holding_period != 1:
             raise ValueError("only holding_period=1 is supported")
         normalized_specs = self._normalize_factor_specs(factor_specs)
@@ -369,6 +377,31 @@ class StrategyResearchService:
             as_of_date=end_date,
             rows_by_factor=factor_rows,
         )
+        decision_dates: set[date] | None = None
+        if rebalance_rule != "daily":
+            # Non-daily rebalancing decides on the selected rebalance dates
+            # only (signals execute T+1 as usual). Passing the dates into the
+            # strategy keeps the previous-selection chain on the rebalance
+            # calendar, so exits land on retained days instead of being
+            # emitted — and silently lost — on filtered-out days.
+            open_dates = self.trading_calendar_repository.list_open_dates(
+                db,
+                exchange="SH",
+                start_date=start_date,
+                end_date=end_date,
+            )
+            rebalance_dates = select_rebalance_dates(
+                open_dates,
+                rule=rebalance_rule,
+                interval=rebalance_interval,
+            )
+            observation_dates = set(strategy_frame.observation_dates)
+            decision_dates = rebalance_dates & observation_dates
+            if not decision_dates:
+                raise ValueError(
+                    "rebalance rule leaves no decision date with factor "
+                    "observations in the requested window"
+                )
         signals = MultiFactorStrategy(
             top_n=top_n,
             allowed_security_types=allowed_security_types,
@@ -380,14 +413,27 @@ class StrategyResearchService:
         ).generate_history(
             frame=strategy_frame,
             security_types=normalized_security_types,
+            decision_dates=sorted(decision_dates) if decision_dates else None,
         )
+        security_profiles: dict[str, tuple[str, str]] = {}
+        if portfolio_constraints is not None:
+            profiles = self.security_repository.get_many(db, symbols=symbols)
+            security_profiles = {
+                security.symbol.upper(): (
+                    security.security_type,
+                    security.industry or "unknown",
+                )
+                for security in profiles
+            }
         contract = self._build_research_contract(
             strategy_name=strategy_name,
             factor_specs=normalized_specs,
             top_n=top_n,
             signal_lag=signal_lag,
             rebalance_rule=rebalance_rule,
+            rebalance_interval=rebalance_interval,
             holding_period=holding_period,
+            portfolio_constraints=portfolio_constraints,
             benchmark=benchmark,
             allowed_security_types=allowed_security_types,
             coverage_ratio=coverage_ratio,
@@ -436,6 +482,8 @@ class StrategyResearchService:
             transfer_fee_rate=transfer_fee_rate,
             exchange_fee_rate=exchange_fee_rate,
             training_artifact_id=training_artifact_id,
+            portfolio_constraints=portfolio_constraints,
+            security_profiles=security_profiles,
         )
 
     def run_factor_selection(
@@ -449,6 +497,8 @@ class StrategyResearchService:
         signal_lag: int = 1,
         rebalance_rule: str = "daily",
         holding_period: int = 1,
+        rebalance_interval: int = 1,
+        portfolio_constraints: PortfolioConstraints | None = None,
         benchmark: str | None = None,
         allowed_security_types: set[str],
         coverage_ratio: Decimal | None = None,
@@ -488,6 +538,8 @@ class StrategyResearchService:
             signal_lag=signal_lag,
             rebalance_rule=rebalance_rule,
             holding_period=holding_period,
+            rebalance_interval=rebalance_interval,
+            portfolio_constraints=portfolio_constraints,
             benchmark=benchmark,
             allowed_security_types=allowed_security_types,
             coverage_ratio=coverage_ratio,
@@ -531,6 +583,8 @@ class StrategyResearchService:
         signal_lag: int = 1,
         rebalance_rule: str = "daily",
         holding_period: int = 1,
+        rebalance_interval: int = 1,
+        portfolio_constraints: PortfolioConstraints | None = None,
         benchmark: str | None = None,
         allowed_security_types: set[str],
         coverage_ratio: Decimal | None = None,
@@ -551,6 +605,13 @@ class StrategyResearchService:
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
     ) -> list[RollingBacktestWindowResult]:
+        if rebalance_rule != "daily" and exchange != "SH":
+            # Rebalance-date selection is anchored on the SH calendar; HK-only
+            # windows could drop whole rebalance weeks silently. Reject until
+            # per-exchange rebalance calendars are implemented.
+            raise ValueError(
+                "non-daily rebalance rules are only supported for exchange=SH"
+            )
         windows = self.generate_rolling_windows(
             db,
             exchange=exchange,
@@ -592,6 +653,8 @@ class StrategyResearchService:
                 signal_lag=signal_lag,
                 rebalance_rule=rebalance_rule,
                 holding_period=holding_period,
+                rebalance_interval=rebalance_interval,
+                portfolio_constraints=portfolio_constraints,
                 benchmark=benchmark,
                 allowed_security_types=allowed_security_types,
                 coverage_ratio=coverage_ratio,
@@ -659,7 +722,9 @@ class StrategyResearchService:
         top_n: int,
         signal_lag: int,
         rebalance_rule: str,
+        rebalance_interval: int,
         holding_period: int,
+        portfolio_constraints: PortfolioConstraints | None,
         benchmark: str | None,
         allowed_security_types: set[str],
         coverage_ratio: Decimal | None,
@@ -719,6 +784,25 @@ class StrategyResearchService:
             "top_n": top_n,
             "signal_lag": signal_lag,
             "rebalance_rule": rebalance_rule,
+            "rebalance_interval": rebalance_interval,
+            "portfolio_constraints": (
+                None
+                if portfolio_constraints is None
+                else {
+                    "max_symbol_weight": str(portfolio_constraints.max_symbol_weight),
+                    "max_industry_weight": str(portfolio_constraints.max_industry_weight),
+                    "cash_reserve_rate": str(portfolio_constraints.cash_reserve_rate),
+                    "security_type_budgets": (
+                        None
+                        if portfolio_constraints.security_type_budgets is None
+                        else {
+                            key: str(value)
+                            for key, value in portfolio_constraints.security_type_budgets.items()
+                        }
+                    ),
+                    "enforcement_mode": "proportional_scale",
+                }
+            ),
             "holding_period": holding_period,
             "benchmark": benchmark,
             "allowed_security_types": sorted(allowed_security_types),

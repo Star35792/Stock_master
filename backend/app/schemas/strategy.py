@@ -7,6 +7,22 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.strategies import MinimumScorePolicy, WeightingMode
 
 
+class BacktestPortfolioConstraintsRequest(BaseModel):
+    """Opt-in portfolio constraints for backtests, sourced from the same
+    PortfolioBuilder the paper path uses.
+
+    Only the pure-computation subset is exposed: style/tracking-error/
+    volatility budgets need factor history joins and stay on the paper path
+    for now. Enforcement is proportional scaling; score-ranked trim requires
+    per-symbol scores the engine does not carry.
+    """
+
+    max_symbol_weight: Decimal = Field(default=Decimal("0.20"), gt=0, le=1)
+    max_industry_weight: Decimal = Field(default=Decimal("0.40"), gt=0, le=1)
+    cash_reserve_rate: Decimal = Field(default=Decimal("0.05"), ge=0, lt=1)
+    security_type_budgets: dict[str, Decimal] | None = Field(default=None)
+
+
 class BacktestRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -145,7 +161,8 @@ class FactorSelectionBacktestRequest(BaseModel):
     factor_specs: list[FactorScoreSpecRequest] = Field(min_length=1)
     top_n: int = Field(gt=0)
     signal_lag: int = Field(default=1, ge=1)
-    rebalance_rule: Literal["daily"] = "daily"
+    rebalance_rule: Literal["daily", "weekly", "monthly", "every_n_trading_days"] = "daily"
+    rebalance_interval: int = Field(default=1, ge=1, le=250)
     holding_period: int = Field(default=1, gt=0)
     benchmark: str | None = Field(default=None, min_length=1, max_length=100)
     allowed_security_types: set[Literal["stock", "etf", "index"]] = Field(
@@ -156,6 +173,7 @@ class FactorSelectionBacktestRequest(BaseModel):
     minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED
     minimum_score: Decimal | None = Field(default=None, ge=0, le=1)
     invested_weight: Decimal = Field(default=Decimal("1"), gt=0, le=1)
+    portfolio_constraints: BacktestPortfolioConstraintsRequest | None = None
     start_date: date
     end_date: date
     adjust_type: Literal["none", "qfq", "hfq"] = "qfq"
@@ -186,6 +204,10 @@ class FactorSelectionBacktestRequest(BaseModel):
             raise ValueError(
                 "equal_weight_fully_invested with hold_cash_when_no_candidate "
                 "always invests 100%; choose another weighting mode to leave cash"
+            )
+        if self.rebalance_rule != "every_n_trading_days" and self.rebalance_interval != 1:
+            raise ValueError(
+                "rebalance_interval only applies to rebalance_rule=every_n_trading_days"
             )
         return self
 
@@ -262,7 +284,8 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
     factor_specs: list[FactorScoreSpecRequest] = Field(min_length=1)
     top_n: int = Field(gt=0)
     signal_lag: int = Field(default=1, ge=1)
-    rebalance_rule: Literal["daily"] = "daily"
+    rebalance_rule: Literal["daily", "weekly", "monthly", "every_n_trading_days"] = "daily"
+    rebalance_interval: int = Field(default=1, ge=1, le=250)
     holding_period: int = Field(default=1, gt=0)
     benchmark: str | None = Field(default=None, min_length=1, max_length=100)
     allowed_security_types: set[Literal["stock", "etf", "index"]] = Field(
@@ -275,6 +298,7 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
     )
     minimum_score: Decimal | None = Field(default=None, ge=0, le=1)
     invested_weight: Decimal = Field(default=Decimal("1"), gt=0, le=1)
+    portfolio_constraints: BacktestPortfolioConstraintsRequest | None = None
     adjust_type: Literal["none", "qfq", "hfq"] = "qfq"
     initial_cash: Decimal = Field(gt=0)
     commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
