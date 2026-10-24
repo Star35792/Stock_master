@@ -132,6 +132,8 @@ async function handleRecordTrade() {
     tradeForm.price = "";
     await refreshBookData();
   } catch (error) {
+    // 请求失败后换新幂等键：用户修改表单重试时不应撞上同键不同请求的 409。
+    tradeIdempotencyKey = null;
     actionError.value = error instanceof Error ? error.message : "记账失败";
   } finally {
     recordingTrade.value = false;

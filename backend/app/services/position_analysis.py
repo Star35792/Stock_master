@@ -6,7 +6,6 @@ plus master data; performance is derived from the append-only equity snapshot
 series without recomputing any audited value.
 """
 
-from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from sqlalchemy.orm import Session
@@ -23,9 +22,8 @@ from app.schemas.position_analysis import (
 from app.schemas.position_book import PositionConcentrationRead
 from app.services.paper_equity import PaperAccountNotFound
 from app.services.position_metrics import (
-    SymbolValuation,
+    build_cost_basis_valuations,
     compute_concentration,
-    finalize_valuation,
     group_industry_exposure,
     quantize_money,
     quantize_ratio,
@@ -72,28 +70,8 @@ class PaperPositionAnalysisService:
         }
 
         cash = Decimal(account.cash_balance)
+        valuations, price_as_of = build_cost_basis_valuations(positions, bars)
         holdings: list[PaperPositionRowRead] = []
-        valuations: dict[str, SymbolValuation] = {}
-        price_as_of: date | None = None
-        for position in positions:
-            bar = bars.get(position.symbol)
-            valuation = SymbolValuation(
-                symbol=position.symbol,
-                quantity=position.quantity,
-                cost_basis=quantize_money(
-                    Decimal(position.quantity) * Decimal(position.average_cost)
-                ),
-                average_cost=Decimal(position.average_cost),
-            )
-            finalize_valuation(
-                valuation,
-                price=bar.close if bar else None,
-                price_as_of=bar.trade_date if bar else None,
-                price_quality_status=bar.quality_status if bar else None,
-            )
-            if bar is not None and (price_as_of is None or bar.trade_date > price_as_of):
-                price_as_of = bar.trade_date
-            valuations[position.symbol] = valuation
 
         positions_market_value = sum(
             (valuation.market_value for valuation in valuations.values()), Decimal()

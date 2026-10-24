@@ -110,3 +110,38 @@ def group_industry_exposure(
         )
     rows.sort(key=lambda row: row["market_value"], reverse=True)
     return rows
+
+
+def build_cost_basis_valuations(
+    positions: list,
+    bars: dict,
+) -> tuple[dict[str, SymbolValuation], object | None]:
+    """Value plain (quantity, average_cost) positions at trusted bars.
+
+    Shared by the paper-account analysis and the drift service so both value
+    ``trade.paper_position`` rows with one implementation. ``positions`` are
+    any objects with symbol/quantity/average_cost; ``bars`` maps symbol to a
+    trusted bar (or is missing the symbol for stale valuation).
+    """
+    valuations: dict[str, SymbolValuation] = {}
+    price_as_of = None
+    for position in positions:
+        bar = bars.get(position.symbol)
+        valuation = SymbolValuation(
+            symbol=position.symbol,
+            quantity=position.quantity,
+            cost_basis=quantize_money(
+                Decimal(position.quantity) * Decimal(position.average_cost)
+            ),
+            average_cost=Decimal(position.average_cost),
+        )
+        finalize_valuation(
+            valuation,
+            price=bar.close if bar else None,
+            price_as_of=bar.trade_date if bar else None,
+            price_quality_status=bar.quality_status if bar else None,
+        )
+        if bar is not None and (price_as_of is None or bar.trade_date > price_as_of):
+            price_as_of = bar.trade_date
+        valuations[position.symbol] = valuation
+    return valuations, price_as_of

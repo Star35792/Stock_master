@@ -150,7 +150,7 @@ function pnlTone(value: string | null): string {
         </label>
         <div class="context-note">
           <CircleHelp :size="17" />
-          <span>账户来自当前 quant_db。真实账户、券商连接和自动交易均不在此页面。</span>
+          <span>账户来自本地 DuckDB 数据库。真实账户、券商连接和自动交易均不在此页面。</span>
         </div>
       </div>
       <div v-if="pageError" class="page-alert page-alert--error" role="alert">

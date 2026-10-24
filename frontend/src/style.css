@@ -1288,3 +1288,13 @@ pre {
   align-items: center;
   gap: 8px;
 }
+
+.prefill-book-select {
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: #101828;
+}

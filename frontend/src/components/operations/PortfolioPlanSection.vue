@@ -24,6 +24,7 @@ import type {
   PaperEquitySnapshot,
   PaperExecutionApproval,
   PaperExecution,
+  PositionBook,
   RiskEvaluation,
 } from "../../types";
 import { historyStatusLabel, statusLabel } from "./formatters";
@@ -55,17 +56,33 @@ const form = reactive<PortfolioPlanCreateRequest>({
 });
 
 const isPrefilling = ref(false);
+const prefillBooks = ref<PositionBook[]>([]);
+const prefillBookId = ref<number | null>(null);
+
+async function loadPrefillBooks() {
+  try {
+    prefillBooks.value = await fetchPositionBooks();
+    if (prefillBookId.value === null || !prefillBooks.value.some((book) => book.id === prefillBookId.value)) {
+      prefillBookId.value = prefillBooks.value[0]?.id ?? null;
+    }
+  } catch {
+    // 账本不可用时保持空列表，预填按钮会给出可读错误。
+    prefillBooks.value = [];
+    prefillBookId.value = null;
+  }
+}
 
 async function prefillFromPositionBook() {
   isPrefilling.value = true;
   errorMessage.value = null;
   try {
-    const books = await fetchPositionBooks();
-    if (books.length === 0) {
+    await loadPrefillBooks();
+    if (prefillBooks.value.length === 0) {
       errorMessage.value = "还没有持仓账本，请先在「持仓分析」页创建账本并记账。";
       return;
     }
-    const book = books[0];
+    const book =
+      prefillBooks.value.find((item) => item.id === prefillBookId.value) ?? prefillBooks.value[0];
     const holdings = await fetchPositionBookHoldings(book.id);
     const priced = holdings.holdings.filter((row) => row.price !== null);
     if (priced.length === 0) {
@@ -155,6 +172,7 @@ onMounted(() => {
   clockTimer = window.setInterval(() => {
     clock.value = Date.now();
   }, 1000);
+  void loadPrefillBooks();
 });
 
 onUnmounted(() => window.clearInterval(clockTimer));
@@ -485,6 +503,16 @@ const reasonLabels: Record<string, string> = {
           <div class="asset-editor-header">
             <strong>手工标的快照</strong>
             <div class="asset-editor-actions">
+              <select
+                v-if="prefillBooks.length > 1"
+                v-model.number="prefillBookId"
+                class="prefill-book-select"
+                aria-label="预填来源账本"
+              >
+                <option v-for="book in prefillBooks" :key="book.id" :value="book.id">
+                  {{ book.name }}
+                </option>
+              </select>
               <button type="button" class="secondary-action" :disabled="isPrefilling" @click="prefillFromPositionBook">
                 {{ isPrefilling ? "预填中…" : "从持仓账本预填" }}
               </button>

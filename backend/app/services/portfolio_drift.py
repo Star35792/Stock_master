@@ -24,7 +24,7 @@ from app.services.portfolio_readiness import PaperAccountNotFound, PortfolioPlan
 from app.services.position_book import PositionBookNotFound, PositionBookService
 from app.services.position_metrics import (
     SymbolValuation,
-    finalize_valuation,
+    build_cost_basis_valuations,
     quantize_money,
     quantize_ratio,
 )
@@ -138,6 +138,8 @@ class PortfolioDriftService:
                 raw_quantity = target_weight * total_equity / price
                 lots = (raw_quantity / LOT_SIZE).to_integral_value(rounding=ROUND_FLOOR)
                 target_quantity = int(lots) * LOT_SIZE
+                if target_quantity == 0:
+                    reasons.append("target weight is below one round lot at this price")
             else:
                 reasons.append("no trusted price for lot sizing")
 
@@ -196,26 +198,5 @@ class PortfolioDriftService:
             if symbols
         }
         cash = Decimal(self.paper_repository.get_account(db, account_id=account_id).cash_balance)
-        valuations: dict[str, SymbolValuation] = {}
-        price_as_of = None
-        for position in positions:
-            bar = bars.get(position.symbol)
-            cost_basis = quantize_money(
-                Decimal(position.quantity) * Decimal(position.average_cost)
-            )
-            valuation = SymbolValuation(
-                symbol=position.symbol,
-                quantity=position.quantity,
-                cost_basis=cost_basis,
-                average_cost=Decimal(position.average_cost),
-            )
-            finalize_valuation(
-                valuation,
-                price=bar.close if bar else None,
-                price_as_of=bar.trade_date if bar else None,
-                price_quality_status=bar.quality_status if bar else None,
-            )
-            if bar is not None and (price_as_of is None or bar.trade_date > price_as_of):
-                price_as_of = bar.trade_date
-            valuations[position.symbol] = valuation
+        valuations, price_as_of = build_cost_basis_valuations(positions, bars)
         return cash, valuations, price_as_of

@@ -384,3 +384,90 @@ def test_holdings_sequence_anomaly_false_for_well_ordered_ledger() -> None:
 
     assert report.sequence_anomaly is False
     assert report.holdings[0].sequence_anomaly is False
+
+
+def test_add_trade_resolves_concurrent_idempotency_race_as_replay() -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    repository = FakeBookRepository()
+    repository.add_book("主账户")
+    service = _service(book_repository=repository)
+    payload = SimpleNamespace(
+        side="buy",
+        symbol="600000.SH",
+        quantity=100,
+        price=Decimal("10"),
+        fee=Decimal("0"),
+        trade_date=date(2026, 7, 20),
+        note=None,
+    )
+    first = service.add_trade(None, None, book_id=1, payload=payload, idempotency_key="race-1")
+
+    original_save = repository.save_trade
+
+    def racing_save(db, *, trade):
+        original_save(db, trade=trade)
+        raise IntegrityError("unique", None, Exception("race"))
+
+    repository.save_trade = racing_save
+    raced = service.add_trade(None, None, book_id=1, payload=payload, idempotency_key="race-1")
+
+    assert raced.id == first.id
+
+
+def test_add_trade_concurrent_race_with_different_request_is_conflict() -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    repository = FakeBookRepository()
+    repository.add_book("主账户")
+    service = _service(book_repository=repository)
+    payload = SimpleNamespace(
+        side="buy",
+        symbol="600000.SH",
+        quantity=100,
+        price=Decimal("10"),
+        fee=Decimal("0"),
+        trade_date=date(2026, 7, 20),
+        note=None,
+    )
+    service.add_trade(None, None, book_id=1, payload=payload, idempotency_key="race-2")
+
+    def racing_save(db, *, trade):
+        raise IntegrityError("unique", None, Exception("race"))
+
+    repository.save_trade = racing_save
+    different = SimpleNamespace(**{**payload.__dict__, "quantity": 200})
+
+    with pytest.raises(PositionBookConflict, match="different trade request"):
+        service.add_trade(
+            None, None, book_id=1, payload=different, idempotency_key="race-2"
+        )
+
+
+def test_full_close_realizes_rounding_remainder() -> None:
+    repository = FakeBookRepository()
+    repository.add_book("主账户")
+    # cost = 3 × 10.0001 + 0.0001 = 30.0004; the 6dp average (10.000133) only
+    # accounts for 30.000399 when the position is fully closed.
+    repository.add_trade(
+        book_id=1,
+        symbol="600000.SH",
+        side="buy",
+        quantity=3,
+        price_quants=100001,
+        fee_quants=1,
+    )
+    repository.add_trade(
+        book_id=1,
+        symbol="600000.SH",
+        side="sell",
+        quantity=3,
+        price_quants=100000,
+    )
+    service = _service(book_repository=repository)
+
+    report = service.get_holdings(None, None, book_id=1)
+
+    assert report.holdings == []
+    # Proceeds 30 - cost 30.0004 = -0.0004 realized, remainder included.
+    assert report.realized_pnl == Decimal("-0.0004")

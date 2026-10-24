@@ -41,6 +41,7 @@
 已知 P1（记录在案，后续优化）：
 
 - 年化收益要求 ≥30 天观察期（已随 P0 修复顺手收紧）；365 日历年化与 √252 波动率口径混用，前端暂不展示年化。
-- HTTP 层测试缺口：`PATCH /position-books/{id}`、DELETE trade、drift happy path 未过 HTTP（受 duckdb 线程隔离限制，service 层已覆盖）。
-- 并发同幂等键双插会以 500 兜底而非 409（单用户手工场景低风险）。
-- 清仓残余成本尾差（<0.0005×数量）直接清零不进已实现；预填固定取第一个账本，多账本时无选择器。
+- ~~HTTP 层测试缺口：`PATCH /position-books/{id}`、DELETE trade、drift happy path 未过 HTTP~~（2026-10-23 当日已补齐：PATCH/DELETE/DELETE-回滚/drift 双库接线均有 HTTP 覆盖）。
+- ~~并发同幂等键双插会以 500 兜底而非 409~~（已修复：IntegrityError 捕获后按同键匹配重放或 409，并有单测）。
+- ~~清仓残余成本尾差直接清零不进已实现；预填固定取第一个账本，多账本时无选择器~~（已修复：尾差计入已实现且清仓后账本级已实现盈亏不再消失；预填支持多账本下拉选择）。
+- 其余 P2：前端幂等键失败重试已换新键（已修）；`quant_db` 措辞已更新（已修）；drift 整手为 0 时补充 reason（已修）；paper 估值逻辑已提取 `build_cost_basis_valuations` 共享（已修）。

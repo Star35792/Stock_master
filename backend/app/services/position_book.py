@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.positions import PositionBook, PositionTrade
@@ -113,7 +114,10 @@ def replay_ledger(trades: list[PositionTrade]) -> dict[str, LedgerPosition]:
         else:
             pos.realized_pnl += proceeds
         pos.quantity = max(pos.quantity - trade.quantity, 0)
-        if pos.quantity == 0:
+        if pos.quantity == 0 and pos.cost != 0:
+            # Rounding remainder on full close cannot be carried as an asset;
+            # book it into realized P&L instead of silently dropping it.
+            pos.realized_pnl -= pos.cost
             pos.cost = Decimal()
     return positions
 
@@ -225,7 +229,21 @@ class PositionBookService:
                 )
 
         trade = PositionTrade(idempotency_key=idempotency_key, **request_values)
-        self.book_repository.save_trade(db, trade=trade)
+        try:
+            self.book_repository.save_trade(db, trade=trade)
+        except IntegrityError:
+            # Concurrent insert raced past the pre-check above (single-user
+            # ledger, but retries can overlap). Resolve it as replay/conflict
+            # instead of surfacing an opaque 500.
+            db.rollback()
+            existing = self.book_repository.get_trade_by_idempotency_key(
+                db, idempotency_key=idempotency_key
+            )
+            if existing is not None and self._trade_matches(existing, request_values):
+                return self._trade_to_read(existing)
+            raise PositionBookConflict(
+                "idempotency key was already used with a different trade request"
+            ) from None
         return self._trade_to_read(trade)
 
     def delete_trade(self, db: Session, *, book_id: int, trade_id: int) -> None:
@@ -261,6 +279,13 @@ class PositionBookService:
         open_positions = {
             symbol: pos for symbol, pos in ledger.items() if pos.quantity > 0
         }
+        # Fully closed symbols with realized P&L stay in the result so the
+        # book-level realized figure survives a position closing out entirely.
+        relevant = {
+            symbol: pos
+            for symbol, pos in ledger.items()
+            if pos.quantity > 0 or pos.realized_pnl != 0
+        }
         bars = {
             bar.symbol: bar
             for bar in self.daily_bar_repository.list_latest_consumable_by_symbols(
@@ -271,13 +296,14 @@ class PositionBookService:
             if open_positions
         }
         cash = from_quants(book.cash_quants)
-        positions_market_value = Decimal()
         valuations: dict[str, SymbolValuation] = {}
         price_as_of: date | None = None
-        for symbol in sorted(open_positions):
-            pos = open_positions[symbol]
+        for symbol in sorted(relevant):
+            pos = relevant[symbol]
             average_cost = (
                 pos.cost / Decimal(pos.quantity)
+                if pos.quantity > 0
+                else Decimal()
             ).quantize(COST_QUANTUM, rounding=ROUND_HALF_UP)
             valuation = SymbolValuation(
                 symbol=symbol,
@@ -299,7 +325,6 @@ class PositionBookService:
             )
             if bar is not None and (price_as_of is None or bar.trade_date > price_as_of):
                 price_as_of = bar.trade_date
-            positions_market_value += valuation.market_value
             valuations[symbol] = valuation
         return book, cash, valuations, price_as_of
 
@@ -329,6 +354,9 @@ class PositionBookService:
 
         holdings: list[PositionHoldingRead] = []
         for symbol, valuation in valuations.items():
+            if valuation.quantity <= 0:
+                # Closed positions only contribute to book-level realized P&L.
+                continue
             security = securities.get(symbol)
             weight = (
                 valuation.market_value / total_equity if total_equity > 0 else Decimal()
@@ -365,6 +393,7 @@ class PositionBookService:
                     valuation.market_value,
                 )
                 for symbol, valuation in valuations.items()
+                if valuation.quantity > 0
             ],
             total_equity=total_equity,
         )
