@@ -48,3 +48,7 @@ Thumbs.db
 # WorkBuddy workspace/session memory
 .workbuddy/
 
+
+# AI session tooling
+.zcode/
+.designkit-history-delivery/
