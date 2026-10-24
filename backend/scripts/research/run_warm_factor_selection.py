@@ -102,6 +102,26 @@ IC_ALIGNED_SPECS = [
 
 SPEC_SETS = {"default": DEFAULT_SPECS, "ic_aligned": IC_ALIGNED_SPECS}
 
+#: 宽候选池：温层回填的全部 13 个价量因子，先验方向一律用平台
+#: ``basic_price_volume_factors`` 的文档默认方向（不含全样本 IC 知识），
+#: 供 ``--selection-policy training_ic_v1`` 逐窗自动选参使用；权重不参与选择。
+PRICE_VOLUME_WIDE_SPECS = [
+    ("ret_1d", Decimal("1"), True),
+    ("momentum_5", Decimal("1"), True),
+    ("reversal_5", Decimal("1"), True),
+    ("volatility_5", Decimal("1"), False),
+    ("ma_gap_5", Decimal("1"), True),
+    ("volume_chg_1d", Decimal("1"), True),
+    ("momentum_20", Decimal("1"), True),
+    ("momentum_60", Decimal("1"), True),
+    ("volatility_20", Decimal("1"), False),
+    ("downside_volatility_20", Decimal("1"), False),
+    ("max_drawdown_20", Decimal("1"), True),
+    ("liquidity_20", Decimal("1"), True),
+    ("volume_stability_20", Decimal("1"), True),
+]
+SPEC_SETS["price_volume_wide"] = PRICE_VOLUME_WIDE_SPECS
+
 FACTOR_LIMITATIONS = [
     "corporate_action_event_accounting_not_implemented",
     "universe_excludes_symbols_with_corporate_actions_in_window",
@@ -196,9 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-symbol-weight", default="0.20")
     parser.add_argument("--max-industry-weight", default="0.40")
     parser.add_argument("--cash-reserve-rate", default="0.05")
-    parser.add_argument(
-        "--name", default=f"warm-factor-selection-{datetime.now():%Y%m%d-%H%M%S}"
-    )
+    parser.add_argument("--name", default=f"warm-factor-selection-{datetime.now():%Y%m%d-%H%M%S}")
     parser.add_argument("--code-version", default="local")
     parser.add_argument("--data-version", default="warm-20261022-175052")
     parser.add_argument("--out", help="结果 JSON 落盘路径")

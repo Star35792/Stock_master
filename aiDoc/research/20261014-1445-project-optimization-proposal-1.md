@@ -57,7 +57,7 @@
 
 1. **运行批量诊断**
    - 使用 `POST /api/v1/factors/batch-profiles` 或 `scripts/factors/run_batch_profiles.py`，对过去 2 年（例如 2024-01-02 至 2025-12-31）的全部活跃因子跑横截面诊断。
-   - 推荐参数：`adjust_type=qfq`、`size_factor_name=market_cap`、`size_factor_version=v1-qfq`；若市值因子未覆盖全期，可先 `--no-size-neutral` 跑一轮基线。
+   - 推荐参数：`adjust_type=qfq`、`size_factor_name=market_cap`、`size_factor_version=v1`；市值因子不依赖价格复权版本。若市值因子未覆盖全期，可先 `--no-size-neutral` 跑一轮基线。
    - 建议按 category 分批跑，避免单日数据质量导致全批失败；每批写入 `system.job_log`。
 
 2. **建立因子淘汰/分级规则**

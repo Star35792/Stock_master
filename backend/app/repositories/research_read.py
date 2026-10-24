@@ -115,10 +115,7 @@ class WarmResearchReadRepository:
         sql += " ORDER BY symbol, trade_date"
 
         rows = self._con.execute(sql, params).fetchall()
-        return [
-            self._to_bar(record, enrich_price_limits=enrich_price_limits)
-            for record in rows
-        ]
+        return [self._to_bar(record, enrich_price_limits=enrich_price_limits) for record in rows]
 
     @staticmethod
     def _to_bar(record: tuple[Any, ...], *, enrich_price_limits: bool) -> SimpleNamespace:
@@ -154,10 +151,7 @@ class WarmResearchReadRepository:
         """
         symbol_list = sorted(set(symbols))
         col_sql = ", ".join(_ACTION_COLUMNS)
-        sql = (
-            f"SELECT {col_sql} FROM market.corporate_action "
-            "WHERE ex_date BETWEEN ? AND ?"
-        )
+        sql = f"SELECT {col_sql} FROM market.corporate_action WHERE ex_date BETWEEN ? AND ?"
         params: list[Any] = [start_date, end_date]
         if symbol_list:
             placeholders = ", ".join("?" for _ in symbol_list)
@@ -166,8 +160,7 @@ class WarmResearchReadRepository:
         sql += " ORDER BY symbol, ex_date"
         rows = self._con.execute(sql, params).fetchall()
         return [
-            SimpleNamespace(**dict(zip(_ACTION_COLUMNS, record, strict=True)))
-            for record in rows
+            SimpleNamespace(**dict(zip(_ACTION_COLUMNS, record, strict=True))) for record in rows
         ]
 
     # ------------------------------------------------------ execution calendar
@@ -185,8 +178,7 @@ class WarmResearchReadRepository:
             exchange = symbol_exchange(symbol)
             if exchange is None:
                 raise ValueError(
-                    "cannot resolve exchange from symbol for execution calendar: "
-                    f"{symbol}"
+                    f"cannot resolve exchange from symbol for execution calendar: {symbol}"
                 )
             symbols_by_exchange.setdefault(exchange, []).append(symbol)
 
@@ -244,6 +236,39 @@ class WarmResearchReadRepository:
             for record in rows
         ]
 
+    def list_qfq_closes(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[SimpleNamespace]:
+        """Return curated forward-adjusted closes for IC forward returns.
+
+        Reads the ``market.prices_qfq`` convenience view mounted by
+        ``WarmLayerStore.connect``; a missing view raises so callers can fail
+        closed instead of silently substituting another price vintage.
+        """
+        try:
+            rows = self._con.execute(
+                "SELECT symbol, trade_date, close FROM market.prices_qfq "
+                "WHERE trade_date BETWEEN ? AND ? ORDER BY symbol, trade_date",
+                [start_date, end_date],
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001 - view may not exist at all
+            raise ValueError(
+                "market.prices_qfq is not available in the bound warm-layer "
+                "release; training-window selection requires the curated "
+                "forward-adjusted price layer"
+            ) from exc
+        return [
+            SimpleNamespace(
+                symbol=record[0].upper(),
+                trade_date=record[1],
+                close=record[2],
+            )
+            for record in rows
+        ]
+
     # ------------------------------------------------------------- diagnostics
 
     def coverage(
@@ -291,8 +316,7 @@ class WarmResearchReadRepository:
         exposes only a few dozen days and must not be used for research.
         """
         row = self._con.execute(
-            "SELECT count(DISTINCT trade_date) FROM market.daily_bar "
-            "WHERE adjust_type = ?",
+            "SELECT count(DISTINCT trade_date) FROM market.daily_bar WHERE adjust_type = ?",
             [adjust_type],
         ).fetchone()
         return int(row[0] or 0)
@@ -318,7 +342,5 @@ class WarmResearchReadRepository:
         return {
             "row_count": total,
             "pre_close_count": with_pre_close,
-            "coverage_rate": Decimal(with_pre_close) / Decimal(total)
-            if total
-            else Decimal("0"),
+            "coverage_rate": Decimal(with_pre_close) / Decimal(total) if total else Decimal("0"),
         }

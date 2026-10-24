@@ -30,7 +30,7 @@ DEFAULT_LOOKBACK_DAYS = 60
 
 #: 默认 size 因子，用于 industry_size_neutral 变换。
 DEFAULT_SIZE_FACTOR_NAME = "market_cap"
-DEFAULT_SIZE_FACTOR_VERSION = "v1-qfq"
+DEFAULT_SIZE_FACTOR_VERSION = "v1"
 
 
 @dataclass(frozen=True)

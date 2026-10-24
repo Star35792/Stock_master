@@ -4,11 +4,21 @@
 ``run_rolling_factor_selection``（训练窗产物快照绑定 artifact，测试窗
 out-of-sample 执行），汇总逐窗净收益与绩效的稳定性。
 
+``--selection-policy training_ic_v1`` 启用训练窗自动选参：每个训练窗内
+按预注册阈值（|RankIC1|>=0.02、|IR|>=0.30、方向正率>=0.55、观测>=10）
+对候选因子计算日历对齐 RankIC1 证据，方向相对请求预设只「维持或拒绝」
+（<60 开市日的窗不允许翻转），存活因子等权进入测试窗；逐窗选择证据写
+入 ``training_artifact``（快照 v2）。默认 ``none`` 保持历史行为。
+
 已知限制（与单窗口脚本一致，另加）
 ----------------------------------
-- 训练窗不做参数选择：``training_artifact`` 只是训练期因子快照，因子
-  方向与权重沿用请求预设（``ic_aligned`` 的方向来自全样本 IC 证据，
-  存在前视嫌疑，逐窗结论只能验证「同一规则跨期稳定性」）。
+- 默认（none）训练窗不做参数选择：``training_artifact`` 只是训练期因子
+  快照，因子方向与权重沿用请求预设（``ic_aligned`` 的方向来自全样本
+  IC 证据，存在前视嫌疑，逐窗结论只能验证「同一规则跨期稳定性」）。
+- 启用 training_ic_v1 时新增限制：方向来自短训练窗证据（样本量小）、
+  阈值为人为预注册而非统计估计、被拒窗口会中止整次运行从而改变被评估
+  的窗口集合；选择器前瞻收益口径为 curated prices_qfq + 交易日历对齐，
+  与 factor_profile 的 LEAD 口径不可直接比较。
 - ``every_n_trading_days`` 锚定各测试窗首个开市日，窗口间相位不一致。
 - 其余偏差（公司行为、幸存者、行业时点、停牌、单样本段）同
   ``run_warm_factor_selection`` 头部声明，全部成立。
@@ -51,6 +61,9 @@ from app.portfolio import PortfolioConstraints  # noqa: E402
 from app.schemas.strategy import BacktestPortfolioConstraintsRequest  # noqa: E402
 from app.services.performance import BacktestPerformanceService  # noqa: E402
 from app.services.strategy_research import StrategyResearchService  # noqa: E402
+from app.services.training_factor_selector import (  # noqa: E402
+    build_training_selection_policy,
+)
 from app.strategies import FactorScoreSpec  # noqa: E402
 from app.utils.duckdb_write_lock import duckdb_write_lock  # noqa: E402
 
@@ -60,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start-date", default="2025-11-03")
     parser.add_argument("--end-date", default="2026-04-30")
     parser.add_argument("--top-n", type=int, default=20)
+    parser.add_argument(
+        "--factor-version",
+        default=FACTOR_VERSION,
+        help="候选因子版本；ic2y release 的两年回填用 v2-qfq-2y",
+    )
     parser.add_argument("--spec-set", choices=sorted(SPEC_SETS), default="ic_aligned")
     parser.add_argument("--release-tag", default="20261022-181648")
     parser.add_argument("--initial-cash", default="1000000")
@@ -78,8 +96,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-industry-weight", default="0.40")
     parser.add_argument("--cash-reserve-rate", default="0.05")
     parser.add_argument(
-        "--name", default=f"warm-rolling-{datetime.now():%Y%m%d-%H%M%S}"
+        "--selection-policy",
+        choices=["none", "training_ic_v1"],
+        default="none",
+        help="训练窗自动选参策略；training_ic_v1 按预注册阈值逐窗选因子与方向",
     )
+    parser.add_argument(
+        "--selection-min-survivors",
+        type=int,
+        default=None,
+        help="覆盖 training_ic_v1 的最小存活因子数（默认 3；事后调整需在研究文档披露）",
+    )
+    parser.add_argument("--name", default=f"warm-rolling-{datetime.now():%Y%m%d-%H%M%S}")
     parser.add_argument("--code-version", default="local")
     parser.add_argument("--data-version", default="warm-20261022-175052")
     parser.add_argument("--out")
@@ -99,9 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     # The interval only carries meaning for every_n_trading_days; the service
     # correctly rejects other rules with interval != 1.
     args.rebalance_interval = (
-        args.rebalance_interval
-        if args.rebalance_rule == "every_n_trading_days"
-        else 1
+        args.rebalance_interval if args.rebalance_rule == "every_n_trading_days" else 1
     )
 
     initialize_research_database()
@@ -121,7 +147,7 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
         specs = [
             FactorScoreSpec(
                 factor_name=name,
-                factor_version=FACTOR_VERSION,
+                factor_version=args.factor_version,
                 weight=weight,
                 higher_is_better=higher,
             )
@@ -174,6 +200,14 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             research_db=research_db,
             code_version=args.code_version,
             data_version=args.data_version,
+            selection_policy=(
+                build_training_selection_policy(
+                    args.selection_policy,
+                    min_surviving_factors=args.selection_min_survivors,
+                )
+                if args.selection_policy != "none"
+                else None
+            ),
         )
         research_db.commit()
 
@@ -210,8 +244,22 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
                     "sharpe_ratio": (
                         str(report.sharpe_ratio) if report.sharpe_ratio is not None else None
                     ),
+                    "selection": window_result.selection_summary,
                 }
             )
+            if window_result.selection_summary is not None:
+                selected = ", ".join(
+                    f"{item['factor_name']}({'+' if item['higher_is_better'] else '-'})"
+                    for item in window_result.selection_summary["selected"]
+                )
+                rejected = [
+                    stat
+                    for stat in window_result.selection_summary["stats"]
+                    if stat["decision"] == "rejected"
+                ]
+                print(f"    selected: {selected or '(none)'}")
+                for stat in rejected:
+                    print(f"    rejected: {stat['factor_name']} ({stat['reason']})")
             print(
                 f"  {window.window_id} test {window.test_start_date}~"
                 f"{window.test_end_date}: return={report.total_return:.4f} "
@@ -233,22 +281,42 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
         for key, value in summary.items():
             print(f"  {key}: {value}")
 
+        selection_enabled = args.selection_policy != "none"
+        limitations = list(FACTOR_LIMITATIONS)
+        if selection_enabled:
+            limitations += [
+                "direction_selected_from_short_training_window",
+                "selection_thresholds_authored_not_estimated",
+                "window_rejection_changes_evaluated_window_set",
+                "selector_calendar_aligned_ic_differs_from_factor_profile_lead_ic",
+            ]
+        else:
+            limitations += ["training_window_does_not_select_parameters"]
+        limitations += ["every_n_anchor_restarts_per_window"]
         payload = {
-            **{key: getattr(args, key) for key in (
-                "start_date", "end_date", "top_n", "spec_set", "exchange",
-                "training_days", "test_days", "step_days", "rebalance_rule",
-                "rebalance_interval",
-            )},
+            **{
+                key: getattr(args, key)
+                for key in (
+                    "start_date",
+                    "end_date",
+                    "top_n",
+                    "spec_set",
+                    "exchange",
+                    "training_days",
+                    "test_days",
+                    "step_days",
+                    "rebalance_rule",
+                    "rebalance_interval",
+                    "selection_policy",
+                )
+            },
             "portfolio_constraints": (
-                None if constraints_request is None
-                else constraints_request.model_dump(mode="json")
+                None if constraints_request is None else constraints_request.model_dump(mode="json")
             ),
-            "factor_version": FACTOR_VERSION,
+            "factor_version": args.factor_version,
             "research_read_source": settings.research_read_source,
-            "limitations": FACTOR_LIMITATIONS + [
-                "training_window_does_not_select_parameters",
-                "every_n_anchor_restarts_per_window",
-            ],
+            "interpretation": ("link_validation_only" if selection_enabled else None),
+            "limitations": limitations,
             "windows": windows_payload,
             "summary": summary,
         }

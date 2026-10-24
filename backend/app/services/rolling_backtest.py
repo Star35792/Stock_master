@@ -8,3 +8,4 @@ from app.services.backtest import PersistedBacktestResult
 class RollingBacktestWindowResult:
     window: RollingWindowRead
     persisted: PersistedBacktestResult
+    selection_summary: dict | None = None

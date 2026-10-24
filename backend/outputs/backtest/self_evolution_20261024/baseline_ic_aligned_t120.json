@@ -1,0 +1,126 @@
+{
+  "start_date": "2024-05-06",
+  "end_date": "2026-04-30",
+  "top_n": 20,
+  "spec_set": "ic_aligned",
+  "exchange": "SH",
+  "training_days": 120,
+  "test_days": 60,
+  "step_days": 60,
+  "rebalance_rule": "every_n_trading_days",
+  "rebalance_interval": 20,
+  "selection_policy": "none",
+  "portfolio_constraints": {
+    "max_symbol_weight": "0.20",
+    "max_industry_weight": "0.40",
+    "cash_reserve_rate": "0.05",
+    "security_type_budgets": null
+  },
+  "factor_version": "v2-qfq-2y-noca",
+  "research_read_source": "warm",
+  "interpretation": null,
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation",
+    "training_window_does_not_select_parameters",
+    "every_n_anchor_restarts_per_window"
+  ],
+  "windows": [
+    {
+      "window_id": "rolling:SH:2024-05-06:2024-10-30:2024-10-31:2025-01-23",
+      "test_window": [
+        "2024-10-31",
+        "2025-01-23"
+      ],
+      "run_id": 39,
+      "total_return": "-0.0109963062",
+      "maximum_drawdown": "-0.1664894893110554769659041190",
+      "turnover_rate": "3.870836232110019720125153558",
+      "total_commission": "2269.047044",
+      "sharpe_ratio": "-0.04749221453979716659281748682",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2024-07-30:2025-01-23:2025-01-24:2025-04-28",
+      "test_window": [
+        "2025-01-24",
+        "2025-04-28"
+      ],
+      "run_id": 40,
+      "total_return": "0.1274448308",
+      "maximum_drawdown": "-0.1276710720379305960869946700",
+      "turnover_rate": "4.197750925255514954975948807",
+      "total_commission": "2555.988640",
+      "sharpe_ratio": "1.955776277096178837375961463",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2024-10-31:2025-04-28:2025-04-29:2025-07-25",
+      "test_window": [
+        "2025-04-29",
+        "2025-07-25"
+      ],
+      "run_id": 41,
+      "total_return": "0.2798231993",
+      "maximum_drawdown": "-0.0326699043545653015252629495",
+      "turnover_rate": "3.844257453865940497800384453",
+      "total_commission": "2425.226257",
+      "sharpe_ratio": "6.055825145386943680817471142",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2025-01-24:2025-07-25:2025-07-28:2025-10-27",
+      "test_window": [
+        "2025-07-28",
+        "2025-10-27"
+      ],
+      "run_id": 42,
+      "total_return": "0.1768879603",
+      "maximum_drawdown": "-0.0548610679235809891694926224",
+      "turnover_rate": "4.051108837991144287710884062",
+      "total_commission": "2398.425114",
+      "sharpe_ratio": "4.008376927396260114155081117",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2025-04-29:2025-10-27:2025-10-28:2026-01-21",
+      "test_window": [
+        "2025-10-28",
+        "2026-01-21"
+      ],
+      "run_id": 43,
+      "total_return": "0.0800358214",
+      "maximum_drawdown": "-0.0713803875725652565144063727",
+      "turnover_rate": "3.799909913688787770286794173",
+      "total_commission": "2198.782847",
+      "sharpe_ratio": "1.947611653333279422533723343",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2025-07-28:2026-01-21:2026-01-22:2026-04-24",
+      "test_window": [
+        "2026-01-22",
+        "2026-04-24"
+      ],
+      "run_id": 44,
+      "total_return": "-0.0569292563",
+      "maximum_drawdown": "-0.1229830850948132483009711239",
+      "turnover_rate": "4.108263844381340949036786265",
+      "total_commission": "2230.997325",
+      "sharpe_ratio": "-0.8263149223461700216638427306",
+      "selection": null
+    }
+  ],
+  "summary": {
+    "window_count": 6,
+    "positive_windows": 4,
+    "mean_return": "0.09937770821666666666666666667",
+    "min_return": "-0.0569292563",
+    "max_return": "0.2798231993",
+    "worst_drawdown": "-0.1664894893110554769659041190"
+  }
+}

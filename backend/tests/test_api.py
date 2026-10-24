@@ -1403,6 +1403,8 @@ def test_run_batch_factor_profiles_forwards_filters(monkeypatch) -> None:
     assert captured["categories"] == {"price_volume_risk"}
     assert captured["excluded_categories"] == {"crowding"}
     assert captured["adjust_type"] == "qfq"
+    assert captured["size_factor_name"] == "market_cap"
+    assert captured["size_factor_version"] == "v1"
 
 
 def test_run_batch_factor_profiles_rejects_reversed_range() -> None:

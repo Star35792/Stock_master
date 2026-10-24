@@ -59,7 +59,7 @@
 - **ST 时点缺失**：`daily_bar.special_treatment_status` 1,972 / 325,774 非空（0.6%）。
 - **涨跌停缺失**：`limit_up` / `limit_down` 非空 **0 行**，`tradability.py:26-28` 退化为「假定可交易」。
 - **行业时点缺失**：`market.security_industry_history` **0 行**，行业因子全量回退当前标签；横截面中性化直接读 `market.security.industry`（当前标签，`repositories/market/security.py:98-104`），未接时点表。
-- **size neutralize 失效**：默认 `market_cap` / `v1-qfq`（`factor_batch_profiler.py:32-33`），库内 `market_cap` 版本为 `v1` → 版本不匹配 → `_size_neutralize` 输出全空。
+- **size neutralize 默认版本错配已修复（2026-10-24）**：批量诊断的 service、API 与 CLI 默认值已统一为 `market_cap` / `v1`；调用方仍可显式覆盖。历史市值覆盖范围仍有限，尚不能据此宣称完整历史 IC 证据。
 - **指数成分快照**：`market.index_constituent_snapshot` 120,343 行但 `snapshot_date` 仅 **1 个值**（2026-09-18），非历史成分序列。
 - **估值快照**：`market.valuation_snapshot` 22,248 行 / **3 个交易日**（2026-09-18 ~ 09-24），非历史序列。
 - **公司行为事件会计**未实现，回测区间命中即整次拒绝（`services/backtest.py:322-326`）。
@@ -79,7 +79,7 @@
 
 | # | 动作 | 说明 |
 |---|---|---|
-| P1-1 | 修复 `market_cap` 版本 | 统一为 `v1`，使 `industry_size_neutral` 生效 |
+| P1-1 | 修复 `market_cap` 版本 | **已完成（2026-10-24）**：service、API、CLI 默认统一为 `v1`，使新批次的 `industry_size_neutral` 可读取市值输入；不回写旧批次结果 |
 | P1-2 | 历史因子值回填 | 依据 P0-1 的历史日线，回填 3-5 年价量类因子（18 个因子，依赖仅 daily_bar，可立即算） |
 | P1-3 | 跑批量截面诊断 | `POST /api/v1/factors/batch-profiles`，落库 `factor.factor_profile` |
 | P1-4 | 因子池分级复核 | 满 200 交易日后重跑 `classify_factor_pool.py`，产出核心池名单 |

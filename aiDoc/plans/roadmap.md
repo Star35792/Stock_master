@@ -224,6 +224,7 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 横截面派生因子运行批次、定义注册、幂等写入、查询 API 和命令行入口。
 - 已扩展到财务、行业、资金流、拥挤度、情绪、宏观、政策、估值和复合因子等多个研究信号族的复用层。
 - 批量诊断：`FactorBatchProfilerService` 对 `factor.factor_definition` 中全部活跃因子逐个运行截面诊断，单因子失败按因子隔离且不影响同批其他因子，整批运行写入 `system.job_log`（`status=success/partial/failed`）；派生 `__` 变换因子不重复作为源。`POST /api/v1/factors/batch-profiles` 触发批量运行，`GET /api/v1/factors/batch-profiles/summary` 按因子聚合已持久化 IC 证据（跨日期简单平均，缺失 horizon 返回空而非 0），命令行入口 `scripts/factors/run_batch_profiles.py`。
+- 批量诊断默认规模因子已统一为 `market_cap@v1`（2026-10-24）；其与行情复权口径独立，默认路径可生成 `industry_size_neutral`，但历史市值覆盖不足时仍不应把结果解释为完整 IC 证据。
 - 财务时点正确性（硬门槛四）：财务因子按供应商公告日 `report_date < trade_date` 生效，运行元数据声明公告日语义与 `statement_content_digest`/`statement_revision_binding`；`fundamental.financial_statement_revision` 保留报告修订历史（修正披露/更正公告不静默覆盖）；金融行业证券从通用结构因子 fail-closed 剔除（`app/services/financial_sector.py`）；行业因子按 `market.security_industry_history` 的时点标签生效，无历史时回退当前标签并在元数据显式记录。历史行业数据源与行业专属财务指标仍待接入。
 
 阶段门：
@@ -237,7 +238,7 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 
 ### V4.1 回测事件模型
 
-状态：单次回测研究合同闭环已完成；批量运行、跨运行比较、基准比较、样本外验证区间合同和交易日滚动窗口规划与执行 API 已交付。样本外运行只执行测试区间；滚动窗口通过 `POST /api/v1/strategy-research/rolling-backtests` 可执行，每个窗口生成独立 `backtest_run` 并绑定到 `strategy.training_artifact` 的不可变训练产物（含训练期因子快照与 SHA-256）。滚动执行仍由调用方指定公共策略参数，平台内自动训练选参尚未实现。
+状态：单次回测研究合同闭环已完成；批量运行、跨运行比较、基准比较、样本外验证区间合同和交易日滚动窗口规划与执行 API 已交付。样本外运行只执行测试区间；滚动窗口通过 `POST /api/v1/strategy-research/rolling-backtests` 可执行，每个窗口生成独立 `backtest_run` 并绑定到 `strategy.training_artifact` 的不可变训练产物（含训练期因子快照与 SHA-256）。滚动执行仍由调用方指定公共策略参数；平台内训练选参首切片已交付（2026-10-24）：`selection_policy=training_ic_v1` 可选启用，逐训练窗按预注册 RankIC 门槛（|mean RankIC1|≥0.02、|IR|≥0.30、方向正率≥0.55、观测≥10）从候选池自动选因子与方向（相对先验只维持或拒绝，<60 开市日的窗不允许翻转），选择证据写入 artifact 快照 v2，window_id 追加 `|sel-<policy>-<config_hash8>` 后缀隔离不同配置，测试窗纯样本外执行；默认不启用时行为与历史逐字节一致。政策定义与四角色评审裁决见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。
 
 交付：
 
@@ -499,7 +500,7 @@ V4 已交付研究合同及一组可复用支撑 API：`out_of_sample` 运行强
 价值初筛当前切片：自动日线同步已恢复，HiThink 证券上市日期通过 raw 留痕及有限重取获得高覆盖；同日晚间东方财富估值支持日期接口退回，披露 ROE 可按已发布报告期批量获取并逐页留 raw，网页显示沪深北有效指标、来源及阻断原因。2026-09-23 首轮真实晚间准备成功，估值同价匹配 5,556 只、披露 ROE 5,517 只；随后报告覆盖 5,578 只，但 ST 状态均未核实，0 只通过准入门槛。这是数据缺口，不是低估值股票为零。旧晚间任务写入的 5,552 条通用 ROE 因子已归档并失效（run 356），新的研究观察值与通用因子隔离。行业、ST 完整时点属性与财报修订历史仍不足，不能宣称已有可交易或历史收益认证的全市场名单。下一门槛是连续交易日运行、逐所价格/ROE/属性覆盖核对、未知 ST 的可信来源及历史 PIT 隔离。
 
 1. 研究可信基线修复：恢复温层历史日线继承、重建 `market.prices_qfq` 视图、回测报告与落盘数字对账、研究产物纳入版本控制。
-2. V4 训练选参编排、产物血缘、窗口绑定和参数敏感性。
+2. V4 训练选参编排、产物血缘、窗口绑定和参数敏感性。2026-10-24 进展：训练选参首切片（自演进阶段 1）已交付——`selection_policy=training_ic_v1` 逐训练窗自动选因子与方向，产物血缘与窗口绑定此前已在，参数敏感性与 champion/challenger 晋级（自演进阶段 2-3）仍待后续切片，见 [训练窗自动选参计划](20261024-1522-training-window-selection-plan.md)。首次实跑完成端到端对照（seg2022 六窗：自动选参 -0.13% vs 静态 ic_aligned -0.23%，2024-2026 段逐窗证据触发 fail-closed 拒绝）——静态预设的前视嫌疑被逐窗证据量化，结论见 [首次实跑证据](../research/20261024-1706-training-window-selection-first-run.md)。
 3. V5 组合、风控和模拟推演的公共 API、前端操作流、人工确认和审计。
 4. V6 写侧运维动作设计：重跑执行入口需先完成权限、审计、幂等、dry-run/confirm/execute 和人工确认边界。
 5. 选股与持仓管理能力增强：因子 IC 证据表、分层回测、组合约束进回测、偏差源补齐。2026-10-23 进展：非日频调仓（weekly/monthly/N 交易日）与可选组合约束（单标/行业/类型/现金留存，经 PortfolioBuilder 与 paper 链路同源）已进入因子选股回测路径，行业标签暂用当前值，时点历史与风格预算仍待 P2 数据项。2026-10-24 温层复跑验证：同一 `ic_aligned` 组合 20 交易日调仓净收益 +12.36%（日频净 +0.08%，佣金 -86%，夏普 1.42），叠加组合约束净 +11.72%、回撤更浅——频率敏感性证据见 [调仓频率净收益证据](../research/20261024-1205-rebalance-frequency-net-return.md)；rolling walk-forward 频率效应跨窗一致（2/2 正窗）。P2-1 涨跌停回填（控制面 97%）与 P2-3 行业时点首切片已落地。研究→持仓闭环已打通：`GET /backtests/runs/{id}/final-holdings` + 草案「从回测持仓预填」把最优配置的期末持仓一键变成组合方案（再经偏离检测对照实际账本）。

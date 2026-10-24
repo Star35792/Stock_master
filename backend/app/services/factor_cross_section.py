@@ -1,11 +1,12 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import ROUND_CEILING, Decimal, localcontext
+from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.factors import rank_ic
 from app.factors.categories import FactorCategory
 from app.repositories.factor import (
     FactorDefinitionRepository,
@@ -147,9 +148,7 @@ class FactorCrossSectionService:
             "winsor": self._winsorize,
             "zscore": self._standardize,
             "rank": self._rank,
-            "industry_neutral": lambda values: self._industry_neutralize(
-                values, industries
-            ),
+            "industry_neutral": lambda values: self._industry_neutralize(values, industries),
         }
         if size_factor_name:
             transforms["industry_size_neutral"] = lambda values: self._size_neutralize(
@@ -259,8 +258,7 @@ class FactorCrossSectionService:
             extreme_count = 0
             if mean is not None and standard_deviation not in {None, Decimal()}:
                 extreme_count = sum(
-                    abs(value - mean) > standard_deviation * Decimal(3)
-                    for value in values
+                    abs(value - mean) > standard_deviation * Decimal(3) for value in values
                 )
             current_top_symbols = self._top_quantile_symbols(symbol_values)
             top_quantile_turnover = None
@@ -269,9 +267,7 @@ class FactorCrossSectionService:
                 top_quantile_turnover = Decimal(1) - (
                     Decimal(retained) / Decimal(len(current_top_symbols))
                 )
-            forward_returns_1d = forward_returns_by_horizon.get(1, {}).get(
-                trade_date, {}
-            )
+            forward_returns_1d = forward_returns_by_horizon.get(1, {}).get(trade_date, {})
             quantile_diagnostics_1d = self._quantile_forward_diagnostics(
                 symbol_values,
                 forward_returns_1d,
@@ -364,9 +360,7 @@ class FactorCrossSectionService:
         factor_symbols = {symbol for values in values_by_date.values() for symbol in values}
         securities = self.security_repository.get_many(db, symbols=factor_symbols)
         exchange_by_symbol = {
-            security.symbol: security.exchange
-            for security in securities
-            if security.exchange
+            security.symbol: security.exchange for security in securities if security.exchange
         }
         exchanges = set(exchange_by_symbol.values())
         open_dates_by_exchange = {
@@ -399,10 +393,7 @@ class FactorCrossSectionService:
             target_date_by_exchange[exchange] = exchange_targets
 
         if not target_date_by_exchange:
-            return {
-                horizon: {}
-                for horizon in FORWARD_RETURN_HORIZONS
-            }
+            return {horizon: {} for horizon in FORWARD_RETURN_HORIZONS}
         bars = self.daily_bar_repository.list_for_factor_calculation(
             db,
             start_date=start_date,
@@ -411,10 +402,7 @@ class FactorCrossSectionService:
             symbols=sorted(factor_symbols) if factor_symbols else symbols,
             quality_status="trusted",
         )
-        bars_by_symbol_date = {
-            (bar.symbol, bar.trade_date): bar
-            for bar in bars
-        }
+        bars_by_symbol_date = {(bar.symbol, bar.trade_date): bar for bar in bars}
 
         returns_by_horizon: dict[int, dict[date, dict[str, Decimal]]] = {
             horizon: defaultdict(dict) for horizon in FORWARD_RETURN_HORIZONS
@@ -427,9 +415,7 @@ class FactorCrossSectionService:
                 current_bar = bars_by_symbol_date.get((symbol, current_date))
                 if current_bar is None:
                     continue
-                horizon_targets = target_date_by_exchange.get(exchange, {}).get(
-                    current_date, {}
-                )
+                horizon_targets = target_date_by_exchange.get(exchange, {}).get(current_date, {})
                 for horizon, future_date in horizon_targets.items():
                     future_bar = bars_by_symbol_date.get((symbol, future_date))
                     if future_bar is None:
@@ -497,8 +483,7 @@ class FactorCrossSectionService:
                 result[trade_date] = {symbol: Decimal() for symbol in values}
             else:
                 result[trade_date] = {
-                    symbol: (value - mean) / standard_deviation
-                    for symbol, value in values.items()
+                    symbol: (value - mean) / standard_deviation for symbol, value in values.items()
                 }
         return result
 
@@ -524,9 +509,7 @@ class FactorCrossSectionService:
             residuals = {}
             for group_values in groups.values():
                 mean = self._mean([value for _, value in group_values]) or Decimal()
-                residuals.update(
-                    {symbol: value - mean for symbol, value in group_values}
-                )
+                residuals.update({symbol: value - mean for symbol, value in group_values})
             result[trade_date] = residuals
         return result
 
@@ -551,10 +534,7 @@ class FactorCrossSectionService:
             denominator = sum((value**2 for value in x_demeaned.values()), Decimal())
             beta = (
                 sum(
-                    (
-                        x_demeaned[symbol] * y_demeaned[symbol]
-                        for symbol in common_values
-                    ),
+                    (x_demeaned[symbol] * y_demeaned[symbol] for symbol in common_values),
                     Decimal(),
                 )
                 / denominator
@@ -562,60 +542,30 @@ class FactorCrossSectionService:
                 else Decimal()
             )
             result[trade_date] = {
-                symbol: y_demeaned[symbol] - beta * x_demeaned[symbol]
-                for symbol in common_values
+                symbol: y_demeaned[symbol] - beta * x_demeaned[symbol] for symbol in common_values
             }
         return result
 
     @staticmethod
     def _mean(values: list[Decimal]) -> Decimal | None:
-        if not values:
-            return None
-        return sum(values, Decimal()) / Decimal(len(values))
+        return rank_ic.mean(values)
 
     def _standard_deviation(self, values: list[Decimal]) -> Decimal | None:
-        mean = self._mean(values)
-        if mean is None:
-            return None
-        variance = (
-            sum(((value - mean) ** 2 for value in values), Decimal())
-            / Decimal(len(values))
-        )
-        with localcontext() as context:
-            context.prec = 28
-            return variance.sqrt()
+        return rank_ic.standard_deviation(values)
 
     def _information_coefficient(
         self,
         factor_values: dict[str, Decimal],
         forward_returns: dict[str, Decimal],
     ) -> Decimal | None:
-        common_symbols = sorted(set(factor_values) & set(forward_returns))
-        if len(common_symbols) < 2:
-            return None
-        return self._correlation(
-            [factor_values[symbol] for symbol in common_symbols],
-            [forward_returns[symbol] for symbol in common_symbols],
-        )
+        return rank_ic.information_coefficient(factor_values, forward_returns)
 
     def _rank_information_coefficient(
         self,
         factor_values: dict[str, Decimal],
         forward_returns: dict[str, Decimal],
     ) -> Decimal | None:
-        common_symbols = sorted(set(factor_values) & set(forward_returns))
-        if len(common_symbols) < 2:
-            return None
-        factor_ranks = self._rank_values(
-            {symbol: factor_values[symbol] for symbol in common_symbols}
-        )
-        return_ranks = self._rank_values(
-            {symbol: forward_returns[symbol] for symbol in common_symbols}
-        )
-        return self._correlation(
-            [factor_ranks[symbol] for symbol in common_symbols],
-            [return_ranks[symbol] for symbol in common_symbols],
-        )
+        return rank_ic.rank_information_coefficient(factor_values, forward_returns)
 
     def _quantile_forward_diagnostics(
         self,
@@ -632,18 +582,12 @@ class FactorCrossSectionService:
         ordered = sorted(common, key=lambda item: (item[1], item[0]))
         quantile_count = max(
             1,
-            int(
-                (Decimal(len(ordered)) * Decimal("0.2")).to_integral_value(
-                    rounding=ROUND_CEILING
-                )
-            ),
+            int((Decimal(len(ordered)) * Decimal("0.2")).to_integral_value(rounding=ROUND_CEILING)),
         )
         bottom_return = self._mean([item[2] for item in ordered[:quantile_count]])
         top_return = self._mean([item[2] for item in ordered[-quantile_count:]])
         long_short_return = (
-            None
-            if top_return is None or bottom_return is None
-            else top_return - bottom_return
+            None if top_return is None or bottom_return is None else top_return - bottom_return
         )
         monotonicity = self._quantile_monotonicity(ordered)
         return QuantileForwardDiagnostics(
@@ -675,43 +619,11 @@ class FactorCrossSectionService:
         )
 
     def _correlation(self, left: list[Decimal], right: list[Decimal]) -> Decimal | None:
-        left_mean = self._mean(left)
-        right_mean = self._mean(right)
-        if left_mean is None or right_mean is None:
-            return None
-        covariance = sum(
-            ((left_value - left_mean) * (right_value - right_mean))
-            for left_value, right_value in zip(left, right, strict=True)
-        )
-        left_sum_squares = sum(((value - left_mean) ** 2 for value in left), Decimal())
-        right_sum_squares = sum(((value - right_mean) ** 2 for value in right), Decimal())
-        if not left_sum_squares or not right_sum_squares:
-            return None
-        with localcontext() as context:
-            context.prec = 28
-            denominator = (left_sum_squares * right_sum_squares).sqrt()
-            return covariance / denominator
+        return rank_ic.correlation(left, right)
 
     @staticmethod
     def _rank_values(values: dict[str, Decimal]) -> dict[str, Decimal]:
-        ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
-        count = len(ordered)
-        if count == 0:
-            return {}
-        if count == 1:
-            return {ordered[0][0]: Decimal("0.5")}
-        ranks: dict[str, Decimal] = {}
-        index = 0
-        while index < count:
-            end = index
-            while end + 1 < count and ordered[end + 1][1] == ordered[index][1]:
-                end += 1
-            average_rank = Decimal(index + end) / Decimal(2)
-            percentile = average_rank / Decimal(count - 1)
-            for position in range(index, end + 1):
-                ranks[ordered[position][0]] = percentile
-            index = end + 1
-        return ranks
+        return rank_ic.rank_values(values)
 
     @staticmethod
     def _top_quantile_symbols(

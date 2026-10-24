@@ -61,12 +61,31 @@ DEFAULT_FACTORS = (
     "volume_stability_20",
 )
 
+#: Extended price/volume factors computable from the same curated ``prices_qfq``
+#: layer (semantics follow ``app/services/basic_price_volume_factors.py``).
+#: Pass them explicitly via ``--factors``; the default set stays unchanged so
+#: historical releases keep reproducing.
+EXTENDED_FACTORS = (
+    "ret_1d",
+    "momentum_5",
+    "reversal_5",
+    "volatility_5",
+    "ma_gap_5",
+    "volume_chg_1d",
+)
+
+KNOWN_FACTORS = DEFAULT_FACTORS + EXTENDED_FACTORS
+
 FACTOR_VERSION = "v1-qfq"
 WARMUP_DAYS = 80  # calendar slack so the 60-day lookback is warm at start
 
 _WINDOW_CLAUSE = """
     WINDOW
         symbol_days AS (PARTITION BY symbol ORDER BY trade_date),
+        trailing_5 AS (
+            PARTITION BY symbol ORDER BY trade_date
+            ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+        ),
         trailing_19 AS (
             PARTITION BY symbol ORDER BY trade_date
             ROWS BETWEEN 18 PRECEDING AND CURRENT ROW
@@ -90,9 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warm-root", default="data/warm")
     parser.add_argument("--curated-root", default="data/warm/curated")
     parser.add_argument("--db-path", default="data/stock_master.duckdb")
-    parser.add_argument(
-        "--parent-release", help="父 release tag（子 release 继承其未发布的表）"
-    )
+    parser.add_argument("--parent-release", help="父 release tag（子 release 继承其未发布的表）")
     parser.add_argument("--release-tag", help="子 release tag，默认当前时间戳")
     parser.add_argument("--factors", help="逗号分隔，默认全部 7 个")
     parser.add_argument(
@@ -115,9 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_excluded_symbols(
-    control_db: Path, start_date: date, end_date: date
-) -> list[str]:
+def _resolve_excluded_symbols(control_db: Path, start_date: date, end_date: date) -> list[str]:
     con = duckdb.connect(str(control_db), read_only=True)
     try:
         rows = con.execute(
@@ -130,9 +145,7 @@ def _resolve_excluded_symbols(
     return [row[0] for row in rows]
 
 
-def _resolve_incomplete_symbols(
-    prices_glob: str, start_date: date, end_date: date
-) -> list[str]:
+def _resolve_incomplete_symbols(prices_glob: str, start_date: date, end_date: date) -> list[str]:
     """Symbols missing a trusted bar on at least one trading day of the window.
 
     The backtest engine fails the whole run when a scheduled execution date has
@@ -183,15 +196,16 @@ def _metrics_sql(factors: list[str]) -> str:
     def pick(name: str, sql: str, alias: str) -> str:
         return sql if name in wanted else f"{_NULL_DOUBLE} AS {alias}"
 
-    lag_20 = pick(
-        "momentum_20", "LAG(close, 20) OVER symbol_days AS close_20", "close_20"
-    )
-    lag_60 = pick(
-        "momentum_60", "LAG(close, 60) OVER symbol_days AS close_60", "close_60"
+    lag_20 = pick("momentum_20", "LAG(close, 20) OVER symbol_days AS close_20", "close_20")
+    lag_60 = pick("momentum_60", "LAG(close, 60) OVER symbol_days AS close_60", "close_60")
+    lag_5 = pick("momentum_5", "LAG(close, 5) OVER symbol_days AS close_5", "close_5")
+    volume_prev = pick(
+        "volume_chg_1d", "LAG(volume, 1) OVER symbol_days AS volume_prev", "volume_prev"
     )
     vol = pick(
         "volatility_20", "stddev_pop(ret) OVER trailing_19 AS volatility_20", "volatility_20"
     )
+    vol_5 = pick("volatility_5", "stddev_pop(ret) OVER trailing_5 AS volatility_5", "volatility_5")
     downside = pick(
         "downside_volatility_20",
         "sqrt(avg(CASE WHEN ret < 0 THEN ret * ret ELSE 0 END) "
@@ -200,13 +214,10 @@ def _metrics_sql(factors: list[str]) -> str:
     )
     drawdown = pick(
         "max_drawdown_20",
-        "MIN(close / NULLIF(peak_20, 0) - 1) OVER trailing_20 "
-        "AS max_drawdown_20",
+        "MIN(close / NULLIF(peak_20, 0) - 1) OVER trailing_20 AS max_drawdown_20",
         "max_drawdown_20",
     )
-    liquidity = pick(
-        "liquidity_20", "avg(amount) OVER trailing_20 AS liquidity_20", "liquidity_20"
-    )
+    liquidity = pick("liquidity_20", "avg(amount) OVER trailing_20 AS liquidity_20", "liquidity_20")
     stability = pick(
         "volume_stability_20",
         "-1 * stddev_pop(volume) OVER trailing_20 "
@@ -214,6 +225,7 @@ def _metrics_sql(factors: list[str]) -> str:
         "AS volume_stability_20",
         "volume_stability_20",
     )
+    ma_5 = pick("ma_gap_5", "avg(close) OVER trailing_5 AS ma_avg_5", "ma_avg_5")
     return f"""
         CREATE OR REPLACE TEMP TABLE metrics AS
         WITH lags AS (
@@ -226,6 +238,8 @@ def _metrics_sql(factors: list[str]) -> str:
                 LAG(close, 1) OVER symbol_days AS close_prev,
                 {lag_20},
                 {lag_60},
+                {lag_5},
+                {volume_prev},
                 MAX(close) OVER trailing_20 AS peak_20
             FROM base
             {_WINDOW_CLAUSE}
@@ -238,13 +252,19 @@ def _metrics_sql(factors: list[str]) -> str:
             symbol,
             trade_date,
             close,
+            volume,
             close_20,
             close_60,
+            close_5,
+            volume_prev,
+            ret,
             {vol},
+            {vol_5},
             {downside},
             {drawdown},
             {liquidity},
-            {stability}
+            {stability},
+            {ma_5}
         FROM numbered
         {_WINDOW_CLAUSE}
     """
@@ -259,6 +279,12 @@ def _unpivot_sql(factors: list[str]) -> str:
         "downside_volatility_20": "downside_volatility_20",
         "max_drawdown_20": "max_drawdown_20",
         "liquidity_20": "liquidity_20",
+        "ret_1d": "ret",
+        "momentum_5": "close / NULLIF(close_5, 0) - 1",
+        "reversal_5": "-1 * (close / NULLIF(close_5, 0) - 1)",
+        "volatility_5": "volatility_5",
+        "ma_gap_5": "close / NULLIF(ma_avg_5, 0) - 1",
+        "volume_chg_1d": "volume / NULLIF(volume_prev, 0) - 1",
         "volume_stability_20": "volume_stability_20",
     }
     selects = "\nUNION ALL\n".join(
@@ -289,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.factors
         else list(DEFAULT_FACTORS)
     )
-    unknown = [f for f in factors if f not in DEFAULT_FACTORS]
+    unknown = [f for f in factors if f not in KNOWN_FACTORS]
     if unknown:
         print(f"unsupported factors: {unknown}")
         return 1
@@ -310,24 +336,18 @@ def main(argv: list[str] | None = None) -> int:
     control_db = Path(args.db_path)
     excluded: list[str] = []
     if args.exclude_corporate_actions:
-        excluded = _resolve_excluded_symbols(
-            control_db, args.start_date, args.end_date
-        )
+        excluded = _resolve_excluded_symbols(control_db, args.start_date, args.end_date)
         print(f"公司行为剔除 {len(excluded):,} 只证券")
 
     if args.require_complete_coverage:
         prices_glob = f"{curated.as_posix()}/**/*.parquet"
-        incomplete = _resolve_incomplete_symbols(
-            prices_glob, args.start_date, args.end_date
-        )
+        incomplete = _resolve_incomplete_symbols(prices_glob, args.start_date, args.end_date)
         print(f"行情不完整剔除 {len(incomplete):,} 只证券")
         excluded = sorted(set(excluded) | set(incomplete))
 
     symbol_filter: list[str] = []
     if args.symbols:
-        symbol_filter = [
-            s.strip().upper() for s in args.symbols.split(",") if s.strip()
-        ]
+        symbol_filter = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
 
     con = duckdb.connect()
     con.execute("SET threads = 4")
@@ -356,13 +376,8 @@ def main(argv: list[str] | None = None) -> int:
     con.execute(_metrics_sql(factors))
     con.execute(_unpivot_sql(factors))
 
-    window_filter = (
-        f"WHERE trade_date BETWEEN DATE '{args.start_date}' "
-        f"AND DATE '{args.end_date}'"
-    )
-    total_rows = con.execute(
-        f"SELECT count(*) FROM long_values {window_filter}"
-    ).fetchone()[0]
+    window_filter = f"WHERE trade_date BETWEEN DATE '{args.start_date}' AND DATE '{args.end_date}'"
+    total_rows = con.execute(f"SELECT count(*) FROM long_values {window_filter}").fetchone()[0]
     if total_rows == 0:
         print("no factor rows produced; aborting without writing a release")
         return 1
@@ -435,9 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     summary_path = warm_root / "exported" / release_tag / "export_summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\nrelease = {release_tag} (parent = {parent})")
     print(f"窗口 {args.start_date} ~ {args.end_date}")

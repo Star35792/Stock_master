@@ -151,7 +151,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 路由文件：`strategy_research.py`、`backtests.py`
 
 - `POST /api/v1/strategy-research/rolling-windows`
-- `POST /api/v1/strategy-research/rolling-backtests`
+- `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`）
 - `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源）
 - `POST /api/v1/strategy-research/factor-selection/backtests/batch`
 - 价格价值研究：`POST /api/v1/strategy-research/price-value/evaluate`

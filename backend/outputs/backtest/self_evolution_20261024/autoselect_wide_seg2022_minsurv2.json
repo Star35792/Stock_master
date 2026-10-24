@@ -1,0 +1,1300 @@
+{
+  "start_date": "2022-05-05",
+  "end_date": "2024-04-30",
+  "top_n": 20,
+  "spec_set": "price_volume_wide",
+  "exchange": "SH",
+  "training_days": 120,
+  "test_days": 60,
+  "step_days": 60,
+  "rebalance_rule": "every_n_trading_days",
+  "rebalance_interval": 20,
+  "selection_policy": "training_ic_v1",
+  "portfolio_constraints": {
+    "max_symbol_weight": "0.20",
+    "max_industry_weight": "0.40",
+    "cash_reserve_rate": "0.05",
+    "security_type_budgets": null
+  },
+  "factor_version": "v2-qfq-2y-noca",
+  "research_read_source": "warm",
+  "interpretation": "link_validation_only",
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation",
+    "direction_selected_from_short_training_window",
+    "selection_thresholds_authored_not_estimated",
+    "window_rejection_changes_evaluated_window_set",
+    "selector_calendar_aligned_ic_differs_from_factor_profile_lead_ic",
+    "every_n_anchor_restarts_per_window"
+  ],
+  "windows": [
+    {
+      "window_id": "rolling:SH:2022-05-05:2022-10-28:2022-10-31:2023-01-30|sel-training_ic_v1-795a19e0",
+      "test_window": [
+        "2022-10-31",
+        "2023-01-30"
+      ],
+      "run_id": 51,
+      "total_return": "0.1576950838",
+      "maximum_drawdown": "-0.0820733830361420076520183493",
+      "turnover_rate": "4.187652916303818572713681052",
+      "total_commission": "2604.364377",
+      "sharpe_ratio": "3.986571535898057796793592922",
+      "selection": {
+        "strategy_id": "training_ic_v1",
+        "config_hash": "795a19e0",
+        "training_start_date": "2022-05-05",
+        "training_end_date": "2022-10-28",
+        "training_open_dates": 120,
+        "selected": [
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          }
+        ],
+        "stats": [
+          {
+            "factor_name": "downside_volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0392233896",
+            "ic_ir": "-0.1948651021",
+            "positive_rate": "0.5798319328",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1948651021)"
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0402546609",
+            "ic_ir": "-0.2314554932",
+            "positive_rate": "0.5714285714",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2314554932)"
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0302223976",
+            "ic_ir": "-0.1989059232",
+            "positive_rate": "0.6134453782",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1989059232)"
+          },
+          {
+            "factor_name": "max_drawdown_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0126871047",
+            "ic_ir": "0.0688667233",
+            "positive_rate": "0.5462184874",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0126871047)"
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0502064860",
+            "ic_ir": "-0.3212775771",
+            "positive_rate": "0.6050420168",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0395437756",
+            "ic_ir": "-0.2681633896",
+            "positive_rate": "0.5546218487",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2681633896)"
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 114,
+            "mean_rank_ic": "-0.0586177409",
+            "ic_ir": "-0.3281646730",
+            "positive_rate": "0.6228070175",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0088856662",
+            "ic_ir": "-0.0613423403",
+            "positive_rate": "0.5042016807",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0088856662)"
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0395437756",
+            "ic_ir": "0.2681633896",
+            "positive_rate": "0.5546218487",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(0.2681633896)"
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0611179793",
+            "ic_ir": "-0.3219388390",
+            "positive_rate": "0.5966386555",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0524434669",
+            "ic_ir": "-0.3362194419",
+            "positive_rate": "0.6050420168",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volume_chg_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0135354132",
+            "ic_ir": "-0.1532407817",
+            "positive_rate": "0.5210084034",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0135354132)"
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0511250835",
+            "ic_ir": "0.3794947883",
+            "positive_rate": "0.6386554622",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          }
+        ],
+        "dropped_candidates": [],
+        "price_source": {
+          "prices_qfq_path": "D:\\code\\stock_master\\backend\\data\\warm\\curated\\prices_qfq",
+          "release_tag": "20261024-selfevo-seg2022"
+        }
+      }
+    },
+    {
+      "window_id": "rolling:SH:2022-07-29:2023-01-30:2023-01-31:2023-04-25|sel-training_ic_v1-795a19e0",
+      "test_window": [
+        "2023-01-31",
+        "2023-04-25"
+      ],
+      "run_id": 52,
+      "total_return": "-0.1001232597",
+      "maximum_drawdown": "-0.1226431926408468660301871515",
+      "turnover_rate": "4.640949661625648098198358759",
+      "total_commission": "2565.998467",
+      "sharpe_ratio": "-3.374376759997992888326695779",
+      "selection": {
+        "strategy_id": "training_ic_v1",
+        "config_hash": "795a19e0",
+        "training_start_date": "2022-07-29",
+        "training_end_date": "2023-01-30",
+        "training_open_dates": 120,
+        "selected": [
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          }
+        ],
+        "stats": [
+          {
+            "factor_name": "downside_volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0449075678",
+            "ic_ir": "-0.2251985328",
+            "positive_rate": "0.6134453782",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2251985328)"
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0241924984",
+            "ic_ir": "-0.1431735404",
+            "positive_rate": "0.5546218487",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1431735404)"
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0397999522",
+            "ic_ir": "-0.2432968190",
+            "positive_rate": "0.6050420168",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2432968190)"
+          },
+          {
+            "factor_name": "max_drawdown_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0081448408",
+            "ic_ir": "0.0436889105",
+            "positive_rate": "0.5210084034",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0081448408)"
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0543073619",
+            "ic_ir": "-0.3046610245",
+            "positive_rate": "0.6218487395",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0522158033",
+            "ic_ir": "-0.3275919935",
+            "positive_rate": "0.5882352941",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0655290835",
+            "ic_ir": "-0.3931109887",
+            "positive_rate": "0.6554621849",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0317636212",
+            "ic_ir": "-0.2060647951",
+            "positive_rate": "0.5630252101",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2060647951)"
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0522158033",
+            "ic_ir": "0.3275919935",
+            "positive_rate": "0.5882352941",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0699539325",
+            "ic_ir": "-0.3884667061",
+            "positive_rate": "0.6386554622",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0715084906",
+            "ic_ir": "-0.4790096349",
+            "positive_rate": "0.6722689076",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volume_chg_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0144352625",
+            "ic_ir": "-0.1610174439",
+            "positive_rate": "0.5462184874",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0144352625)"
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0581649471",
+            "ic_ir": "0.4756928713",
+            "positive_rate": "0.6638655462",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          }
+        ],
+        "dropped_candidates": [],
+        "price_source": {
+          "prices_qfq_path": "D:\\code\\stock_master\\backend\\data\\warm\\curated\\prices_qfq",
+          "release_tag": "20261024-selfevo-seg2022"
+        }
+      }
+    },
+    {
+      "window_id": "rolling:SH:2022-10-31:2023-04-25:2023-04-26:2023-07-25|sel-training_ic_v1-795a19e0",
+      "test_window": [
+        "2023-04-26",
+        "2023-07-25"
+      ],
+      "run_id": 53,
+      "total_return": "0.0729924818",
+      "maximum_drawdown": "-0.0523813908162049002989536028",
+      "turnover_rate": "4.555308175888916446823326619",
+      "total_commission": "2616.483231",
+      "sharpe_ratio": "1.892597414259647153413741355",
+      "selection": {
+        "strategy_id": "training_ic_v1",
+        "config_hash": "795a19e0",
+        "training_start_date": "2022-10-31",
+        "training_end_date": "2023-04-25",
+        "training_open_dates": 120,
+        "selected": [
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          }
+        ],
+        "stats": [
+          {
+            "factor_name": "downside_volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0419734335",
+            "ic_ir": "-0.2405586536",
+            "positive_rate": "0.6302521008",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2405586536)"
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0030373676",
+            "ic_ir": "0.0170621447",
+            "positive_rate": "0.5126050420",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0030373676)"
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0602044279",
+            "ic_ir": "-0.3801189424",
+            "positive_rate": "0.6470588235",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "max_drawdown_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0255305510",
+            "ic_ir": "0.1665218699",
+            "positive_rate": "0.6050420168",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(0.1665218699)"
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0359567089",
+            "ic_ir": "-0.2009570348",
+            "positive_rate": "0.5546218487",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2009570348)"
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0541375094",
+            "ic_ir": "-0.3603891248",
+            "positive_rate": "0.6554621849",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0287583022",
+            "ic_ir": "-0.1760930731",
+            "positive_rate": "0.6050420168",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1760930731)"
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0569774996",
+            "ic_ir": "-0.3641367275",
+            "positive_rate": "0.6554621849",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0541375094",
+            "ic_ir": "0.3603891248",
+            "positive_rate": "0.6554621849",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0605070904",
+            "ic_ir": "-0.3665353954",
+            "positive_rate": "0.6470588235",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0703511656",
+            "ic_ir": "-0.4767822966",
+            "positive_rate": "0.6806722689",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volume_chg_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0017665753",
+            "ic_ir": "-0.0195326247",
+            "positive_rate": "0.5042016807",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0017665753)"
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0573162571",
+            "ic_ir": "0.4861037774",
+            "positive_rate": "0.6554621849",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          }
+        ],
+        "dropped_candidates": [],
+        "price_source": {
+          "prices_qfq_path": "D:\\code\\stock_master\\backend\\data\\warm\\curated\\prices_qfq",
+          "release_tag": "20261024-selfevo-seg2022"
+        }
+      }
+    },
+    {
+      "window_id": "rolling:SH:2023-01-31:2023-07-25:2023-07-26:2023-10-25|sel-training_ic_v1-795a19e0",
+      "test_window": [
+        "2023-07-26",
+        "2023-10-25"
+      ],
+      "run_id": 54,
+      "total_return": "-0.0615959227",
+      "maximum_drawdown": "-0.1055348830456626991161095785",
+      "turnover_rate": "4.251223980370707806627443072",
+      "total_commission": "2314.682550",
+      "sharpe_ratio": "-1.668816867974903344013704149",
+      "selection": {
+        "strategy_id": "training_ic_v1",
+        "config_hash": "795a19e0",
+        "training_start_date": "2023-01-31",
+        "training_end_date": "2023-07-25",
+        "training_open_dates": 120,
+        "selected": [
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          }
+        ],
+        "stats": [
+          {
+            "factor_name": "downside_volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0429785368",
+            "ic_ir": "-0.2223460208",
+            "positive_rate": "0.5882352941",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2223460208)"
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0272010486",
+            "ic_ir": "-0.1463546013",
+            "positive_rate": "0.5798319328",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1463546013)"
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0283362222",
+            "ic_ir": "-0.1716721640",
+            "positive_rate": "0.5378151261",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1716721640)"
+          },
+          {
+            "factor_name": "max_drawdown_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0201248845",
+            "ic_ir": "0.1241694347",
+            "positive_rate": "0.5966386555",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(0.1241694347)"
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0344731313",
+            "ic_ir": "-0.2021414634",
+            "positive_rate": "0.5294117647",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2021414634)"
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0134578334",
+            "ic_ir": "-0.0845874461",
+            "positive_rate": "0.5210084034",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0134578334)"
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0253679186",
+            "ic_ir": "-0.1466906865",
+            "positive_rate": "0.6050420168",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1466906865)"
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0249714779",
+            "ic_ir": "-0.1555371938",
+            "positive_rate": "0.5798319328",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1555371938)"
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0134578334",
+            "ic_ir": "0.0845874461",
+            "positive_rate": "0.5210084034",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0134578334)"
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0562204673",
+            "ic_ir": "-0.2915644684",
+            "positive_rate": "0.6218487395",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2915644684)"
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0591246679",
+            "ic_ir": "-0.3567425243",
+            "positive_rate": "0.6134453782",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volume_chg_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0054792667",
+            "ic_ir": "0.0613406396",
+            "positive_rate": "0.5210084034",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0054792667)"
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0419211671",
+            "ic_ir": "0.3795763475",
+            "positive_rate": "0.6386554622",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          }
+        ],
+        "dropped_candidates": [],
+        "price_source": {
+          "prices_qfq_path": "D:\\code\\stock_master\\backend\\data\\warm\\curated\\prices_qfq",
+          "release_tag": "20261024-selfevo-seg2022"
+        }
+      }
+    },
+    {
+      "window_id": "rolling:SH:2023-04-26:2023-10-25:2023-10-26:2024-01-18|sel-training_ic_v1-795a19e0",
+      "test_window": [
+        "2023-10-26",
+        "2024-01-18"
+      ],
+      "run_id": 55,
+      "total_return": "0.0329782615",
+      "maximum_drawdown": "-0.1036039299144160476344545219",
+      "turnover_rate": "4.628982148771983954593159173",
+      "total_commission": "2810.863878",
+      "sharpe_ratio": "0.8911059390843513008468123496",
+      "selection": {
+        "strategy_id": "training_ic_v1",
+        "config_hash": "795a19e0",
+        "training_start_date": "2023-04-26",
+        "training_end_date": "2023-10-25",
+        "training_open_dates": 120,
+        "selected": [
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          }
+        ],
+        "stats": [
+          {
+            "factor_name": "downside_volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0408878023",
+            "ic_ir": "-0.2034841130",
+            "positive_rate": "0.5882352941",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2034841130)"
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0506127680",
+            "ic_ir": "-0.3013475132",
+            "positive_rate": "0.6302521008",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0208044013",
+            "ic_ir": "-0.1303783979",
+            "positive_rate": "0.4957983193",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1303783979)"
+          },
+          {
+            "factor_name": "max_drawdown_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0151549186",
+            "ic_ir": "0.0772419772",
+            "positive_rate": "0.5630252101",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0151549186)"
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0531086338",
+            "ic_ir": "-0.3033765702",
+            "positive_rate": "0.6050420168",
+            "decision": "flipped",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0118107571",
+            "ic_ir": "-0.0712574553",
+            "positive_rate": "0.4957983193",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0118107571)"
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0369690523",
+            "ic_ir": "-0.2311353242",
+            "positive_rate": "0.5798319328",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2311353242)"
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0070061705",
+            "ic_ir": "-0.0463860594",
+            "positive_rate": "0.5294117647",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0070061705)"
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0118107571",
+            "ic_ir": "0.0712574553",
+            "positive_rate": "0.4957983193",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(0.0118107571)"
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0585066856",
+            "ic_ir": "-0.3126632699",
+            "positive_rate": "0.6386554622",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0623756971",
+            "ic_ir": "-0.3940156805",
+            "positive_rate": "0.6554621849",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volume_chg_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0080794272",
+            "ic_ir": "-0.0770732615",
+            "positive_rate": "0.5462184874",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0080794272)"
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0318713874",
+            "ic_ir": "0.3249732271",
+            "positive_rate": "0.6554621849",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          }
+        ],
+        "dropped_candidates": [],
+        "price_source": {
+          "prices_qfq_path": "D:\\code\\stock_master\\backend\\data\\warm\\curated\\prices_qfq",
+          "release_tag": "20261024-selfevo-seg2022"
+        }
+      }
+    },
+    {
+      "window_id": "rolling:SH:2023-07-26:2024-01-18:2024-01-19:2024-04-23|sel-training_ic_v1-795a19e0",
+      "test_window": [
+        "2024-01-19",
+        "2024-04-23"
+      ],
+      "run_id": 56,
+      "total_return": "-0.1098976041",
+      "maximum_drawdown": "-0.2575378496597444468289357410",
+      "turnover_rate": "4.330632358459840766703046788",
+      "total_commission": "2171.521340",
+      "sharpe_ratio": "-1.154935771174644353817442808",
+      "selection": {
+        "strategy_id": "training_ic_v1",
+        "config_hash": "795a19e0",
+        "training_start_date": "2023-07-26",
+        "training_end_date": "2024-01-18",
+        "training_open_dates": 120,
+        "selected": [
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": true
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "higher_is_better": false
+          }
+        ],
+        "stats": [
+          {
+            "factor_name": "downside_volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0500016241",
+            "ic_ir": "-0.2422341027",
+            "positive_rate": "0.6386554622",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2422341027)"
+          },
+          {
+            "factor_name": "liquidity_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0435298120",
+            "ic_ir": "-0.2550872543",
+            "positive_rate": "0.6134453782",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2550872543)"
+          },
+          {
+            "factor_name": "ma_gap_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0341260476",
+            "ic_ir": "-0.2048848525",
+            "positive_rate": "0.5294117647",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2048848525)"
+          },
+          {
+            "factor_name": "max_drawdown_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0412408284",
+            "ic_ir": "0.2094190854",
+            "positive_rate": "0.5966386555",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(0.2094190854)"
+          },
+          {
+            "factor_name": "momentum_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0317833850",
+            "ic_ir": "-0.1927850801",
+            "positive_rate": "0.5630252101",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.1927850801)"
+          },
+          {
+            "factor_name": "momentum_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0400702825",
+            "ic_ir": "-0.2384447570",
+            "positive_rate": "0.5630252101",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2384447570)"
+          },
+          {
+            "factor_name": "momentum_60",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0332712704",
+            "ic_ir": "-0.2250703931",
+            "positive_rate": "0.5546218487",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(-0.2250703931)"
+          },
+          {
+            "factor_name": "ret_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0189473249",
+            "ic_ir": "-0.1341131690",
+            "positive_rate": "0.5546218487",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0189473249)"
+          },
+          {
+            "factor_name": "reversal_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0400702825",
+            "ic_ir": "0.2384447570",
+            "positive_rate": "0.5630252101",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "ic_ir_below_threshold(0.2384447570)"
+          },
+          {
+            "factor_name": "volatility_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0613126041",
+            "ic_ir": "-0.3252982940",
+            "positive_rate": "0.6638655462",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volatility_5",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": false,
+            "observations": 119,
+            "mean_rank_ic": "-0.0601216690",
+            "ic_ir": "-0.3553879858",
+            "positive_rate": "0.6134453782",
+            "decision": "maintained",
+            "direction_higher_is_better": false,
+            "reason": null
+          },
+          {
+            "factor_name": "volume_chg_1d",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "-0.0112944496",
+            "ic_ir": "-0.1072546300",
+            "positive_rate": "0.5882352941",
+            "decision": "rejected",
+            "direction_higher_is_better": null,
+            "reason": "mean_rank_ic_below_threshold(-0.0112944496)"
+          },
+          {
+            "factor_name": "volume_stability_20",
+            "factor_version": "v2-qfq-2y-noca",
+            "prior_higher_is_better": true,
+            "observations": 119,
+            "mean_rank_ic": "0.0394148283",
+            "ic_ir": "0.3342461866",
+            "positive_rate": "0.6554621849",
+            "decision": "maintained",
+            "direction_higher_is_better": true,
+            "reason": null
+          }
+        ],
+        "dropped_candidates": [],
+        "price_source": {
+          "prices_qfq_path": "D:\\code\\stock_master\\backend\\data\\warm\\curated\\prices_qfq",
+          "release_tag": "20261024-selfevo-seg2022"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "window_count": 6,
+    "positive_windows": 3,
+    "mean_return": "-0.0013251599",
+    "min_return": "-0.1098976041",
+    "max_return": "0.1576950838",
+    "worst_drawdown": "-0.2575378496597444468289357410"
+  }
+}

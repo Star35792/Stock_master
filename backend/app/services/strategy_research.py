@@ -19,6 +19,11 @@ from app.repositories.strategy import TrainingArtifactRepository
 from app.schemas.strategy import RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
 from app.services.rolling_backtest import RollingBacktestWindowResult
+from app.services.training_factor_selector import (
+    TrainingSelectionPolicy,
+    TrainingSelectionResult,
+    select_training_factors,
+)
 from app.strategies import (
     FactorScoreSpec,
     MinimumScorePolicy,
@@ -51,12 +56,10 @@ class StrategyResearchService:
         # hot window even though history lives in the warm layer. ``getattr``
         # keeps stand-in services used by tests working.
         self.research_read_source = (
-            getattr(backtest_service, "research_read_source", None)
-            or settings.research_read_source
+            getattr(backtest_service, "research_read_source", None) or settings.research_read_source
         )
         self.research_release_tag = (
-            getattr(backtest_service, "research_release_tag", None)
-            or settings.research_release_tag
+            getattr(backtest_service, "research_release_tag", None) or settings.research_release_tag
         )
         self.research_min_trading_days = (
             getattr(backtest_service, "research_min_trading_days", None)
@@ -121,6 +124,57 @@ class StrategyResearchService:
 
         yield read_factor_rows
 
+    def _load_qfq_closes(
+        self,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[dict[str, dict[date, Decimal]], dict[str, str]]:
+        """Load curated forward-adjusted closes for training-window IC math.
+
+        Training-window selection is warm-layer-only: the control-plane hot
+        window cannot supply a multi-month curated qfq price series, so any
+        other research source fails closed here.
+        """
+        if self.research_read_source != "warm":
+            raise ValueError(
+                "selection_policy requires research_read_source=warm; the "
+                "control-plane hot window cannot supply curated qfq closes "
+                "for training-window IC computation"
+            )
+        from app.repositories.warm_layer import WarmLayerStore
+
+        store = WarmLayerStore()
+        release_tag = self.research_release_tag or store.latest_release_tag
+        if release_tag is None:
+            raise ValueError(
+                "no warm-layer release available; research reads require an "
+                "exported Parquet release"
+            )
+        base_tag = store.base_release_tag_for(release_tag)
+        if base_tag:
+            store = WarmLayerStore(base_release_tag=base_tag)
+        reader = WarmResearchReadRepository(
+            store.connect(
+                release_tag=release_tag,
+                read_only=True,
+                attach_control=False,
+            )
+        )
+        try:
+            rows = reader.list_qfq_closes(start_date=start_date, end_date=end_date)
+        finally:
+            reader.close()
+        closes: dict[str, dict[date, Decimal]] = {}
+        for row in rows:
+            closes.setdefault(row.symbol, {})[row.trade_date] = row.close
+        price_source = {
+            "prices_qfq_path": str(store.prices_qfq_glob()),
+            "release_tag": release_tag,
+        }
+        return closes, price_source
+
     def generate_rolling_windows(
         self,
         db: Session,
@@ -171,9 +225,7 @@ class StrategyResearchService:
             raise ValueError("open trading dates are insufficient for one rolling window")
         return windows
 
-    def _normalize_factor_specs(
-        self, factor_specs: list[FactorScoreSpec]
-    ) -> list[FactorScoreSpec]:
+    def _normalize_factor_specs(self, factor_specs: list[FactorScoreSpec]) -> list[FactorScoreSpec]:
         if not factor_specs:
             raise ValueError("factor_specs must not be empty")
         return sorted(
@@ -215,9 +267,7 @@ class StrategyResearchService:
 
     @staticmethod
     def _compute_artifact_hash(snapshot: dict[str, Any]) -> str:
-        canonical = json.dumps(
-            snapshot, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-        )
+        canonical = json.dumps(snapshot, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _build_training_input_snapshot(
@@ -229,14 +279,22 @@ class StrategyResearchService:
         training_end_date: date,
         training_rows: dict[FactorScoreSpec, list[SimpleNamespace]],
         security_types: dict[str, str],
+        selection_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         frame = StrategyFactorFrame.from_rows(
             as_of_date=training_end_date,
             rows_by_factor=training_rows,
         )
         frame_snapshot = frame.snapshot()
-        return {
-            "contract_version": "rolling_training_input_v1",
+        snapshot: dict[str, Any] = {
+            # v2 is reserved for snapshots that carry a per-window training
+            # selection result; the disabled path must stay byte-identical to
+            # v1 so previously created artifacts keep validating.
+            "contract_version": (
+                "rolling_training_input_v2"
+                if selection_summary is not None
+                else "rolling_training_input_v1"
+            ),
             "window_id": window_id,
             "training_start_date": training_start_date.isoformat(),
             "training_end_date": training_end_date.isoformat(),
@@ -254,10 +312,12 @@ class StrategyResearchService:
                 {row.symbol for rows in training_rows.values() for row in rows}
             ),
             "security_type_map": {
-                symbol.upper(): security_type
-                for symbol, security_type in security_types.items()
+                symbol.upper(): security_type for symbol, security_type in security_types.items()
             },
         }
+        if selection_summary is not None:
+            snapshot["selection"] = selection_summary
+        return snapshot
 
     def _get_or_create_training_artifact(
         self,
@@ -270,6 +330,7 @@ class StrategyResearchService:
         security_types: dict[str, str],
         code_version: str,
         data_version: str,
+        selection_summary: dict[str, Any] | None = None,
     ) -> Any:
         existing = self.training_artifact_repository.get_by_window_id(
             db, window_id=window.window_id
@@ -281,6 +342,7 @@ class StrategyResearchService:
             training_end_date=window.training_end_date,
             training_rows=training_rows,
             security_types=security_types,
+            selection_summary=selection_summary,
         )
         artifact_hash = self._compute_artifact_hash(snapshot)
         if existing is not None:
@@ -346,6 +408,8 @@ class StrategyResearchService:
         training_artifact_id: int | None = None,
         validation_window_id: str | None = None,
         research_db: Session | None = None,
+        contract_factor_specs: list[FactorScoreSpec] | None = None,
+        selection: dict[str, Any] | None = None,
     ) -> PersistedBacktestResult:
         self._validate_validation_window(
             validation_mode=validation_mode,
@@ -365,14 +429,11 @@ class StrategyResearchService:
         if holding_period != 1:
             raise ValueError("only holding_period=1 is supported")
         normalized_specs = self._normalize_factor_specs(factor_specs)
-        factor_rows = self._load_factor_rows(
-            db, normalized_specs, start_date, end_date
-        )
+        factor_rows = self._load_factor_rows(db, normalized_specs, start_date, end_date)
         symbols = {row.symbol for rows in factor_rows.values() for row in rows}
         security_types = self.security_repository.get_security_types(db, symbols)
         normalized_security_types = {
-            symbol.upper(): security_type
-            for symbol, security_type in security_types.items()
+            symbol.upper(): security_type for symbol, security_type in security_types.items()
         }
         strategy_frame = StrategyFactorFrame.from_rows(
             as_of_date=end_date,
@@ -428,7 +489,9 @@ class StrategyResearchService:
             }
         contract = self._build_research_contract(
             strategy_name=strategy_name,
-            factor_specs=normalized_specs,
+            factor_specs=(
+                contract_factor_specs if contract_factor_specs is not None else normalized_specs
+            ),
             top_n=top_n,
             signal_lag=signal_lag,
             rebalance_rule=rebalance_rule,
@@ -461,6 +524,7 @@ class StrategyResearchService:
             training_end_date=training_end_date,
             strategy_input_snapshot=strategy_frame.snapshot(),
             validation_window_id=validation_window_id,
+            selection=selection,
         )
         return self.backtest_service.run(
             db,
@@ -609,14 +673,13 @@ class StrategyResearchService:
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
         research_db: Session | None = None,
+        selection_policy: TrainingSelectionPolicy | None = None,
     ) -> list[RollingBacktestWindowResult]:
         if rebalance_rule != "daily" and exchange != "SH":
             # Rebalance-date selection is anchored on the SH calendar; HK-only
             # windows could drop whole rebalance weeks silently. Reject until
             # per-exchange rebalance calendars are implemented.
-            raise ValueError(
-                "non-daily rebalance rules are only supported for exchange=SH"
-            )
+            raise ValueError("non-daily rebalance rules are only supported for exchange=SH")
         windows = self.generate_rolling_windows(
             db,
             exchange=exchange,
@@ -627,33 +690,86 @@ class StrategyResearchService:
             step_days=step_days,
         )
         normalized_specs = self._normalize_factor_specs(factor_specs)
+        config_hash = (
+            selection_policy.config_hash(normalized_specs) if selection_policy is not None else None
+        )
         results: list[RollingBacktestWindowResult] = []
         for window in windows:
-            training_rows = self._load_factor_rows(
+            training_rows = self._load_factor_rows_or_candidates(
                 db,
                 normalized_specs,
                 window.training_start_date,
                 window.training_end_date,
+                selection_policy=selection_policy,
             )
-            symbols = {
-                row.symbol for rows in training_rows.values() for row in rows
-            }
+            selection_summary: dict[str, Any] | None = None
+            selection: dict[str, Any] | None = None
+            effective_specs = normalized_specs
+            artifact_window = window
+            if selection_policy is not None:
+                closes, price_source = self._load_qfq_closes(
+                    db,
+                    start_date=window.training_start_date,
+                    end_date=window.training_end_date,
+                )
+                training_open_dates = self.trading_calendar_repository.list_open_dates(
+                    db,
+                    exchange=exchange,
+                    start_date=window.training_start_date,
+                    end_date=window.training_end_date,
+                )
+                if len(training_open_dates) < 2:
+                    raise ValueError(
+                        "training window has fewer than two open dates; "
+                        "RankIC1 selection is impossible"
+                    )
+                selection_result: TrainingSelectionResult = select_training_factors(
+                    policy=selection_policy,
+                    candidates=normalized_specs,
+                    rows_by_spec=training_rows,
+                    qfq_closes=closes,
+                    training_open_dates=training_open_dates,
+                    training_start_date=window.training_start_date,
+                    training_end_date=window.training_end_date,
+                    price_source=price_source,
+                )
+                selection_summary = selection_result.summary()
+                selection = {
+                    "policy": {
+                        **selection_policy.to_snapshot(),
+                        "config_hash": selection_result.config_hash,
+                    },
+                    "result": selection_summary,
+                }
+                effective_specs = self._normalize_factor_specs(selection_result.selected_specs)
+                # Different selection policies or candidate pools must not
+                # collide on the per-window immutable artifact, so the
+                # selection identity joins the window key.
+                artifact_window = window.model_copy(
+                    update={
+                        "window_id": (
+                            f"{window.window_id}|sel-{selection_policy.strategy_id}-{config_hash}"
+                        )
+                    }
+                )
+            symbols = {row.symbol for rows in training_rows.values() for row in rows}
             security_types = self.security_repository.get_security_types(db, symbols)
             artifact = self._get_or_create_training_artifact(
                 research_db if research_db is not None else db,
-                window=window,
+                window=artifact_window,
                 strategy_name=strategy_name,
                 factor_specs=normalized_specs,
                 training_rows=training_rows,
                 security_types=security_types,
                 code_version=code_version,
                 data_version=data_version,
+                selection_summary=selection_summary,
             )
             result = self._run_single_factor_selection(
                 db,
                 name=f"{name}:{window.index}",
                 strategy_name=strategy_name,
-                factor_specs=normalized_specs,
+                factor_specs=effective_specs,
                 top_n=top_n,
                 signal_lag=signal_lag,
                 rebalance_rule=rebalance_rule,
@@ -685,14 +801,16 @@ class StrategyResearchService:
                 transfer_fee_rate=transfer_fee_rate,
                 exchange_fee_rate=exchange_fee_rate,
                 training_artifact_id=artifact.id,
-                validation_window_id=window.window_id,
+                validation_window_id=artifact_window.window_id,
                 research_db=research_db,
+                contract_factor_specs=(normalized_specs if selection_policy is not None else None),
+                selection=selection,
             )
             results.append(
                 RollingBacktestWindowResult(
                     window=RollingWindowRead(
                         index=window.index,
-                        window_id=window.window_id,
+                        window_id=artifact_window.window_id,
                         training_start_date=window.training_start_date,
                         training_end_date=window.training_end_date,
                         test_start_date=window.test_start_date,
@@ -700,9 +818,45 @@ class StrategyResearchService:
                         execution_status="run_completed",
                     ),
                     persisted=result,
+                    selection_summary=selection_summary,
                 )
             )
         return results
+
+    def _load_factor_rows_or_candidates(
+        self,
+        db: Session,
+        factor_specs: list[FactorScoreSpec],
+        start_date: date,
+        end_date: date,
+        *,
+        selection_policy: TrainingSelectionPolicy | None,
+    ) -> dict[FactorScoreSpec, list[SimpleNamespace]]:
+        """Load candidate rows, tolerating candidates missing in this window.
+
+        Without a selection policy the historical fail-closed behavior applies
+        unchanged: any spec without rows aborts the run.  With selection, a
+        candidate that simply has no values in this training window is dropped
+        there and recorded by the selector instead of killing the whole run;
+        the test window still fails closed on missing *selected* factors.
+        """
+        try:
+            return self._load_factor_rows(db, factor_specs, start_date, end_date)
+        except ValueError:
+            if selection_policy is None:
+                raise
+        loaded: dict[FactorScoreSpec, list[SimpleNamespace]] = {}
+        for spec in factor_specs:
+            try:
+                loaded.update(self._load_factor_rows(db, [spec], start_date, end_date))
+            except ValueError:
+                continue
+        if not loaded:
+            raise ValueError(
+                f"factor values not found for any candidate between "
+                f"{start_date.isoformat()} and {end_date.isoformat()}"
+            )
+        return loaded
 
     @staticmethod
     def _normalize_factor_rows(rows: list[Any]) -> list[SimpleNamespace]:
@@ -757,6 +911,7 @@ class StrategyResearchService:
         training_end_date: date | None,
         strategy_input_snapshot: dict[str, Any],
         validation_window_id: str | None = None,
+        selection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         validation_protocol = None
         window_binding_status = "not_applicable"
@@ -776,7 +931,7 @@ class StrategyResearchService:
             assert validation_window_id is not None
             validation_protocol = "rolling_walk_forward_v1"
             window_binding_status = "artifact_bound"
-        return {
+        contract: dict[str, Any] = {
             "strategy_name": strategy_name,
             "factor_specs": [
                 {
@@ -831,12 +986,8 @@ class StrategyResearchService:
             "sell_stamp_duty_rate": StrategyResearchService._optional_decimal_str(
                 sell_stamp_duty_rate
             ),
-            "transfer_fee_rate": StrategyResearchService._optional_decimal_str(
-                transfer_fee_rate
-            ),
-            "exchange_fee_rate": StrategyResearchService._optional_decimal_str(
-                exchange_fee_rate
-            ),
+            "transfer_fee_rate": StrategyResearchService._optional_decimal_str(transfer_fee_rate),
+            "exchange_fee_rate": StrategyResearchService._optional_decimal_str(exchange_fee_rate),
             "code_version": code_version,
             "data_version": data_version,
             "strategy_input_snapshot": strategy_input_snapshot,
@@ -850,6 +1001,13 @@ class StrategyResearchService:
             ),
             "training_end_date": training_end_date.isoformat() if training_end_date else None,
         }
+        if selection is not None:
+            # Only per-window selection runs carry these keys; the disabled
+            # path keeps the historical contract shape so validation-report
+            # comparable keys stay stable for existing runs.
+            contract["selection_policy"] = selection["policy"]
+            contract["selection_result"] = selection["result"]
+        return contract
 
     @staticmethod
     def _validate_validation_window(

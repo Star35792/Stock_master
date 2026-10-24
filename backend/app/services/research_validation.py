@@ -44,6 +44,7 @@ _COMPARABLE_PARAMETER_KEYS = (
     "minimum_score_policy",
     "minimum_score",
     "invested_weight",
+    "selection_policy",
 )
 
 
@@ -149,6 +150,10 @@ class ResearchValidationReportService:
             limitation=(
                 "Training dates are recorded, but training, parameter selection, and "
                 "artifact provenance are not verified; overlapping windows are not compounded."
+                if runs[0].parameters.get("selection_policy") is None
+                else "Per-window training selection ran under a versioned policy, but "
+                "artifact provenance is still not verified; overlapping windows are "
+                "not compounded."
             ),
             windows=windows,
             aggregate=self._aggregate(successful),

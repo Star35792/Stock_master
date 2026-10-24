@@ -181,9 +181,7 @@ class FactorSelectionBacktestRequest(BaseModel):
     commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
     slippage_bps: Decimal = Field(default=Decimal("2"), ge=0)
     lot_size: int = Field(default=100, gt=0)
-    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = (
-        "linear_commission_v1"
-    )
+    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = "linear_commission_v1"
     min_commission: Decimal | None = Field(default=None, ge=0)
     sell_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
@@ -241,15 +239,9 @@ class RollingWindowRequest(BaseModel):
     exchange: Literal["SH", "SZ", "BJ", "HK"]
     start_date: date
     end_date: date
-    training_days: int = Field(
-        gt=0, le=1000, description="Training-window open trading dates"
-    )
-    test_days: int = Field(
-        gt=0, le=1000, description="Test-window open trading dates"
-    )
-    step_days: int = Field(
-        gt=0, le=1000, description="Open trading dates between window starts"
-    )
+    training_days: int = Field(gt=0, le=1000, description="Training-window open trading dates")
+    test_days: int = Field(gt=0, le=1000, description="Test-window open trading dates")
+    step_days: int = Field(gt=0, le=1000, description="Open trading dates between window starts")
 
 
 class RollingWindowRead(BaseModel):
@@ -259,28 +251,20 @@ class RollingWindowRead(BaseModel):
     training_end_date: date
     test_start_date: date
     test_end_date: date
-    execution_status: Literal[
-        "planning_only", "artifact_created", "run_completed"
-    ] = "planning_only"
+    execution_status: Literal["planning_only", "artifact_created", "run_completed"] = (
+        "planning_only"
+    )
 
 
 class RollingFactorSelectionBacktestRequest(BaseModel):
     exchange: Literal["SH", "SZ", "BJ", "HK"]
     start_date: date
     end_date: date
-    training_days: int = Field(
-        gt=0, le=1000, description="Training-window open trading dates"
-    )
-    test_days: int = Field(
-        gt=0, le=1000, description="Test-window open trading dates"
-    )
-    step_days: int = Field(
-        gt=0, le=1000, description="Open trading dates between window starts"
-    )
+    training_days: int = Field(gt=0, le=1000, description="Training-window open trading dates")
+    test_days: int = Field(gt=0, le=1000, description="Test-window open trading dates")
+    step_days: int = Field(gt=0, le=1000, description="Open trading dates between window starts")
     name: str = Field(min_length=1, max_length=100)
-    strategy_name: str = Field(
-        default="factor_selection", min_length=1, max_length=100
-    )
+    strategy_name: str = Field(default="factor_selection", min_length=1, max_length=100)
     factor_specs: list[FactorScoreSpecRequest] = Field(min_length=1)
     top_n: int = Field(gt=0)
     signal_lag: int = Field(default=1, ge=1)
@@ -293,9 +277,7 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
     )
     coverage_ratio: Decimal | None = Field(default=None, gt=0, le=1)
     weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
-    minimum_score_policy: MinimumScorePolicy = (
-        MinimumScorePolicy.ALWAYS_FULLY_INVESTED
-    )
+    minimum_score_policy: MinimumScorePolicy = MinimumScorePolicy.ALWAYS_FULLY_INVESTED
     minimum_score: Decimal | None = Field(default=None, ge=0, le=1)
     invested_weight: Decimal = Field(default=Decimal("1"), gt=0, le=1)
     portfolio_constraints: BacktestPortfolioConstraintsRequest | None = None
@@ -304,15 +286,21 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
     commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
     slippage_bps: Decimal = Field(default=Decimal("2"), ge=0)
     lot_size: int = Field(default=100, gt=0)
-    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = (
-        "linear_commission_v1"
-    )
+    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = "linear_commission_v1"
     min_commission: Decimal | None = Field(default=None, ge=0)
     sell_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
     exchange_fee_rate: Decimal | None = Field(default=None, ge=0)
     code_version: str = Field(min_length=1)
     data_version: str = Field(min_length=1)
+    selection_policy: Literal["training_ic_v1"] | None = Field(
+        default=None,
+        description=(
+            "Optional per-window training selection policy; when set, the "
+            "candidate factor_specs are re-scored on every training window "
+            "and only artifact-bound selections drive the test window"
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_weighting_mode_and_invested_weight(

@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional comma-separated category blocklist.",
     )
     parser.add_argument("--size-factor-name", default="market_cap")
-    parser.add_argument("--size-factor-version", default="v1-qfq")
+    parser.add_argument("--size-factor-version", default="v1")
     parser.add_argument(
         "--no-size-neutral",
         action="store_true",

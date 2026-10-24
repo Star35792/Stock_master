@@ -102,7 +102,7 @@ class FactorBatchProfileRunRequest(BaseModel):
     categories: list[str] | None = None
     excluded_categories: list[str] | None = None
     size_factor_name: str | None = "market_cap"
-    size_factor_version: str | None = "v1-qfq"
+    size_factor_version: str | None = "v1"
     code_version: str = "local"
     release_id: str | None = None
 

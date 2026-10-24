@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import StrategyResearchService
+from app.services.training_factor_selector import TrainingSelectionPolicy
 from app.strategies import FactorScoreSpec
 
 
@@ -33,13 +34,9 @@ class FakeFactorValueRepository:
         start_date = kwargs["start_date"]
         end_date = kwargs["end_date"]
         if factor_name == "momentum_20":
-            return self._rows_for_range(
-                start_date, end_date, base_value=Decimal("1"), run_id=11
-            )
+            return self._rows_for_range(start_date, end_date, base_value=Decimal("1"), run_id=11)
         if factor_name == "quality_20":
-            return self._rows_for_range(
-                start_date, end_date, base_value=Decimal("3"), run_id=12
-            )
+            return self._rows_for_range(start_date, end_date, base_value=Decimal("3"), run_id=12)
         return []
 
     def _rows_for_range(
@@ -252,9 +249,7 @@ def test_strategy_research_service_runs_factor_selection_backtest() -> None:
     contract = backtest_service.kwargs["research_contract"]
     assert contract["benchmark"] == "000300.SH"
     assert contract["allowed_security_types"] == ["stock"]
-    assert contract["strategy_input_snapshot"]["contract_version"] == (
-        "strategy_factor_frame_v1"
-    )
+    assert contract["strategy_input_snapshot"]["contract_version"] == ("strategy_factor_frame_v1")
     assert contract["strategy_input_snapshot"]["as_of_date"] == "2026-07-01"
     assert contract["strategy_input_snapshot"]["row_count"] == 4
     assert contract["strategy_input_snapshot"]["factor_run_ids"] == [11, 12]
@@ -466,16 +461,12 @@ def test_strategy_research_service_runs_rolling_factor_selection() -> None:
 
     assert len(results) == 4
     assert [result.window.index for result in results] == [0, 1, 2, 3]
-    assert all(
-        result.window.execution_status == "run_completed" for result in results
-    )
+    assert all(result.window.execution_status == "run_completed" for result in results)
     assert len(training_artifact_repository.artifacts) == 4
     assert len(backtest_service.calls) == 4
 
     first_artifact = training_artifact_repository.artifacts[0]
-    assert first_artifact.window_id == (
-        "rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08"
-    )
+    assert first_artifact.window_id == ("rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08")
     assert first_artifact.training_start_date == date(2026, 1, 2)
     assert first_artifact.test_end_date == date(2026, 1, 8)
     assert first_artifact.artifact_hash is not None
@@ -739,14 +730,18 @@ class _RotatingFactorRepository(FakeFactorValueRepository):
             bbb = Decimal("2") if trade_date < week_three_start else Decimal("1")
             rows.append(
                 SimpleNamespace(
-                    trade_date=trade_date, symbol="AAA",
+                    trade_date=trade_date,
+                    symbol="AAA",
                     value=Decimal("1") if trade_date < week_three_start else Decimal("3"),
                     run_id=run_id,
                 )
             )
             rows.append(
                 SimpleNamespace(
-                    trade_date=trade_date, symbol="BBB", value=bbb, run_id=run_id,
+                    trade_date=trade_date,
+                    symbol="BBB",
+                    value=bbb,
+                    run_id=run_id,
                 )
             )
         return rows
@@ -821,3 +816,141 @@ def test_rolling_rejects_non_daily_rebalance_for_non_sh_exchange() -> None:
             code_version="abc",
             data_version="dv",
         )
+
+
+def test_rolling_selection_requires_warm_research_source() -> None:
+    service = StrategyResearchService(
+        factor_value_repository=FakeFactorValueRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+        backtest_service=FakeBacktestService(),
+        training_artifact_repository=FakeTrainingArtifactRepository(),
+    )
+    service.research_read_source = "control"
+
+    with pytest.raises(ValueError, match="requires research_read_source=warm"):
+        service.run_rolling_factor_selection(
+            object(),
+            exchange="SH",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 16),
+            training_days=3,
+            test_days=2,
+            step_days=2,
+            name="selection-control-rejected",
+            factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+            top_n=1,
+            allowed_security_types={"stock"},
+            adjust_type="qfq",
+            initial_cash=Decimal("100000"),
+            commission_rate=Decimal("0.0003"),
+            slippage_bps=Decimal("2"),
+            lot_size=100,
+            code_version="abc123",
+            data_version="market-qfq-20260720",
+            selection_policy=TrainingSelectionPolicy(),
+        )
+
+
+def test_rolling_with_selection_binds_artifact_and_selected_specs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import strategy_research as strategy_research_module
+    from app.services.training_factor_selector import TrainingSelectionResult
+
+    spec = FactorScoreSpec("momentum_20", "v1-qfq")
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    training_artifact_repository = FakeTrainingArtifactRepository()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+        backtest_service=backtest_service,
+        training_artifact_repository=training_artifact_repository,
+    )
+
+    def fake_select_training_factors(**kwargs):
+        candidates = kwargs["candidates"]
+        selected = [
+            FactorScoreSpec(
+                candidates[0].factor_name,
+                candidates[0].factor_version,
+                weight=Decimal("1"),
+                higher_is_better=not candidates[0].higher_is_better,
+            )
+        ]
+        return TrainingSelectionResult(
+            policy=kwargs["policy"],
+            config_hash=kwargs["policy"].config_hash(candidates),
+            training_start_date=kwargs["training_start_date"],
+            training_end_date=kwargs["training_end_date"],
+            training_open_dates=3,
+            selected_specs=selected,
+            stats=[],
+            dropped_candidates=[],
+            price_source={"prices_qfq_path": "fake", "release_tag": "fake"},
+        )
+
+    monkeypatch.setattr(
+        strategy_research_module, "select_training_factors", fake_select_training_factors
+    )
+    monkeypatch.setattr(
+        service,
+        "_load_qfq_closes",
+        lambda db, *, start_date, end_date: (
+            {"AAA": {}, "BBB": {}},
+            {"prices_qfq_path": "fake", "release_tag": "fake"},
+        ),
+    )
+
+    policy = TrainingSelectionPolicy()
+    results = service.run_rolling_factor_selection(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+        name="rolling-selection",
+        factor_specs=[spec],
+        top_n=1,
+        allowed_security_types={"stock"},
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+        selection_policy=policy,
+    )
+
+    config_hash = policy.config_hash([spec])
+    base_id = "rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08"
+    suffixed_id = f"{base_id}|sel-training_ic_v1-{config_hash}"
+    assert len(results) == 4
+    assert results[0].window.window_id == suffixed_id
+    assert results[0].selection_summary is not None
+    assert results[0].selection_summary["price_source"] == {
+        "prices_qfq_path": "fake",
+        "release_tag": "fake",
+    }
+
+    artifact = training_artifact_repository.artifacts[0]
+    assert artifact.window_id == suffixed_id
+    snapshot = artifact.training_input_snapshot
+    assert snapshot["contract_version"] == "rolling_training_input_v2"
+    assert snapshot["selection"]["selected"][0]["higher_is_better"] is False
+    assert snapshot["factor_specs"][0]["higher_is_better"] is True
+
+    call = backtest_service.calls[0]
+    contract = call["research_contract"]
+    assert contract["validation_window_id"] == suffixed_id
+    # The contract keeps the candidate pool in factor_specs for validation
+    # comparability; the window selection travels in dedicated keys.
+    assert contract["factor_specs"][0]["higher_is_better"] is True
+    assert contract["selection_policy"]["config_hash"] == config_hash
+    assert contract["selection_result"]["selected"][0]["higher_is_better"] is False
+    assert contract["validation_window_id"] == suffixed_id

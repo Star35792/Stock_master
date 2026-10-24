@@ -1,0 +1,126 @@
+{
+  "start_date": "2022-05-05",
+  "end_date": "2024-04-30",
+  "top_n": 20,
+  "spec_set": "ic_aligned",
+  "exchange": "SH",
+  "training_days": 120,
+  "test_days": 60,
+  "step_days": 60,
+  "rebalance_rule": "every_n_trading_days",
+  "rebalance_interval": 20,
+  "selection_policy": "none",
+  "portfolio_constraints": {
+    "max_symbol_weight": "0.20",
+    "max_industry_weight": "0.40",
+    "cash_reserve_rate": "0.05",
+    "security_type_budgets": null
+  },
+  "factor_version": "v2-qfq-2y-noca",
+  "research_read_source": "warm",
+  "interpretation": null,
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation",
+    "training_window_does_not_select_parameters",
+    "every_n_anchor_restarts_per_window"
+  ],
+  "windows": [
+    {
+      "window_id": "rolling:SH:2022-05-05:2022-10-28:2022-10-31:2023-01-30",
+      "test_window": [
+        "2022-10-31",
+        "2023-01-30"
+      ],
+      "run_id": 45,
+      "total_return": "0.1183693721",
+      "maximum_drawdown": "-0.0740169626602253309462307331",
+      "turnover_rate": "3.919920247551673803236398491",
+      "total_commission": "2364.658735",
+      "sharpe_ratio": "3.604141831885990932082519075",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2022-07-29:2023-01-30:2023-01-31:2023-04-25",
+      "test_window": [
+        "2023-01-31",
+        "2023-04-25"
+      ],
+      "run_id": 46,
+      "total_return": "-0.0804149807",
+      "maximum_drawdown": "-0.1061340289642021103776745953",
+      "turnover_rate": "3.761571080659903513300812718",
+      "total_commission": "2093.414744",
+      "sharpe_ratio": "-2.967696527947958045261626982",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2022-10-31:2023-04-25:2023-04-26:2023-07-25",
+      "test_window": [
+        "2023-04-26",
+        "2023-07-25"
+      ],
+      "run_id": 47,
+      "total_return": "0.0699749032",
+      "maximum_drawdown": "-0.0678903780430996518513001797",
+      "turnover_rate": "4.002988369250450111594652185",
+      "total_commission": "2317.234831",
+      "sharpe_ratio": "2.276720038368479673267246047",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2023-01-31:2023-07-25:2023-07-26:2023-10-25",
+      "test_window": [
+        "2023-07-26",
+        "2023-10-25"
+      ],
+      "run_id": 48,
+      "total_return": "-0.0186080624",
+      "maximum_drawdown": "-0.0811481557771958443232108701",
+      "turnover_rate": "4.227334722426571338647914057",
+      "total_commission": "2362.977610",
+      "sharpe_ratio": "-0.4429480391086642384329583449",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2023-04-26:2023-10-25:2023-10-26:2024-01-18",
+      "test_window": [
+        "2023-10-26",
+        "2024-01-18"
+      ],
+      "run_id": 49,
+      "total_return": "0.0265561467",
+      "maximum_drawdown": "-0.0477835326000684255845742547",
+      "turnover_rate": "4.262780544814360479532518693",
+      "total_commission": "2513.869678",
+      "sharpe_ratio": "0.9397347566770221405386946690",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2023-07-26:2024-01-18:2024-01-19:2024-04-23",
+      "test_window": [
+        "2024-01-19",
+        "2024-04-23"
+      ],
+      "run_id": 50,
+      "total_return": "-0.1299123792",
+      "maximum_drawdown": "-0.2885495773955912681116475131",
+      "turnover_rate": "4.566675242980746251994173618",
+      "total_commission": "2302.535649",
+      "sharpe_ratio": "-1.067945305668641823087101929",
+      "selection": null
+    }
+  ],
+  "summary": {
+    "window_count": 6,
+    "positive_windows": 3,
+    "mean_return": "-0.002339166716666666666666666667",
+    "min_return": "-0.1299123792",
+    "max_return": "0.1183693721",
+    "worst_drawdown": "-0.2885495773955912681116475131"
+  }
+}

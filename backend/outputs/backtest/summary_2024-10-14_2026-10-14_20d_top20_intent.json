@@ -1,0 +1,76 @@
+{
+  "params": {
+    "start": "2024-10-14",
+    "end": "2026-10-14",
+    "rebalance_days": 20,
+    "top_n": 20,
+    "initial_cash": 1000000,
+    "max_price": 15,
+    "min_ret20": -0.35,
+    "max_ret20": -0.15,
+    "min_ret5": -0.05,
+    "max_ret5": 0.15,
+    "min_avg_amount": 10000000,
+    "rank_mode": "intent",
+    "include_financials": false,
+    "compare_equity": null,
+    "block_days": null,
+    "bootstrap": 20000,
+    "seed": 42,
+    "out_dir": "outputs/backtest"
+  },
+  "metrics": {
+    "total_return": 0.07825992135860194,
+    "annualized_return": 0.03998240033171241,
+    "max_drawdown": -0.24329864441874438,
+    "sharpe": 0.2065812218722842,
+    "calmar": 0.16433466132634175,
+    "win_rate_daily": 0.5204301075268817,
+    "annual_turnover": 9.938631604851755,
+    "final_equity": 1078259.921358602,
+    "trading_days": 466,
+    "years": 1.9219712525667352,
+    "benchmark_total_return": 0.0209506841953655,
+    "excess_return": 0.05730923716323644
+  },
+  "signal_periods": 24,
+  "candidate_symbols": 355,
+  "trade_count": 754,
+  "data_snapshot": {
+    "daily_bar": {
+      "none": {
+        "rows": 10668759,
+        "max_trade_date": "2026-10-21"
+      },
+      "qfq": {
+        "rows": 10668757,
+        "max_trade_date": "2026-10-19"
+      }
+    },
+    "corporate_action": {
+      "rows": 57734,
+      "max_ex_date": "2026-10-26"
+    },
+    "adjustment_factor_release": "a_share_adjustment_factors_event_none_all_20261019",
+    "latest_import_batches": [
+      {
+        "batch_no": "hithink_daily_bar_20261021034913_47ea230a",
+        "dataset": "daily_bar",
+        "status": "success",
+        "release_tag": null
+      },
+      {
+        "batch_no": "hithink_daily_bar_20261021034628_e1cad4eb",
+        "dataset": "daily_bar",
+        "status": "success",
+        "release_tag": null
+      },
+      {
+        "batch_no": "hithink_daily_bar_20261021034422_7853bc03",
+        "dataset": "daily_bar",
+        "status": "success",
+        "release_tag": null
+      }
+    ]
+  }
+}

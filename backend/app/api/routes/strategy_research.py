@@ -20,6 +20,7 @@ from app.services.backtest import BacktestDataChangedError
 from app.services.price_value_backtest import PriceValueBacktestService
 from app.services.price_value_research import PriceValueResearchService
 from app.services.price_value_screen import PriceValueScreenService
+from app.services.training_factor_selector import build_training_selection_policy
 from app.strategies import FactorScoreSpec
 
 router = APIRouter(prefix="/strategy-research", tags=["strategy-research"])
@@ -197,9 +198,7 @@ def run_factor_selection_backtest(
             rebalance_rule=payload.rebalance_rule,
             holding_period=payload.holding_period,
             rebalance_interval=payload.rebalance_interval,
-            portfolio_constraints=_to_portfolio_constraints(
-                payload.portfolio_constraints
-            ),
+            portfolio_constraints=_to_portfolio_constraints(payload.portfolio_constraints),
             benchmark=payload.benchmark,
             allowed_security_types=set(payload.allowed_security_types),
             coverage_ratio=payload.coverage_ratio,
@@ -290,9 +289,7 @@ def run_rolling_factor_selection_backtests(
             rebalance_rule=payload.rebalance_rule,
             holding_period=payload.holding_period,
             rebalance_interval=payload.rebalance_interval,
-            portfolio_constraints=_to_portfolio_constraints(
-                payload.portfolio_constraints
-            ),
+            portfolio_constraints=_to_portfolio_constraints(payload.portfolio_constraints),
             benchmark=payload.benchmark,
             allowed_security_types=set(payload.allowed_security_types),
             coverage_ratio=payload.coverage_ratio,
@@ -313,6 +310,11 @@ def run_rolling_factor_selection_backtests(
             research_db=research_db,
             code_version=payload.code_version,
             data_version=payload.data_version,
+            selection_policy=(
+                build_training_selection_policy(payload.selection_policy)
+                if payload.selection_policy
+                else None
+            ),
         )
         db.commit()
         research_db.commit()
