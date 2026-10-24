@@ -1,0 +1,71 @@
+{
+  "run_id": 15,
+  "window": [
+    "2025-11-03",
+    "2026-04-30"
+  ],
+  "top_n": 20,
+  "rebalance_rule": "weekly",
+  "rebalance_interval": 1,
+  "portfolio_constraints": null,
+  "factors": [
+    {
+      "name": "momentum_20",
+      "weight": "1",
+      "higher_is_better": false
+    },
+    {
+      "name": "momentum_60",
+      "weight": "1",
+      "higher_is_better": false
+    },
+    {
+      "name": "volatility_20",
+      "weight": "1",
+      "higher_is_better": false
+    },
+    {
+      "name": "downside_volatility_20",
+      "weight": "1",
+      "higher_is_better": false
+    },
+    {
+      "name": "max_drawdown_20",
+      "weight": "1",
+      "higher_is_better": true
+    },
+    {
+      "name": "liquidity_20",
+      "weight": "1",
+      "higher_is_better": false
+    },
+    {
+      "name": "volume_stability_20",
+      "weight": "1",
+      "higher_is_better": true
+    }
+  ],
+  "spec_set": "ic_aligned",
+  "factor_version": "v1-qfq",
+  "research_read_source": "warm",
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "single_window_no_out_of_sample_validation"
+  ],
+  "performance": {
+    "total_return": "0.0663641003",
+    "annualized_return": "0.1457609953835095",
+    "maximum_drawdown": "-0.1117245919749996532069938389",
+    "annualized_volatility": "0.1727472912722235178173379779",
+    "sharpe_ratio": "0.8749554872389874757590313216",
+    "turnover_rate": "28.96128370859118597891910692",
+    "total_commission": "18481.225132",
+    "daily_win_rate": "0.5210084033613445378151260504",
+    "calmar_ratio": "1.304645582560069604066804656",
+    "profit_loss_ratio": "0.9993156571847848675401544120"
+  }
+}

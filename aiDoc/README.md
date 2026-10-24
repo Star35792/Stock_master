@@ -34,6 +34,7 @@
 | 选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |
 | 研究产出修复与因子证据 | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) | `aiDoc/plans/roadmap.md`、[温层因子回填与 IC 证据](data/20261023-0247-warm-factor-ic-evidence.md) |
 | 温层因子回填、IC 证据与回测口径 | [温层因子回填与 IC 证据](data/20261023-0247-warm-factor-ic-evidence.md) | `aiDoc/relations/trusted-daily-data-center.md` 第 10.1 节 |
+| 调仓频率与净收益（20 交易日调仓平台复现） | [调仓频率净收益证据](research/20261024-1205-rebalance-frequency-net-return.md) | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) P3 |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
 | 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | `aiDoc/plans/decision-review-protocol.md`、本文件长期协作机制小节 |
 

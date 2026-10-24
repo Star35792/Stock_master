@@ -48,7 +48,9 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.config.settings import settings  # noqa: E402
 from app.database.session import SessionLocal  # noqa: E402
+from app.portfolio import PortfolioConstraints  # noqa: E402
 from app.schemas.strategy import (  # noqa: E402
+    BacktestPortfolioConstraintsRequest,
     FactorScoreSpecRequest,
     FactorSelectionBacktestRequest,
     WeightingMode,
@@ -121,12 +123,22 @@ def build_request(args: argparse.Namespace) -> FactorSelectionBacktestRequest:
         factor_specs=specs,
         top_n=args.top_n,
         signal_lag=1,
-        rebalance_rule="daily",
+        rebalance_rule=args.rebalance_rule,
+        rebalance_interval=args.rebalance_interval,
         holding_period=1,
         benchmark=args.benchmark,
         allowed_security_types={"stock"},
         coverage_ratio=Decimal("0.8"),
         weighting_mode=WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED,
+        portfolio_constraints=(
+            BacktestPortfolioConstraintsRequest(
+                max_symbol_weight=Decimal(args.max_symbol_weight),
+                max_industry_weight=Decimal(args.max_industry_weight),
+                cash_reserve_rate=Decimal(args.cash_reserve_rate),
+            )
+            if args.enable_portfolio_constraints
+            else None
+        ),
         adjust_type="qfq",
         start_date=date.fromisoformat(args.start_date),
         end_date=date.fromisoformat(args.end_date),
@@ -160,6 +172,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--initial-cash", default="1000000")
     parser.add_argument("--benchmark", default=None)
     parser.add_argument(
+        "--rebalance-rule",
+        choices=["daily", "weekly", "monthly", "every_n_trading_days"],
+        default="daily",
+        help="调仓频率；every_n_trading_days 需配 --rebalance-interval",
+    )
+    parser.add_argument(
+        "--rebalance-interval",
+        type=int,
+        default=1,
+        help="every_n_trading_days 的交易日间隔（如 20 = 每 20 个交易日调仓）",
+    )
+    parser.add_argument(
+        "--enable-portfolio-constraints",
+        action="store_true",
+        help="启用与 paper 链路同源的组合约束（单标/行业/现金留存）",
+    )
+    parser.add_argument("--max-symbol-weight", default="0.20")
+    parser.add_argument("--max-industry-weight", default="0.40")
+    parser.add_argument("--cash-reserve-rate", default="0.05")
+    parser.add_argument(
         "--name", default=f"warm-factor-selection-{datetime.now():%Y%m%d-%H%M%S}"
     )
     parser.add_argument("--code-version", default="local")
@@ -191,6 +223,17 @@ def main(argv: list[str] | None = None) -> int:
             signal_lag=request.signal_lag,
             rebalance_rule=request.rebalance_rule,
             holding_period=request.holding_period,
+            rebalance_interval=request.rebalance_interval,
+            portfolio_constraints=(
+                None
+                if request.portfolio_constraints is None
+                else PortfolioConstraints(
+                    max_symbol_weight=request.portfolio_constraints.max_symbol_weight,
+                    max_industry_weight=request.portfolio_constraints.max_industry_weight,
+                    cash_reserve_rate=request.portfolio_constraints.cash_reserve_rate,
+                    security_type_budgets=request.portfolio_constraints.security_type_budgets,
+                )
+            ),
             benchmark=request.benchmark,
             allowed_security_types=request.allowed_security_types,
             coverage_ratio=request.coverage_ratio,
@@ -224,6 +267,13 @@ def main(argv: list[str] | None = None) -> int:
             "run_id": result.run_id,
             "window": [args.start_date, args.end_date],
             "top_n": args.top_n,
+            "rebalance_rule": args.rebalance_rule,
+            "rebalance_interval": args.rebalance_interval,
+            "portfolio_constraints": (
+                None
+                if request.portfolio_constraints is None
+                else request.portfolio_constraints.model_dump(mode="json")
+            ),
             "factors": [
                 {"name": name, "weight": str(w), "higher_is_better": h}
                 for name, w, h in SPEC_SETS[args.spec_set]
