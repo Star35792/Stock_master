@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.strategy_research import router
+from app.database.research_session import initialize_research_database
 from app.database.session import get_db, initialize_database
 from app.models.market import (
     CorporateAction,
@@ -57,6 +58,7 @@ def backtest_payload(**changes):
 def database(tmp_path):
     engine = create_engine(f"duckdb:///{tmp_path / 'price-value.duckdb'}")
     initialize_database(engine)
+    initialize_research_database(engine)
     with Session(engine) as db:
         db.add(
             Security(
@@ -109,6 +111,11 @@ def client(database):
             yield db
 
     app.dependency_overrides[get_db] = session
+    # Research artifacts share this test database (initialized in the
+    # database fixture via initialize_research_database).
+    from app.database.research_session import get_research_db
+
+    app.dependency_overrides[get_research_db] = session
     with TestClient(app) as test_client:
         yield test_client
 
@@ -228,6 +235,7 @@ def test_current_unfinished_session_is_rejected(database):
 def database_with_suspension(tmp_path):
     engine = create_engine(f"duckdb:///{tmp_path / 'price-value-suspension.duckdb'}")
     initialize_database(engine)
+    initialize_research_database(engine)
     with Session(engine) as db:
         db.add(
             Security(

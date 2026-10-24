@@ -333,7 +333,12 @@ class DailyBacktestService:
         training_artifact_id: int | None = None,
         portfolio_constraints: PortfolioConstraints | None = None,
         security_profiles: dict[str, tuple[str, str]] | None = None,
+        research_db: Session | None = None,
     ) -> PersistedBacktestResult:
+        # Strategy artifacts live in the standalone research database; the
+        # main session still serves market/calendar reads. ``None`` keeps the
+        # single-session behaviour used by tests and legacy callers.
+        artifacts_db = research_db if research_db is not None else db
         if start_date > end_date:
             raise ValueError("start_date must be earlier than or equal to end_date")
         if adjust_type not in {"none", "qfq", "hfq"}:
@@ -421,7 +426,7 @@ class DailyBacktestService:
                 "signals": serialized_signals,
             }
         run = self.backtest_repository.create_run(
-            db,
+            artifacts_db,
             name=name,
             strategy_name=strategy_name,
             parameters=parameters,
@@ -467,7 +472,7 @@ class DailyBacktestService:
                 "verification_status": "pending",
             }
             self.backtest_repository.update_data_snapshot(
-                db,
+                artifacts_db,
                 run=run,
                 data_snapshot=data_snapshot,
             )
@@ -521,7 +526,7 @@ class DailyBacktestService:
                 "post_run_sha256": snapshot_after["sha256"],
             }
             self.backtest_repository.update_data_snapshot(
-                db,
+                artifacts_db,
                 run=run,
                 data_snapshot=data_snapshot,
             )
@@ -530,10 +535,12 @@ class DailyBacktestService:
                     "backtest_data_changed: trusted market data changed while "
                     "the backtest was running"
                 )
-            self.backtest_repository.save_result(db, run=run, result=result)
+            self.backtest_repository.save_result(artifacts_db, run=run, result=result)
         except Exception as exc:
-            self.backtest_repository.fail_run(db, run=run, error_message=str(exc))
-            db.commit()
+            self.backtest_repository.fail_run(
+                artifacts_db, run=run, error_message=str(exc)
+            )
+            artifacts_db.commit()
             raise
         return PersistedBacktestResult(run_id=run.id, result=result)
 
@@ -786,9 +793,14 @@ class BacktestQueryService:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
 
     def get_benchmark_comparison(
-        self, db: Session, *, run_id: int
+        self,
+        db: Session,
+        *,
+        run_id: int,
+        research_db: Session | None = None,
     ) -> BacktestBenchmarkRead:
-        run = self.backtest_repository.get_run(db, run_id=run_id)
+        artifacts_db = research_db if research_db is not None else db
+        run = self.backtest_repository.get_run(artifacts_db, run_id=run_id)
         if run is None:
             raise ValueError("backtest run not found")
         if run.status != "success":
@@ -1065,9 +1077,11 @@ class BacktestQueryService:
         run_id: int,
         code_version: str,
         style_factors: dict[str, tuple[str, str]] | None = None,
+        research_db: Session | None = None,
     ) -> BacktestPerformanceRead:
         self.performance_service.analyze(
             db,
+            research_db=research_db,
             run_id=run_id,
             code_version=code_version,
             style_factors=style_factors,

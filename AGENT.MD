@@ -57,7 +57,7 @@
 
 ## 当前项目定位
 
-Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，面向单机单用户采用极简分层存储：DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载控制面、事务事实与 `raw -> market -> factor -> ... -> trade` 全链路，大体量列式温层落本地 Parquet（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。唯一例外：手工录入的真实持仓账本（`positions` 域，`position_book`/`position_trade`）存独立 SQLite 文件 `data/positions.db`（决策见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`），估值价格仍取 DuckDB `market` 可信层。除此之外经评估不引入 PostgreSQL/SQLite/MinIO/Redis。`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，接入 `daily_loop` 与 Parquet release 为后续切片。
+Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，面向单机单用户采用极简分层存储：DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载控制面、事务事实与 `raw -> market -> factor -> ... -> trade` 全链路，大体量列式温层落本地 Parquet（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。两个已决策的例外：手工录入的真实持仓账本（`positions` 域，`position_book`/`position_trade`）存独立 SQLite 文件 `data/positions.db`（决策见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`），估值价格仍取 DuckDB `market` 可信层；strategy 回测产物 6 张表存独立 `data/research.duckdb`，研究脚本与 API/维护进程分域并行写（`aiDoc/relations/20261024-1427-research-database-split.md`）。除此之外经评估不引入 PostgreSQL/SQLite/MinIO/Redis。`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，接入 `daily_loop` 与 Parquet release 为后续切片。
 
 **项目边界（重要）**：本项目**只用于选股研究与持仓管理**，不连接券商，不做实盘自动化交易，不发送任何真实订单。系统产出止于「研究结论 + 选股名单 + 组合持仓方案 + 风险预算与持仓推演」，由人工在外部终端自行下单。`trade` 域在此语义下仅指本地模拟推演账户，不是通向真实账户的跳板；不引入真实账户只读适配器、外部订单幂等状态机、券商回报对账或 kill switch。
 
@@ -149,7 +149,7 @@ models / database
 
 - 使用 Python 3.13。
 - 使用 FastAPI、SQLAlchemy 2.x。
-- DuckDB 单库（`data/stock_master.duckdb`）承载控制面、审计、组合、风控、持仓推演等强事务数据与大体量分析事实的查询；大体量列式温层落本地 Parquet。唯一例外是手工记账的真实持仓账本存独立 SQLite（`data/positions.db`，见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）。除此之外不引入 PostgreSQL、SQLite、MinIO 或 Redis（决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。
+- DuckDB 单库（`data/stock_master.duckdb`）承载控制面、审计、组合、风控、持仓推演等强事务数据与大体量分析事实的查询；大体量列式温层落本地 Parquet。两个例外：手工记账的真实持仓账本存独立 SQLite（`data/positions.db`，见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）；strategy 回测产物存独立 `data/research.duckdb`（服务层以 `research_db=None` 兼容参数贯穿，研究脚本持 `data/research_write.lock`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）。维护/研究脚本写库前必须走 `app/utils/duckdb_write_lock.py` 对应域的锁。除此之外不引入 PostgreSQL、SQLite、MinIO 或 Redis（决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。
 - 数据中心核心价格、金额和比率必须使用精确定点类型；DuckDB 使用 `Numeric`/`DECIMAL`，Parquet 使用 `DECIMAL`，不要用浮点保存核心金融数据。
 - 字段命名使用 snake_case。
 - 证券代码统一命名为 `symbol`。

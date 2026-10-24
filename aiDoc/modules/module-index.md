@@ -22,6 +22,7 @@
 | `risk` | 下单前风控内核 |
 | `trade` | 本地模拟推演执行与持仓记录（BrokerAdapter 仅隔离本地模拟回报） |
 | `services.position_book` / `services.position_metrics` / `services.position_analysis` / `services.portfolio_drift` | 真实持仓账本（独立 SQLite）记账与重放推导、共享 Decimal 持仓指标（盈亏/集中度/行业暴露）、paper 账户持仓与净值绩效只读分析、组合草案与真实/模拟持仓的偏离检测（只读建议，不生成订单） |
+| `database.research_session` / `backtest.rebalance` / `utils.duckdb_write_lock` | 独立 research.duckdb 引擎与会话（strategy 产物域，`research_db=None` 兼容贯穿）、回测调仓日选择（daily/weekly/monthly/N 交易日）、DuckDB 跨进程写锁（主库 `duckdb_write.lock` / 研究库 `research_write.lock`） |
 
 当前公共边界：`api` 已暴露行情、数据质量、因子、回测、策略研究、运维查询，以及组合草案、只读风险前数据核对、paper 账本一致性审计、paper 账户不可变净值快照、绑定服务端事实源的正式风险评估、短时人工确认和幂等 paper 执行批次。账本审计只读取既有订单、成交、执行批次、现金和持仓事实并报告差异，不自动修复。执行入口只消费确认记录，重新验证全部哈希并固定使用本地 PaperBrokerAdapter；本项目不接入任何真实账户，也不实现受控交易适配器或实盘自动化交易。
 

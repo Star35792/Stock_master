@@ -190,8 +190,14 @@ class PriceValueBacktestService:
         return bars, days, snapshot
 
     def run(
-        self, db: Session, payload: PriceValueBacktestRequest, *, now: datetime | None = None
+        self,
+        db: Session,
+        payload: PriceValueBacktestRequest,
+        *,
+        now: datetime | None = None,
+        research_db: Session | None = None,
     ) -> PriceValueBacktestResponse:
+        artifacts_db = research_db if research_db is not None else db
         evaluated_at = now or datetime.now(UTC)
         if datetime.combine(payload.end_date, time(16), tzinfo=SHANGHAI) > evaluated_at:
             raise ValueError(
@@ -262,7 +268,7 @@ class PriceValueBacktestService:
             "price_value_report": _json_snapshot(report),
         }
         run = self.runs.create_run(
-            db,
+            artifacts_db,
             name=payload.name,
             strategy_name=STRATEGY_NAME,
             parameters=parameters,
@@ -272,10 +278,13 @@ class PriceValueBacktestService:
             end_date=payload.end_date,
             initial_cash=payload.initial_cash,
         )
-        self.runs.save_result(db, run=run, result=result)
+        self.runs.save_result(artifacts_db, run=run, result=result)
         return PriceValueBacktestResponse(run_id=run.id, **report)
 
-    def get(self, db: Session, run_id: int) -> PriceValueBacktestResponse:
+    def get(
+        self, db: Session, run_id: int, *, research_db: Session | None = None
+    ) -> PriceValueBacktestResponse:
+        db = research_db if research_db is not None else db
         run = self.runs.get_run(db, run_id=run_id)
         if run is None or run.strategy_name != STRATEGY_NAME:
             raise LookupError("price-value backtest not found")

@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # see aiDoc/relations for the storage boundary decision.
     positions_db_path: str = "data/positions.db"
 
+    # Research artifacts (strategy backtest tables) live in their own DuckDB
+    # file so research scripts can write while the API holds the main
+    # database; see the research-split ADR in aiDoc/relations.
+    research_db_path: str = "data/research.duckdb"
+
     akshare_timeout_seconds: int = 30
 
     hithink_finance_api_key: str | None = Field(default=None, repr=False)

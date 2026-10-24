@@ -37,9 +37,13 @@ class BacktestPerformanceService:
         run_id: int,
         code_version: str,
         style_factors: dict[str, tuple[str, str]] | None = None,
+        research_db: Session | None = None,
     ) -> PersistedPerformanceReport:
+        # Strategy inputs persist in the research database; industry and
+        # factor reads stay on the main database.
+        artifacts_db = research_db if research_db is not None else db
         run, equity_rows, trade_rows, position_rows = (
-            self.performance_repository.load_inputs(db, run_id=run_id)
+            self.performance_repository.load_inputs(artifacts_db, run_id=run_id)
         )
         if run is None:
             raise ValueError("backtest run not found")
@@ -70,7 +74,7 @@ class BacktestPerformanceService:
             style_values=style_values,
         )
         performance = self.performance_repository.save(
-            db,
+            artifacts_db,
             run_id=run_id,
             report=report,
             code_version=code_version,

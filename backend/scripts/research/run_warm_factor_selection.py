@@ -47,6 +47,10 @@ os.environ.setdefault("RESEARCH_RELEASE_TAG", _PRE_ARGS.release_tag)
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.config.settings import settings  # noqa: E402
+from app.database.research_session import (  # noqa: E402
+    ResearchSessionLocal,
+    initialize_research_database,
+)
 from app.database.session import SessionLocal  # noqa: E402
 from app.portfolio import PortfolioConstraints  # noqa: E402
 from app.schemas.strategy import (  # noqa: E402
@@ -58,6 +62,7 @@ from app.schemas.strategy import (  # noqa: E402
 from app.services.performance import BacktestPerformanceService  # noqa: E402
 from app.services.strategy_research import StrategyResearchService  # noqa: E402
 from app.strategies import FactorScoreSpec  # noqa: E402
+from app.utils.duckdb_write_lock import duckdb_write_lock  # noqa: E402
 
 FACTOR_VERSION = "v1-qfq"
 
@@ -202,6 +207,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"research_read_source = {settings.research_read_source}")
     print(f"窗口 {args.start_date} ~ {args.end_date}, top_n={args.top_n}")
 
+    initialize_research_database()
+    # 研究产物写独立 research.duckdb（拿研究写锁），行情/因子仍读主库与温层；
+    # 两库分文件后，本脚本与 API/维护进程不再竞争同一把文件级写锁。
+    with duckdb_write_lock("data/research_write.lock", timeout_seconds=120):
+        research_db: Session = ResearchSessionLocal()
+        try:
+            return _run(args, research_db)
+        finally:
+            research_db.close()
+
+
+def _run(args: argparse.Namespace, research_db: Session) -> int:
     db: Session = SessionLocal()
     try:
         request = build_request(args)
@@ -250,14 +267,16 @@ def main(argv: list[str] | None = None) -> int:
             sell_stamp_duty_rate=request.sell_stamp_duty_rate,
             transfer_fee_rate=request.transfer_fee_rate,
             exchange_fee_rate=request.exchange_fee_rate,
+            research_db=research_db,
             code_version=request.code_version,
             data_version=request.data_version,
         )
-        db.commit()
+        research_db.commit()
         print(f"\nrun_id = {result.run_id}")
 
         report = BacktestPerformanceService().analyze(
             db,
+            research_db=research_db,
             run_id=result.run_id,
             code_version=args.code_version,
             style_factors=None,

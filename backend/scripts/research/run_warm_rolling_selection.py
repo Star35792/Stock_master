@@ -42,12 +42,17 @@ from run_warm_factor_selection import (  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.config.settings import settings  # noqa: E402
+from app.database.research_session import (  # noqa: E402
+    ResearchSessionLocal,
+    initialize_research_database,
+)
 from app.database.session import SessionLocal  # noqa: E402
 from app.portfolio import PortfolioConstraints  # noqa: E402
 from app.schemas.strategy import BacktestPortfolioConstraintsRequest  # noqa: E402
 from app.services.performance import BacktestPerformanceService  # noqa: E402
 from app.services.strategy_research import StrategyResearchService  # noqa: E402
 from app.strategies import FactorScoreSpec  # noqa: E402
+from app.utils.duckdb_write_lock import duckdb_write_lock  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,43 +98,54 @@ def main(argv: list[str] | None = None) -> int:
     )
     # The interval only carries meaning for every_n_trading_days; the service
     # correctly rejects other rules with interval != 1.
-    rebalance_interval = (
+    args.rebalance_interval = (
         args.rebalance_interval
         if args.rebalance_rule == "every_n_trading_days"
         else 1
     )
 
-    specs = [
-        FactorScoreSpec(
-            factor_name=name,
-            factor_version=FACTOR_VERSION,
-            weight=weight,
-            higher_is_better=higher,
-        )
-        for name, weight, higher in SPEC_SETS[args.spec_set]
-    ]
-    constraints_request = (
-        BacktestPortfolioConstraintsRequest(
-            max_symbol_weight=Decimal(args.max_symbol_weight),
-            max_industry_weight=Decimal(args.max_industry_weight),
-            cash_reserve_rate=Decimal(args.cash_reserve_rate),
-        )
-        if args.enable_portfolio_constraints
-        else None
-    )
-    portfolio_constraints = (
-        None
-        if constraints_request is None
-        else PortfolioConstraints(
-            max_symbol_weight=constraints_request.max_symbol_weight,
-            max_industry_weight=constraints_request.max_industry_weight,
-            cash_reserve_rate=constraints_request.cash_reserve_rate,
-            security_type_budgets=constraints_request.security_type_budgets,
-        )
-    )
+    initialize_research_database()
+    # 研究产物写独立 research.duckdb（拿研究写锁），行情/因子仍读主库与温层；
+    # 两库分文件后，本脚本与 API/维护进程不再竞争同一把文件级写锁。
+    with duckdb_write_lock("data/research_write.lock", timeout_seconds=120):
+        research_db: Session = ResearchSessionLocal()
+        try:
+            return _run(args, research_db)
+        finally:
+            research_db.close()
 
+
+def _run(args: argparse.Namespace, research_db: Session) -> int:
     db: Session = SessionLocal()
     try:
+        specs = [
+            FactorScoreSpec(
+                factor_name=name,
+                factor_version=FACTOR_VERSION,
+                weight=weight,
+                higher_is_better=higher,
+            )
+            for name, weight, higher in SPEC_SETS[args.spec_set]
+        ]
+        constraints_request = (
+            BacktestPortfolioConstraintsRequest(
+                max_symbol_weight=Decimal(args.max_symbol_weight),
+                max_industry_weight=Decimal(args.max_industry_weight),
+                cash_reserve_rate=Decimal(args.cash_reserve_rate),
+            )
+            if args.enable_portfolio_constraints
+            else None
+        )
+        portfolio_constraints = (
+            None
+            if constraints_request is None
+            else PortfolioConstraints(
+                max_symbol_weight=constraints_request.max_symbol_weight,
+                max_industry_weight=constraints_request.max_industry_weight,
+                cash_reserve_rate=constraints_request.cash_reserve_rate,
+                security_type_budgets=constraints_request.security_type_budgets,
+            )
+        )
         results = StrategyResearchService().run_rolling_factor_selection(
             db,
             exchange=args.exchange,
@@ -142,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             factor_specs=specs,
             top_n=args.top_n,
             rebalance_rule=args.rebalance_rule,
-            rebalance_interval=rebalance_interval,
+            rebalance_interval=args.rebalance_interval,
             portfolio_constraints=portfolio_constraints,
             allowed_security_types={"stock"},
             adjust_type="qfq",
@@ -155,10 +171,11 @@ def main(argv: list[str] | None = None) -> int:
             sell_stamp_duty_rate=Decimal("0.0005"),
             transfer_fee_rate=Decimal("0.00001"),
             exchange_fee_rate=Decimal("0.0000487"),
+            research_db=research_db,
             code_version=args.code_version,
             data_version=args.data_version,
         )
-        db.commit()
+        research_db.commit()
 
         performance_service = BacktestPerformanceService()
         windows_payload = []
@@ -170,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             persisted = window_result.persisted
             report = performance_service.analyze(
                 db,
+                research_db=research_db,
                 run_id=persisted.run_id,
                 code_version=args.code_version,
                 style_factors=None,

@@ -345,6 +345,7 @@ class StrategyResearchService:
         exchange_fee_rate: Decimal | None,
         training_artifact_id: int | None = None,
         validation_window_id: str | None = None,
+        research_db: Session | None = None,
     ) -> PersistedBacktestResult:
         self._validate_validation_window(
             validation_mode=validation_mode,
@@ -463,6 +464,7 @@ class StrategyResearchService:
         )
         return self.backtest_service.run(
             db,
+            research_db=research_db,
             name=name,
             strategy_name=strategy_name,
             signals=signals,
@@ -523,6 +525,7 @@ class StrategyResearchService:
         sell_stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
+        research_db: Session | None = None,
     ) -> PersistedBacktestResult:
         if validation_mode == "rolling":
             raise ValueError(
@@ -564,6 +567,7 @@ class StrategyResearchService:
             sell_stamp_duty_rate=sell_stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate,
             exchange_fee_rate=exchange_fee_rate,
+            research_db=research_db,
         )
 
     def run_rolling_factor_selection(
@@ -604,6 +608,7 @@ class StrategyResearchService:
         sell_stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
+        research_db: Session | None = None,
     ) -> list[RollingBacktestWindowResult]:
         if rebalance_rule != "daily" and exchange != "SH":
             # Rebalance-date selection is anchored on the SH calendar; HK-only
@@ -635,7 +640,7 @@ class StrategyResearchService:
             }
             security_types = self.security_repository.get_security_types(db, symbols)
             artifact = self._get_or_create_training_artifact(
-                db,
+                research_db if research_db is not None else db,
                 window=window,
                 strategy_name=strategy_name,
                 factor_specs=normalized_specs,
@@ -681,6 +686,7 @@ class StrategyResearchService:
                 exchange_fee_rate=exchange_fee_rate,
                 training_artifact_id=artifact.id,
                 validation_window_id=window.window_id,
+                research_db=research_db,
             )
             results.append(
                 RollingBacktestWindowResult(

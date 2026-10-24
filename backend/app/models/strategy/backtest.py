@@ -21,11 +21,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database.base import Base
+from app.database.research_base import ResearchBase
 from app.models.common import CreatedAtMixin
 
 
-class TrainingArtifact(CreatedAtMixin, Base):
+class TrainingArtifact(CreatedAtMixin, ResearchBase):
     """Immutable record of the training inputs used for one walk-forward window.
 
     The artifact captures the factor specification and a content hash of the
@@ -58,7 +58,7 @@ class TrainingArtifact(CreatedAtMixin, Base):
     data_version: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
-class BacktestRun(CreatedAtMixin, Base):
+class BacktestRun(CreatedAtMixin, ResearchBase):
     __tablename__ = "backtest_run"
     __table_args__ = (
         CheckConstraint(
@@ -100,7 +100,7 @@ class BacktestRun(CreatedAtMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
 
-class BacktestTradeRecord(CreatedAtMixin, Base):
+class BacktestTradeRecord(CreatedAtMixin, ResearchBase):
     __tablename__ = "backtest_trade"
     __table_args__ = (
         CheckConstraint("side in ('buy', 'sell')", name="ck_backtest_trade_side"),
@@ -124,7 +124,7 @@ class BacktestTradeRecord(CreatedAtMixin, Base):
     cash_after: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
 
 
-class BacktestEquity(CreatedAtMixin, Base):
+class BacktestEquity(CreatedAtMixin, ResearchBase):
     __tablename__ = "backtest_equity"
     __table_args__ = (
         UniqueConstraint("run_id", "trade_date"),
@@ -142,7 +142,7 @@ class BacktestEquity(CreatedAtMixin, Base):
     total_equity: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
 
 
-class BacktestPosition(CreatedAtMixin, Base):
+class BacktestPosition(CreatedAtMixin, ResearchBase):
     __tablename__ = "backtest_position"
     __table_args__ = (
         UniqueConstraint("run_id", "trade_date", "symbol"),
@@ -161,7 +161,7 @@ class BacktestPosition(CreatedAtMixin, Base):
     market_value: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
 
 
-class BacktestPerformance(CreatedAtMixin, Base):
+class BacktestPerformance(CreatedAtMixin, ResearchBase):
     __tablename__ = "backtest_performance"
     __table_args__ = (
         UniqueConstraint("run_id"),

@@ -40,7 +40,10 @@ class OperationsOverviewService:
     ) -> None:
         self.repository = repository or OperationsOverviewRepository()
 
-    def get_overview(self, db: Session, *, limit: int = 5) -> OperationsOverview:
+    def get_overview(
+        self, db: Session, *, limit: int = 5, research_db: Session | None = None,
+    ) -> OperationsOverview:
+        backtest_db = research_db if research_db is not None else db
         return OperationsOverview(
             generated_at=datetime.now(UTC),
             data_quality=DataQualityOverview(
@@ -71,10 +74,10 @@ class OperationsOverviewService:
                 ],
             ),
             backtests=BacktestRunOverview(
-                status_counts=self.repository.count_backtest_runs_by_status(db),
+                status_counts=self.repository.count_backtest_runs_by_status(backtest_db),
                 latest_runs=[
                     BacktestRunSnapshot.model_validate(run)
-                    for run in self.repository.latest_backtest_runs(db, limit=limit)
+                    for run in self.repository.latest_backtest_runs(backtest_db, limit=limit)
                 ],
             ),
             paper_trading=PaperTradingOverview(
@@ -95,6 +98,7 @@ class OperationsOverviewService:
         *,
         failure_type: str,
         failure_id: int,
+        research_db: Session | None = None,
     ) -> OperationsFailureDetail | None:
         if failure_type == "data_quality_issue":
             issue = self.repository.get_unresolved_data_quality_issue(
@@ -130,7 +134,9 @@ class OperationsOverviewService:
                 )
             )
         if failure_type == "backtest_run":
-            run = self.repository.get_failed_backtest_run(db, run_id=failure_id)
+            run = self.repository.get_failed_backtest_run(
+                research_db if research_db is not None else db, run_id=failure_id
+            )
             return (
                 None
                 if run is None
@@ -151,7 +157,9 @@ class OperationsOverviewService:
             )
         raise ValueError("unsupported failure_type")
 
-    def get_alerts(self, db: Session) -> OperationsAlertSummary:
+    def get_alerts(
+        self, db: Session, research_db: Session | None = None
+    ) -> OperationsAlertSummary:
         open_severity_counts = self.repository.count_open_data_quality_by_severity(db)
         alert_items = []
         critical_count = open_severity_counts.get("critical", 0)
@@ -221,7 +229,9 @@ class OperationsOverviewService:
                     next_action="review factor parameters, input window, and upstream data quality",
                 )
             )
-        failed_backtests = self.repository.count_failed_backtest_runs(db)
+        failed_backtests = self.repository.count_failed_backtest_runs(
+            research_db if research_db is not None else db
+        )
         if failed_backtests > 0:
             alert_items.append(
                 OperationsAlertItem(
@@ -339,11 +349,14 @@ class OperationsOverviewService:
             parameters={},
         )
 
-    def get_failures(self, db: Session, *, limit: int = 20) -> OperationsFailureReport:
+    def get_failures(
+        self, db: Session, *, limit: int = 20, research_db: Session | None = None,
+    ) -> OperationsFailureReport:
+        backtest_db = research_db if research_db is not None else db
         data_quality_total = self.repository.count_unresolved_data_quality_issues(db)
         jobs_total = self.repository.count_failed_jobs(db)
         factor_runs_total = self.repository.count_failed_factor_runs(db)
-        backtest_runs_total = self.repository.count_failed_backtest_runs(db)
+        backtest_runs_total = self.repository.count_failed_backtest_runs(backtest_db)
         paper_orders_total = self.repository.count_rejected_paper_orders(db)
         return OperationsFailureReport(
             generated_at=datetime.now(UTC),
@@ -383,7 +396,7 @@ class OperationsOverviewService:
                 has_more=backtest_runs_total > limit,
                 items=[
                     BacktestRunFailure.model_validate(run)
-                    for run in self.repository.failed_backtest_runs(db, limit=limit)
+                    for run in self.repository.failed_backtest_runs(backtest_db, limit=limit)
                 ],
             ),
             paper_orders=PaperOrderFailureSection(

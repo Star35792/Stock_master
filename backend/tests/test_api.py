@@ -867,7 +867,7 @@ def test_operations_failures_forwards_limit(monkeypatch) -> None:
 def test_operations_alerts_returns_candidates(monkeypatch) -> None:
     captured: dict = {}
 
-    def fake_get_alerts(db):
+    def fake_get_alerts(db, **kwargs):
         captured["called"] = True
         return {
             "generated_at": "2026-07-20T00:00:00Z",
@@ -913,6 +913,7 @@ def test_operations_failure_detail_forwards_type_and_id(monkeypatch) -> None:
     response = client.get("/api/v1/operations/failures/paper_order/7")
 
     assert response.status_code == 200
+    captured.pop("research_db", None)  # session object, not part of the assertion
     assert captured == {"failure_type": "paper_order", "failure_id": 7}
 
 

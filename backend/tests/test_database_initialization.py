@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.database.research_session import initialize_research_database
 from app.database.session import apply_schema_compatibility, initialize_database
 from app.models.strategy import BacktestRun, TrainingArtifact
 
@@ -13,7 +14,9 @@ from app.models.strategy import BacktestRun, TrainingArtifact
 def test_fresh_database_preserves_referenced_training_artifacts(tmp_path) -> None:
     engine = create_engine(f"duckdb:///{tmp_path / 'fresh.duckdb'}")
     initialize_database(engine)
+    initialize_research_database(engine)
     initialize_database(engine)
+    initialize_research_database(engine)
     with Session(engine) as db:
         artifact = TrainingArtifact(
             window_id="retained-window",
@@ -88,6 +91,7 @@ def test_schema_compatibility_adds_release_lineage_columns(tmp_path) -> None:
 def test_schema_compatibility_removes_legacy_security_name_index(tmp_path) -> None:
     engine = create_engine(f"duckdb:///{tmp_path / 'legacy-security.duckdb'}")
     initialize_database(engine)
+    initialize_research_database(engine)
     with engine.begin() as connection:
         connection.execute(text("CREATE INDEX ix_security_name ON market.security(name)"))
 
@@ -125,7 +129,9 @@ def test_existing_backtest_database_gets_nullable_artifact_column_and_index(tmp_
                     '2026-01-01', '2026-01-31', 1000, 'success')
         """))
     initialize_database(engine)
+    initialize_research_database(engine)
     initialize_database(engine)
+    initialize_research_database(engine)
     with Session(engine) as db:
         run = db.get(BacktestRun, 7)
         assert run.name == "existing"

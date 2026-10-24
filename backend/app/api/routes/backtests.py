@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.dependencies import DatabaseSession
+from app.api.dependencies import DatabaseSession, ResearchDatabaseSession
 from app.schemas import Page
 from app.schemas.research_validation import (
     ResearchValidationReportRead,
@@ -35,11 +35,13 @@ validation_report_service = ResearchValidationReportService()
     response_model=ResearchValidationReportRead,
 )
 def build_research_validation_report(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     payload: ResearchValidationReportRequest,
 ) -> ResearchValidationReportRead:
     try:
-        return validation_report_service.build_report(db, run_ids=payload.run_ids)
+        return validation_report_service.build_report(
+            research_db, run_ids=payload.run_ids
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -49,12 +51,12 @@ def build_research_validation_report(
 
 @router.post("/runs/drift", response_model=BacktestDriftRead)
 def detect_backtest_drift(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     payload: BacktestDriftRequest,
 ) -> BacktestDriftRead:
     try:
         return service.detect_drift(
-            db,
+            research_db,
             baseline_run_id=payload.baseline_run_id,
             candidate_run_ids=payload.candidate_run_ids,
             return_tolerance=payload.return_tolerance,
@@ -66,11 +68,11 @@ def detect_backtest_drift(
 
 @router.post("/runs/compare", response_model=list[BacktestComparisonItem])
 def compare_backtest_runs(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     payload: BacktestComparisonRequest,
 ) -> list[BacktestComparisonItem]:
     try:
-        return service.compare_runs(db, run_ids=payload.run_ids)
+        return service.compare_runs(research_db, run_ids=payload.run_ids)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -84,7 +86,7 @@ def _raise_not_found(message: str) -> None:
 
 @router.get("/runs", response_model=Page[BacktestRunRead])
 def list_backtest_runs(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     strategy_name: str | None = None,
     status_: Literal["running", "success", "failed"] | None = Query(
         default=None,
@@ -101,7 +103,7 @@ def list_backtest_runs(
             detail="start_date must be earlier than or equal to end_date",
         )
     return service.list_runs(
-        db,
+        research_db,
         strategy_name=strategy_name,
         status=status_,
         start_date=start_date,
@@ -112,8 +114,10 @@ def list_backtest_runs(
 
 
 @router.get("/runs/{run_id}", response_model=BacktestRunRead)
-def get_backtest_run(db: DatabaseSession, run_id: int) -> BacktestRunRead:
-    run = service.get_run(db, run_id=run_id)
+def get_backtest_run(
+    research_db: ResearchDatabaseSession, run_id: int
+) -> BacktestRunRead:
+    run = service.get_run(research_db, run_id=run_id)
     if run is None:
         _raise_not_found("backtest run not found")
     return run
@@ -121,7 +125,7 @@ def get_backtest_run(db: DatabaseSession, run_id: int) -> BacktestRunRead:
 
 @router.get("/runs/{run_id}/trades", response_model=Page[BacktestTradeRead])
 def list_backtest_trades(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     run_id: int,
     symbol: str | None = None,
     start_date: date | None = None,
@@ -129,7 +133,7 @@ def list_backtest_trades(
     limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[BacktestTradeRead]:
-    if service.get_run(db, run_id=run_id) is None:
+    if service.get_run(research_db, run_id=run_id) is None:
         _raise_not_found("backtest run not found")
     if start_date and end_date and start_date > end_date:
         raise HTTPException(
@@ -137,7 +141,7 @@ def list_backtest_trades(
             detail="start_date must be earlier than or equal to end_date",
         )
     return service.list_trades(
-        db,
+        research_db,
         run_id=run_id,
         symbol=symbol,
         start_date=start_date,
@@ -149,14 +153,14 @@ def list_backtest_trades(
 
 @router.get("/runs/{run_id}/equity", response_model=Page[BacktestEquityRead])
 def list_backtest_equity(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     run_id: int,
     start_date: date | None = None,
     end_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[BacktestEquityRead]:
-    if service.get_run(db, run_id=run_id) is None:
+    if service.get_run(research_db, run_id=run_id) is None:
         _raise_not_found("backtest run not found")
     if start_date and end_date and start_date > end_date:
         raise HTTPException(
@@ -164,7 +168,7 @@ def list_backtest_equity(
             detail="start_date must be earlier than or equal to end_date",
         )
     return service.list_equity(
-        db,
+        research_db,
         run_id=run_id,
         start_date=start_date,
         end_date=end_date,
@@ -175,7 +179,7 @@ def list_backtest_equity(
 
 @router.get("/runs/{run_id}/positions", response_model=Page[BacktestPositionRead])
 def list_backtest_positions(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     run_id: int,
     symbol: str | None = None,
     start_date: date | None = None,
@@ -183,7 +187,7 @@ def list_backtest_positions(
     limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[BacktestPositionRead]:
-    if service.get_run(db, run_id=run_id) is None:
+    if service.get_run(research_db, run_id=run_id) is None:
         _raise_not_found("backtest run not found")
     if start_date and end_date and start_date > end_date:
         raise HTTPException(
@@ -191,7 +195,7 @@ def list_backtest_positions(
             detail="start_date must be earlier than or equal to end_date",
         )
     return service.list_positions(
-        db,
+        research_db,
         run_id=run_id,
         symbol=symbol,
         start_date=start_date,
@@ -203,10 +207,10 @@ def list_backtest_positions(
 
 @router.get("/runs/{run_id}/performance", response_model=BacktestPerformanceRead)
 def get_backtest_performance(
-    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     run_id: int,
 ) -> BacktestPerformanceRead:
-    performance = service.get_performance(db, run_id=run_id)
+    performance = service.get_performance(research_db, run_id=run_id)
     if performance is None:
         _raise_not_found("backtest performance not found")
     return performance
@@ -215,6 +219,7 @@ def get_backtest_performance(
 @router.get("/runs/{run_id}/benchmark", response_model=BacktestBenchmarkRead)
 def get_backtest_benchmark(
     db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     run_id: int,
 ) -> BacktestBenchmarkRead:
     try:
@@ -228,10 +233,11 @@ def get_backtest_benchmark(
 @router.post("/runs/{run_id}/performance", response_model=BacktestPerformanceRead)
 def analyze_backtest_performance(
     db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
     run_id: int,
     payload: BacktestPerformanceAnalyzeRequest,
 ) -> BacktestPerformanceRead:
-    if service.get_run(db, run_id=run_id) is None:
+    if service.get_run(research_db, run_id=run_id) is None:
         _raise_not_found("backtest run not found")
     style_factors = {
         style_name: (ref.factor_name, ref.factor_version)
@@ -240,14 +246,15 @@ def analyze_backtest_performance(
     try:
         performance = service.analyze_performance(
             db,
+            research_db=research_db,
             run_id=run_id,
             code_version=payload.code_version,
             style_factors=style_factors,
         )
-        db.commit()
+        research_db.commit()
         return performance
     except ValueError as exc:
-        db.rollback()
+        research_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

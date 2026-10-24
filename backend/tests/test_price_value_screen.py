@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.data_sources.eastmoney import EastmoneyDataError
+from app.database.research_session import initialize_research_database
 from app.database.session import initialize_database
 from app.models.factor import FactorRun, FactorValue
 from app.models.market import DailyBar, Security, TradingCalendar, ValuationSnapshot
@@ -75,6 +76,7 @@ def test_comparable_roe_period_uses_same_period_coverage_per_exchange():
 def _database(tmp_path):
     engine = create_engine(f"duckdb:///{tmp_path / 'screen.duckdb'}")
     initialize_database(engine)
+    initialize_research_database(engine)
     with Session(engine) as db:
         for exchange in ("SH", "SZ", "BJ"):
             db.add(TradingCalendar(exchange=exchange, trade_date=TARGET, is_open=True))

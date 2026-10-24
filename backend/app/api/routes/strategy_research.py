@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import DatabaseSession
+from app.api.dependencies import DatabaseSession, ResearchDatabaseSession
 from app.portfolio import PortfolioConstraints
 from app.schemas.price_value import PriceValueRequest
 from app.schemas.price_value_backtest import PriceValueBacktestRequest, PriceValueBacktestResponse
@@ -57,11 +57,13 @@ def price_value_profit_status(db: DatabaseSession) -> dict:
 
 @router.post("/price-value/backtests", response_model=PriceValueBacktestResponse)
 def run_price_value_backtest(
-    payload: PriceValueBacktestRequest, db: DatabaseSession
+    payload: PriceValueBacktestRequest,
+    db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
 ) -> PriceValueBacktestResponse:
     try:
-        result = price_value_backtest_service.run(db, payload)
-        db.commit()
+        result = price_value_backtest_service.run(db, payload, research_db=research_db)
+        research_db.commit()
         return result
     except BacktestDataChangedError as exc:
         db.rollback()
@@ -117,6 +119,7 @@ def generate_rolling_windows(
 def run_factor_selection_backtests_batch(
     payload: BatchFactorSelectionBacktestRequest,
     db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
 ) -> list[BatchFactorSelectionBacktestItem]:
     rolling_runs = [item for item in payload.runs if item.validation_mode == "rolling"]
     if rolling_runs:
@@ -130,7 +133,7 @@ def run_factor_selection_backtests_batch(
     results: list[BatchFactorSelectionBacktestItem] = []
     for index, item in enumerate(payload.runs):
         try:
-            result = run_factor_selection_backtest(item, db)
+            result = run_factor_selection_backtest(item, db, research_db)
             results.append(
                 BatchFactorSelectionBacktestItem(index=index, status="success", result=result)
             )
@@ -150,6 +153,7 @@ def run_factor_selection_backtests_batch(
 def run_factor_selection_backtest(
     payload: FactorSelectionBacktestRequest,
     db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
 ) -> FactorSelectionBacktestResult:
     if payload.start_date > payload.end_date:
         raise HTTPException(
@@ -215,6 +219,7 @@ def run_factor_selection_backtest(
             sell_stamp_duty_rate=payload.sell_stamp_duty_rate,
             transfer_fee_rate=payload.transfer_fee_rate,
             exchange_fee_rate=payload.exchange_fee_rate,
+            research_db=research_db,
             code_version=payload.code_version,
             data_version=payload.data_version,
             validation_mode=payload.validation_mode,
@@ -252,6 +257,7 @@ def run_factor_selection_backtest(
 def run_rolling_factor_selection_backtests(
     payload: RollingFactorSelectionBacktestRequest,
     db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
 ) -> list[FactorSelectionBacktestResult]:
     if payload.start_date > payload.end_date:
         raise HTTPException(
@@ -304,10 +310,12 @@ def run_rolling_factor_selection_backtests(
             sell_stamp_duty_rate=payload.sell_stamp_duty_rate,
             transfer_fee_rate=payload.transfer_fee_rate,
             exchange_fee_rate=payload.exchange_fee_rate,
+            research_db=research_db,
             code_version=payload.code_version,
             data_version=payload.data_version,
         )
         db.commit()
+        research_db.commit()
     except ValueError as exc:
         db.rollback()
         raise HTTPException(
