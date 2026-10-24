@@ -28,6 +28,8 @@
 - `market.daily_bar` 的 `UniqueConstraint` 已修正为 `(symbol, trade_date, adjust_type)`，`AdjustmentBuildService.rebuild_qfq` 已改为 `INSERT ... ON CONFLICT DO UPDATE` 以规避 DuckDB 同事务 DELETE 不可见问题。
 - **研究读路径默认走温层**（2026-10-22）：控制面 `market.daily_bar` 只有约 59 个交易日热窗口，任何跨年回测/IC 都必须读 `data/warm/exported/` 的 Parquet。改回测或研究读路径时，ORM 仓库与 `repositories/research_read.py` 这对孪生实现要同步改。
 - 温层连接不要 ATTACH 控制面 DuckDB：DuckDB 禁止同一文件被两个句柄打开（其一为读写）时报 `Unique file handle conflict`。用 `attach_control=False` 建纯 Parquet 连接，控制面读取继续走已打开的 ORM session。
+- **DuckDB 跨进程写互斥的工程约定**（2026-10-24）：引擎无服务器模式、文件级写锁不可配置。维护/研究脚本统一走 `app/utils/duckdb_write_lock.py`（锁文件 `data/duckdb_write.lock`，O_EXCL 原子获取、崩溃 stale 抢占、超时报持有者 PID）排队写库，避免跑到一半才报 conflict；FastAPI 进程不持锁（长驻单写者）。更彻底的解法（strategy 研究写域拆独立 duckdb 文件 + 查询面 Parquet 化）是待评审的 T2 方向。
+- **P2 偏差源回填的两个近似假设**（2026-10-24，影响一切消费这些表的数字解读）：①涨跌停回填（控制面 97% 覆盖）对历史期 ST 用 name 前缀近似当前期——主板 ST 的 5% 带宽在历史上被高估为 10%（偏宽松方向）；②行业时点表是「当前标签回填」（source=`current_label_backfill_20261024`，5,579 只、effective_from=上市日），假设行业从未变更。真实历史数据接入后用 `record_interval` 追加区间即可，无需重建。
 - DuckDB `corr()` 对退化分组返回 **NaN 而不是 NULL**，写进 `DECIMAL` 列会抛 `Conversion Error: Could not cast value nan`。任何 SQL 聚合结果写入定点列之前都要先过滤 NaN/inf。
 - 涨跌停价格不能用「涨跌幅≈10%」反推校验：当日收盘涨 10% 不等于收盘价等于涨停价。正确校验是不变式 `high <= limit_up` 且 `low >= limit_down`（剔除上市前 5 个交易日后真实违规率 0.092%）。推导锚点必须是当日自身的 `pre_close`，不能用前一行的 `close`（除权除息日两者不等）。
 - 因子方向不能靠直觉设定：本轮实测 7 个价量因子里 `momentum_20`/`momentum_60`/`liquidity_20` 的 RankIC 显著为负（IR 在 -0.26~-0.33），默认预设给它们「越高越好」导致回测亏损。任何因子进策略前先查 `factor.factor_profile` 的 RankIC 符号。

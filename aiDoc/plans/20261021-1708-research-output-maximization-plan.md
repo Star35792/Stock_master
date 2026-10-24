@@ -91,9 +91,9 @@
 
 | # | 动作 | 优先级理由 |
 |---|---|---|
-| P2-1 | 涨跌停价格回填 | 当前退化为「全可交易」，直接虚高所有回测收益 |
-| P2-2 | ST / 退市时点表 | 0.6% 覆盖率 + 0 退市股 = 幸存者偏差 |
-| P2-3 | 行业时点标签 | `security_industry_history` 建表已有代码（`repositories/market/security_industry_history.py`），需灌数据并让横截面中性化改读时点表 |
+| P2-1 | 涨跌停价格回填 | **2026-10-24 控制面已回填**：`backfill_price_limits.py` 用 `derive_price_limits`（与温层读路径同一实现）填充 315,919/325,774（97%）`limit_up/limit_down`，跳过非股票与无板块行；温层读路径此前已即时推导（回测数字已含约束），本次使 paper 执行链路与后续温层导出也生效。ST 带宽用 name 前缀近似当前期（历史期偏宽松，脚本头部披露） |
+| P2-2 | ST / 退市时点表 | 0.6% 覆盖率 + 0 退市股 = 幸存者偏差。**数据源卡死**：HiThink/Eastmoney/SDK 均无 ST 历史、退市时点、曾用名接口，本地不可修复；等新数据源接入（`security_status_event` 表与仓储已就绪） |
+| P2-3 | 行业时点标签 | **2026-10-24 首切片已回填**：`backfill_industry_history.py` 为 5,579 只有当前标签的股票写入 `effective_from=list_date（或温层首条 bar）→ NULL` 区间（source=`current_label_backfill_20261024`），`industries_as_of` PIT 读路径与 `industry_factors` 的 PIT 分支全历史命中；这是「当前标签回填」近似（假设行业从未变更），真实行业变更史仍需数据源 |
 | P2-4 | 历史 universe | 用 `index_constituent_snapshot` 扩展为多日期成分序列，回测按调仓日取成分 |
 | P2-5 | 估值历史序列 | `valuation_snapshot` 目前仅 3 天，价值类因子无法做历史 IC |
 
