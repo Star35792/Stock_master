@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeftRight, BookOpen, CircleAlert, Plus, RefreshCw, Trash2, Wallet } from "@lucide/vue";
+import { ArrowLeftRight, BookOpen, CircleAlert, Pencil, Plus, RefreshCw, Trash2, Wallet } from "@lucide/vue";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import {
@@ -10,6 +10,7 @@ import {
   fetchPositionBooks,
   fetchPositionTrades,
   fetchPortfolioPlanDrift,
+  updatePositionBook,
 } from "../api";
 import type { PortfolioPlanDrift, PositionBook, PositionBookHoldings, PositionTrade } from "../types";
 import { formatDate, formatNumber, formatPercent } from "../components/operations/formatters";
@@ -25,6 +26,79 @@ const notice = ref<string | null>(null);
 const newBookName = ref("");
 const newBookCash = ref("0");
 const creatingBook = ref(false);
+
+const editingBook = ref(false);
+const editForm = reactive({ name: "", cash: "", note: "" });
+const savingBook = ref(false);
+
+const sortKey = ref<"market_value" | "unrealized_pnl_pct" | "weight">("market_value");
+const sortAsc = ref(false);
+const industryFilter = ref("");
+
+const sortedFilteredHoldings = computed(() => {
+  const rows = [...(holdings.value?.holdings ?? [])];
+  const filtered = industryFilter.value
+    ? rows.filter((row) => (row.industry ?? "-") === industryFilter.value)
+    : rows;
+  const key = sortKey.value;
+  filtered.sort((a, b) => {
+    const left = Number(a[key] ?? 0);
+    const right = Number(b[key] ?? 0);
+    return sortAsc.value ? left - right : right - left;
+  });
+  return filtered;
+});
+
+const industryOptions = computed(() => {
+  const values = new Set<string>();
+  for (const row of holdings.value?.holdings ?? []) {
+    values.add(row.industry ?? "-");
+  }
+  return [...values].sort((a, b) => a.localeCompare(b, "zh-CN"));
+});
+
+function toggleSort(key: typeof sortKey.value) {
+  if (sortKey.value === key) {
+    sortAsc.value = !sortAsc.value;
+  } else {
+    sortKey.value = key;
+    sortAsc.value = false;
+  }
+}
+
+function startEditBook() {
+  const book = selectedBook.value;
+  if (!book) return;
+  editForm.name = book.name;
+  editForm.cash = String(Number(book.cash));
+  editForm.note = book.note ?? "";
+  editingBook.value = true;
+}
+
+async function saveBookEdit() {
+  if (selectedBookId.value === null) return;
+  const name = editForm.name.trim();
+  if (!name) {
+    actionError.value = "账本名称不能为空。";
+    return;
+  }
+  savingBook.value = true;
+  actionError.value = null;
+  try {
+    await updatePositionBook(selectedBookId.value, {
+      name,
+      cash: editForm.cash,
+      note: editForm.note || null,
+    });
+    editingBook.value = false;
+    notice.value = "账本已更新。";
+    await loadBooks(selectedBookId.value);
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : "账本更新失败";
+  } finally {
+    savingBook.value = false;
+  }
+}
 
 const tradeForm = reactive({
   side: "buy" as "buy" | "sell",
@@ -227,12 +301,28 @@ onMounted(() => {
       <button class="secondary-action" type="button" :disabled="loading || selectedBookId === null" @click="refreshBookData">
         <RefreshCw :size="16" />{{ loading ? "刷新中…" : "刷新" }}
       </button>
+      <button class="secondary-action" type="button" :disabled="selectedBookId === null" @click="startEditBook">
+        <Pencil :size="15" />编辑
+      </button>
       <div class="new-book">
         <input v-model="newBookName" placeholder="新账本名称" />
         <input v-model="newBookCash" inputmode="decimal" placeholder="初始现金" />
         <button type="button" :disabled="creatingBook" @click="handleCreateBook">
           <Plus :size="16" />{{ creatingBook ? "创建中…" : "创建账本" }}
         </button>
+      </div>
+    </div>
+
+    <div v-if="editingBook" class="exposure-panel book-edit-panel">
+      <h3><Pencil :size="15" />编辑账本「{{ selectedBook?.name }}」</h3>
+      <div class="trade-form">
+        <label>名称<input v-model="editForm.name" maxlength="100" /></label>
+        <label>现金<input v-model="editForm.cash" inputmode="decimal" /></label>
+        <label>备注<input v-model="editForm.note" maxlength="200" placeholder="可选" /></label>
+        <button type="button" :disabled="savingBook" @click="saveBookEdit">
+          {{ savingBook ? "保存中…" : "保存" }}
+        </button>
+        <button class="secondary-action" type="button" @click="editingBook = false">取消</button>
       </div>
     </div>
 
@@ -248,15 +338,29 @@ onMounted(() => {
     </div>
 
     <div v-if="holdings && holdings.holdings.length > 0" class="table-panel full">
+      <div class="table-toolbar">
+        <label class="industry-filter">行业
+          <select v-model="industryFilter">
+            <option value="">全部（{{ holdings.holdings.length }} 只）</option>
+            <option v-for="industry in industryOptions" :key="industry" :value="industry">
+              {{ industry }}（{{ holdings!.holdings.filter((row) => (row.industry ?? "-") === industry).length }}）
+            </option>
+          </select>
+        </label>
+      </div>
       <table>
         <thead>
           <tr>
             <th>代码</th><th>名称</th><th>行业</th><th>数量</th><th>成本</th>
-            <th>现价</th><th>市值</th><th>浮盈</th><th>收益率</th><th>权重</th>
+            <th>现价</th>
+            <th class="sortable" @click="toggleSort('market_value')">市值 {{ sortKey === "market_value" ? (sortAsc ? "↑" : "↓") : "" }}</th>
+            <th>浮盈</th>
+            <th class="sortable" @click="toggleSort('unrealized_pnl_pct')">收益率 {{ sortKey === "unrealized_pnl_pct" ? (sortAsc ? "↑" : "↓") : "" }}</th>
+            <th class="sortable" @click="toggleSort('weight')">权重 {{ sortKey === "weight" ? (sortAsc ? "↑" : "↓") : "" }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in holdings.holdings" :key="row.symbol">
+          <tr v-for="row in sortedFilteredHoldings" :key="row.symbol">
             <td>{{ row.symbol }}</td>
             <td>{{ row.name ?? "-" }}</td>
             <td>{{ row.industry ?? "-" }}</td>
@@ -504,5 +608,40 @@ onMounted(() => {
   color: #dc2626;
   cursor: pointer;
   padding: 4px;
+}
+</style>
+<style scoped>
+.book-edit-panel label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px 0;
+}
+
+.industry-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.industry-filter select {
+  min-height: 32px;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable:hover {
+  color: #2563eb;
 }
 </style>

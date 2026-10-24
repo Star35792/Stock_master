@@ -1,10 +1,157 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import { BarChart3, Check, Filter, Info, Trash2 } from "@lucide/vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { BarChart3, Check, Filter, Info, Play, Trash2 } from "@lucide/vue";
 
 import { fetchFactorDefinitions, fetchFactorProfiles } from "../api";
 import { securityTypeLabel } from "../components/operations/formatters";
 import type { FactorDefinition, FactorProfile } from "../types";
+import {
+  fetchBacktestFinalHoldingsTyped,
+  runFactorSelectionBacktest,
+} from "../factorSelectionApi";
+
+const backtestForm = reactive({
+  name: `工作台选股回测 ${new Date().toISOString().slice(0, 10)}`,
+  top_n: "20",
+  start_date: "",
+  end_date: "",
+  initial_cash: "1000000",
+  rebalance_rule: "every_n_trading_days" as
+    | "daily"
+    | "weekly"
+    | "monthly"
+    | "every_n_trading_days",
+  rebalance_interval: "20",
+  benchmark: "",
+  useConstraints: false,
+  max_symbol_weight: "0.20",
+  max_industry_weight: "0.40",
+  cash_reserve_rate: "0.05",
+});
+const isRunningBacktest = ref(false);
+const backtestError = ref<string | null>(null);
+const backtestResult = ref<Awaited<
+  ReturnType<typeof runFactorSelectionBacktest>
+> | null>(null);
+const backtestHoldings = ref<Awaited<
+  ReturnType<typeof fetchBacktestFinalHoldingsTyped>
+> | null>(null);
+const isLoadingHoldings = ref(false);
+let backtestRequestId = 0;
+let backtestController: AbortController | null = null;
+
+watch(
+  backtestForm,
+  () => {
+    backtestResult.value = null;
+    backtestHoldings.value = null;
+    backtestError.value = null;
+  },
+  { deep: true },
+);
+
+onBeforeUnmount(() => backtestController?.abort());
+
+async function runBacktest() {
+  if (selected.value.length === 0) {
+    backtestError.value = "请先在左侧选择至少一个因子。";
+    return;
+  }
+  const topN = Number(backtestForm.top_n);
+  const interval = Number(backtestForm.rebalance_interval);
+  if (!Number.isFinite(topN) || topN <= 0) {
+    backtestError.value = "持仓数量必须是正整数。";
+    return;
+  }
+  if (
+    backtestForm.rebalance_rule === "every_n_trading_days" &&
+    (!Number.isFinite(interval) || interval < 1)
+  ) {
+    backtestError.value = "调仓间隔必须是正整数。";
+    return;
+  }
+  isRunningBacktest.value = true;
+  backtestError.value = null;
+  backtestResult.value = null;
+  backtestHoldings.value = null;
+  const requestId = ++backtestRequestId;
+  backtestController = new AbortController();
+  try {
+    const result = await runFactorSelectionBacktest(
+      {
+        name: backtestForm.name || "工作台选股回测",
+        strategy_name: "factor_selection",
+        factor_specs: selected.value.map((factor) => ({
+          factor_name: factor.name,
+          factor_version: factor.version,
+          // 与研究脚本 ic_aligned 相同的等权约定；方向开关属后续切片。
+          weight: "1",
+          higher_is_better: true,
+        })),
+        top_n: topN,
+        signal_lag: 1,
+        rebalance_rule: backtestForm.rebalance_rule,
+        rebalance_interval:
+          backtestForm.rebalance_rule === "every_n_trading_days" ? interval : 1,
+        holding_period: 1,
+        benchmark: backtestForm.benchmark.trim() || null,
+        allowed_security_types: ["stock"],
+        coverage_ratio: "0.8",
+        weighting_mode: "equal_weight_fully_invested",
+        minimum_score_policy: "always_fully_invested",
+        invested_weight: "1",
+        portfolio_constraints: backtestForm.useConstraints
+          ? {
+              max_symbol_weight: backtestForm.max_symbol_weight,
+              max_industry_weight: backtestForm.max_industry_weight,
+              cash_reserve_rate: backtestForm.cash_reserve_rate,
+              security_type_budgets: null,
+            }
+          : null,
+        start_date: backtestForm.start_date,
+        end_date: backtestForm.end_date,
+        adjust_type: "qfq",
+        initial_cash: backtestForm.initial_cash,
+        // 与研究脚本一致的 A 股真实成本合同。
+        commission_rate: "0.0003",
+        slippage_bps: "2",
+        lot_size: 100,
+        fee_model_version: "a_share_cost_v1",
+        min_commission: "5",
+        sell_stamp_duty_rate: "0.0005",
+        transfer_fee_rate: "0.00001",
+        exchange_fee_rate: "0.0000487",
+        code_version: "workbench",
+        data_version: "workbench",
+        validation_mode: "none",
+      },
+      backtestController.signal,
+    );
+    if (requestId !== backtestRequestId) return;
+    backtestResult.value = result;
+  } catch (error) {
+    if (requestId !== backtestRequestId) return;
+    backtestError.value = error instanceof Error ? error.message : "回测发起失败";
+  } finally {
+    if (requestId === backtestRequestId) isRunningBacktest.value = false;
+  }
+}
+
+async function loadBacktestHoldings() {
+  if (!backtestResult.value) return;
+  isLoadingHoldings.value = true;
+  try {
+    backtestHoldings.value = await fetchBacktestFinalHoldingsTyped(
+      backtestResult.value.run_id,
+      new AbortController().signal,
+    );
+  } catch (error) {
+    backtestError.value = error instanceof Error ? error.message : "最终持仓读取失败";
+  } finally {
+    isLoadingHoldings.value = false;
+  }
+}
+
 
 const definitions = ref<FactorDefinition[]>([]);
 const selected = ref<FactorDefinition[]>([]);
@@ -246,6 +393,81 @@ onMounted(loadDefinitions);
         <div v-if="activeFactor" class="factor-detail"><h2>{{ localizedName(activeFactor) }}</h2><p>{{ localizedDescription(activeFactor) }}</p><dl><div><dt>输入数据</dt><dd>{{ activeFactor.inputs.join("、") || "由服务端定义" }}</dd></div><div><dt>依赖</dt><dd>{{ activeFactor.dependencies.join("、") || "无" }}</dd></div><div><dt>适用类型</dt><dd>{{ activeFactor.applicable_security_types.map(securityTypeLabel).join("、") || "未限制" }}</dd></div></dl><div v-if="schemaProperties(activeFactor).length" class="parameter-list"><strong>参数配置</strong><label v-for="parameter in schemaProperties(activeFactor)" :key="parameter.key">{{ parameter.label }}<input v-model="parameterValues[activeFactor.name][parameter.key]" :type="parameter.value.type === 'number' || parameter.value.type === 'integer' ? 'number' : 'text'" :placeholder="String(parameter.value.default ?? '')" /></label></div><div class="profile-summary"><strong>最近画像</strong><span v-if="isLoadingProfiles">读取中…</span><span v-else-if="!profiles.length">暂无画像数据</span><span v-else>覆盖率 {{ (Number(profiles[profiles.length - 1].coverage_rate) * 100).toFixed(1) }}% · IC {{ profiles[profiles.length - 1].ic_1d ?? "-" }}</span></div></div>
       </aside>
     </div>
+
+    <section class="backtest-launcher" aria-label="因子选股回测">
+      <div class="panel-heading">
+        <div>
+          <h2><Play :size="16" />因子选股回测</h2>
+          <span>用上方选中的因子发起研究回测（T+1 执行、A 股真实成本、只读研究）</span>
+        </div>
+      </div>
+      <form class="backtest-form" @submit.prevent="runBacktest">
+        <label>回测名称<input v-model="backtestForm.name" required maxlength="100" /></label>
+        <label>开始日期<input v-model="backtestForm.start_date" type="date" required /></label>
+        <label>结束日期<input v-model="backtestForm.end_date" type="date" required /></label>
+        <label>初始资金<input v-model="backtestForm.initial_cash" inputmode="decimal" required /></label>
+        <label>持仓数量<input v-model="backtestForm.top_n" inputmode="numeric" required /></label>
+        <label>调仓规则
+          <select v-model="backtestForm.rebalance_rule">
+            <option value="daily">每日</option>
+            <option value="weekly">每周（最后交易日）</option>
+            <option value="monthly">每月（最后交易日）</option>
+            <option value="every_n_trading_days">每 N 个交易日</option>
+          </select>
+        </label>
+        <label v-if="backtestForm.rebalance_rule === 'every_n_trading_days'">
+          调仓间隔（交易日）<input v-model="backtestForm.rebalance_interval" inputmode="numeric" />
+        </label>
+        <label>基准（可选）<input v-model="backtestForm.benchmark" placeholder="如 000300.SH" /></label>
+      </form>
+      <div class="constraint-row">
+        <label class="constraint-toggle">
+          <input v-model="backtestForm.useConstraints" type="checkbox" />
+          启用组合约束（与模拟盘同源：单标 / 行业 / 现金留存）
+        </label>
+        <template v-if="backtestForm.useConstraints">
+          <label>单标的上限<input v-model="backtestForm.max_symbol_weight" inputmode="decimal" /></label>
+          <label>行业上限<input v-model="backtestForm.max_industry_weight" inputmode="decimal" /></label>
+          <label>现金留存率<input v-model="backtestForm.cash_reserve_rate" inputmode="decimal" /></label>
+        </template>
+      </div>
+      <p v-if="backtestError" class="inline-error" role="alert">{{ backtestError }}</p>
+      <button class="primary-action backtest-run" type="button" :disabled="isRunningBacktest" @click="runBacktest">
+        <Play :size="16" />{{ isRunningBacktest ? "回测运行中…（约需数十秒）" : "发起回测" }}
+      </button>
+
+      <div v-if="backtestResult" class="backtest-result">
+        <div class="result-metrics">
+          <div><span>run ID</span><strong>#{{ backtestResult.run_id }}</strong></div>
+          <div><span>净收益</span><strong>{{ (Number(backtestResult.total_return) * 100).toFixed(2) }}%</strong></div>
+          <div><span>期末权益</span><strong>{{ Number(backtestResult.final_equity).toLocaleString("zh-CN", { maximumFractionDigits: 0 }) }}</strong></div>
+          <div><span>成交笔数</span><strong>{{ backtestResult.trade_count }}</strong></div>
+        </div>
+        <div class="result-actions">
+          <button class="secondary-action" type="button" :disabled="isLoadingHoldings" @click="loadBacktestHoldings">
+            {{ isLoadingHoldings ? "读取中…" : "查看最终持仓" }}
+          </button>
+          <span class="result-hint">可在「组合草案」页用 run ID {{ backtestResult.run_id }} 一键预填方案。</span>
+        </div>
+        <div v-if="backtestHoldings && backtestHoldings.holdings.length" class="table-panel full">
+          <table>
+            <thead><tr><th>代码</th><th>名称</th><th>行业</th><th>数量</th><th>收盘价</th><th>市值</th><th>权重</th></tr></thead>
+            <tbody>
+              <tr v-for="row in backtestHoldings.holdings" :key="row.symbol">
+                <td>{{ row.symbol }}</td>
+                <td>{{ row.name ?? "-" }}</td>
+                <td>{{ row.industry ?? "-" }}</td>
+                <td>{{ row.quantity }}</td>
+                <td>{{ Number(row.close).toFixed(2) }}</td>
+                <td>{{ Number(row.market_value).toLocaleString("zh-CN", { maximumFractionDigits: 0 }) }}</td>
+                <td>{{ (Number(row.weight) * 100).toFixed(2) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else-if="backtestHoldings && !backtestHoldings.holdings.length" class="empty-panel">该回测最末日没有持仓快照。</p>
+      </div>
+    </section>
   </section>
 </template>
 
@@ -283,4 +505,102 @@ input, select { min-height: 40px; border: 1px solid #cbd5e1; border-radius: 6px;
 .empty-panel { padding: 24px; color: #667085; text-align: center; }
 @media (max-width: 900px) { .factor-page { padding: 24px 16px 48px; }.factor-layout { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .page-heading, .factor-toolbar { align-items: stretch; flex-direction: column; }.factor-catalog { grid-template-columns: 1fr; } }
+</style>
+<style scoped>
+.backtest-launcher {
+  margin-top: 20px;
+  border: 1px solid #e3e7ee;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+
+.panel-heading span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.backtest-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.backtest-form label,
+.constraint-row label {
+  display: grid;
+  gap: 5px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.constraint-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.constraint-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  grid-auto-flow: column;
+}
+
+.constraint-row label:not(.constraint-toggle) input {
+  width: 110px;
+}
+
+.backtest-run {
+  align-self: flex-start;
+}
+
+.result-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.result-metrics > div {
+  border: 1px solid #eef1f5;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.result-metrics span {
+  font-size: 11px;
+  color: #667085;
+}
+
+.result-metrics strong {
+  font-size: 15px;
+}
+
+.result-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.result-hint {
+  color: #667085;
+  font-size: 12px;
+}
 </style>
