@@ -1,6 +1,9 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.dependencies import DatabaseSession, ResearchDatabaseSession
+from app.backtest.quantile_result import quantile_result_to_read
 from app.portfolio import PortfolioConstraints
 from app.schemas.price_value import PriceValueRequest
 from app.schemas.price_value_backtest import PriceValueBacktestRequest, PriceValueBacktestResponse
@@ -9,8 +12,10 @@ from app.schemas.strategy import (
     BacktestPortfolioConstraintsRequest,
     BatchFactorSelectionBacktestItem,
     BatchFactorSelectionBacktestRequest,
+    CombinedEquityCurveRead,
     FactorSelectionBacktestRequest,
     FactorSelectionBacktestResult,
+    RollingBacktestResultRead,
     RollingFactorSelectionBacktestRequest,
     RollingWindowRead,
     RollingWindowRequest,
@@ -224,6 +229,7 @@ def run_factor_selection_backtest(
             validation_mode=payload.validation_mode,
             training_start_date=payload.training_start_date,
             training_end_date=payload.training_end_date,
+            quantile_backtest=payload.quantile_backtest,
         )
         db.commit()
     except ValueError as exc:
@@ -246,18 +252,23 @@ def run_factor_selection_backtest(
         trade_count=len(result.trades),
         equity_points=len(result.equity_curve),
         position_snapshots=len(result.positions),
+        quantile=(
+            quantile_result_to_read(persisted.quantile)
+            if persisted.quantile is not None
+            else None
+        ),
     )
 
 
 @router.post(
     "/rolling-backtests",
-    response_model=list[FactorSelectionBacktestResult],
+    response_model=RollingBacktestResultRead,
 )
 def run_rolling_factor_selection_backtests(
     payload: RollingFactorSelectionBacktestRequest,
     db: DatabaseSession,
     research_db: ResearchDatabaseSession,
-) -> list[FactorSelectionBacktestResult]:
+) -> RollingBacktestResultRead:
     if payload.start_date > payload.end_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -315,6 +326,7 @@ def run_rolling_factor_selection_backtests(
                 if payload.selection_policy
                 else None
             ),
+            quantile_backtest=payload.quantile_backtest,
         )
         db.commit()
         research_db.commit()
@@ -325,12 +337,12 @@ def run_rolling_factor_selection_backtests(
             detail=str(exc),
         ) from exc
 
-    results: list[FactorSelectionBacktestResult] = []
-    for window_result in persisted_list:
+    window_results: list[FactorSelectionBacktestResult] = []
+    for window_result in persisted_list.windows:
         window = window_result.window
         persisted = window_result.persisted
         result = persisted.result
-        results.append(
+        window_results.append(
             FactorSelectionBacktestResult(
                 run_id=persisted.run_id,
                 name=f"{payload.name}:{window.index}",
@@ -343,6 +355,29 @@ def run_rolling_factor_selection_backtests(
                 trade_count=len(result.trades),
                 equity_points=len(result.equity_curve),
                 position_snapshots=len(result.positions),
+                quantile=(
+                    quantile_result_to_read(persisted.quantile)
+                    if persisted.quantile is not None
+                    else None
+                ),
             )
         )
-    return results
+    combined = persisted_list.combined
+    combined_read = None
+    if combined is not None:
+        combined_read = CombinedEquityCurveRead(
+            trade_dates=list(combined.trade_dates),
+            total_equity=[Decimal(str(equity)) for equity in combined.total_equity],
+            total_return=combined.total_return,
+            annualized_return=combined.annualized_return,
+            sharpe_ratio=combined.sharpe_ratio,
+            maximum_drawdown=combined.maximum_drawdown,
+            turnover_rate=combined.turnover_rate,
+            total_commission=combined.total_commission,
+            window_count=combined.window_count,
+        )
+    return RollingBacktestResultRead(
+        windows=window_results,
+        combined=combined_read,
+        declarations=persisted_list.declarations,
+    )

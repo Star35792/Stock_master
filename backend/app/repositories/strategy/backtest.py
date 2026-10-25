@@ -215,6 +215,16 @@ class BacktestRepository:
         run.parameters = {**run.parameters, "data_snapshot": data_snapshot}
         db.add(run)
 
+    def update_run_parameters(
+        self,
+        db: Session,
+        *,
+        run: BacktestRun,
+        extra: dict[str, Any],
+    ) -> None:
+        run.parameters = {**run.parameters, **extra}
+        db.add(run)
+
     def fail_run(self, db: Session, *, run: BacktestRun, error_message: str) -> None:
         run.status = "failed"
         run.error_message = error_message

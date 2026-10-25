@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.schemas.strategy import QuantileBacktestRequest
 from app.services import StrategyResearchService
 from app.services.training_factor_selector import TrainingSelectionPolicy
 from app.strategies import FactorScoreSpec
@@ -106,15 +107,34 @@ class FakeBacktestService:
 
     def run(self, db: object, **kwargs: object) -> SimpleNamespace:
         self.calls.append(kwargs)
+        initial_cash = kwargs["initial_cash"]
+        start_date = kwargs["start_date"]
+        end_date = kwargs["end_date"]
+        # Build a minimal but well-shaped equity curve + trades so the rolling
+        # combined-curve stitching path has real (non-overlapping) points to
+        # concatenate. Each window closes 1% above its opening cash.
+        equity_curve = [
+            SimpleNamespace(trade_date=start_date, total_equity=initial_cash),
+            SimpleNamespace(
+                trade_date=end_date, total_equity=initial_cash * Decimal("1.01")
+            ),
+        ]
+        trades = [
+            SimpleNamespace(
+                quantity=100,
+                fill_price=Decimal("10"),
+                commission=Decimal("0.3"),
+            )
+        ]
         return SimpleNamespace(
             run_id=7 + len(self.calls) - 1,
             result=SimpleNamespace(
-                initial_cash=kwargs["initial_cash"],
-                final_equity=Decimal("110000"),
-                total_return=Decimal("0.1"),
-                trades=[1, 2],
-                equity_curve=[1, 2, 3],
-                positions=[1],
+                initial_cash=initial_cash,
+                final_equity=initial_cash * Decimal("1.01"),
+                total_return=Decimal("0.01"),
+                trades=trades,
+                equity_curve=equity_curve,
+                positions=[SimpleNamespace(trade_date=end_date, symbol="AAA")],
             ),
         )
 
@@ -459,11 +479,17 @@ def test_strategy_research_service_runs_rolling_factor_selection() -> None:
         data_version="market-qfq-20260720",
     )
 
-    assert len(results) == 4
-    assert [result.window.index for result in results] == [0, 1, 2, 3]
-    assert all(result.window.execution_status == "run_completed" for result in results)
+    assert len(results.windows) == 4
+    assert [result.window.index for result in results.windows] == [0, 1, 2, 3]
+    assert all(result.window.execution_status == "run_completed" for result in results.windows)
     assert len(training_artifact_repository.artifacts) == 4
     assert len(backtest_service.calls) == 4
+    # Each window's test-period equity is stitched into one combined curve.
+    assert results.combined is not None
+    assert results.combined.window_count == 4
+    assert len(results.combined.trade_dates) == 8
+    assert results.combined.total_return > 0
+    assert "non_tradable" in results.declarations
 
     first_artifact = training_artifact_repository.artifacts[0]
     assert first_artifact.window_id == ("rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08")
@@ -930,10 +956,10 @@ def test_rolling_with_selection_binds_artifact_and_selected_specs(
     config_hash = policy.config_hash([spec])
     base_id = "rolling:SH:2026-01-02:2026-01-06:2026-01-07:2026-01-08"
     suffixed_id = f"{base_id}|sel-training_ic_v1-{config_hash}"
-    assert len(results) == 4
-    assert results[0].window.window_id == suffixed_id
-    assert results[0].selection_summary is not None
-    assert results[0].selection_summary["price_source"] == {
+    assert len(results.windows) == 4
+    assert results.windows[0].window.window_id == suffixed_id
+    assert results.windows[0].selection_summary is not None
+    assert results.windows[0].selection_summary["price_source"] == {
         "prices_qfq_path": "fake",
         "release_tag": "fake",
     }
@@ -954,3 +980,129 @@ def test_rolling_with_selection_binds_artifact_and_selected_specs(
     assert contract["selection_policy"]["config_hash"] == config_hash
     assert contract["selection_result"]["selected"][0]["higher_is_better"] is False
     assert contract["validation_window_id"] == suffixed_id
+
+
+def test_run_factor_selection_passes_quantile_backtest_to_engine() -> None:
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="quantile-wire",
+        factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+        top_n=1,
+        allowed_security_types={"stock"},
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 1),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc",
+        data_version="dv",
+        quantile_backtest=QuantileBacktestRequest(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+        ),
+    )
+
+    kwargs = backtest_service.kwargs
+    assert kwargs is not None
+    assert kwargs["quantile_meta"] is not None
+    assert kwargs["quantile_meta"].split_factor_name == "momentum_20"
+    assert kwargs["quantile_meta"].n_layers == 2
+    # Two layers, each carrying the single 2026-07-01 decision-date signal.
+    assert len(kwargs["quantile_layer_signals"]) == 2
+    for layer in kwargs["quantile_layer_signals"]:
+        assert len(layer) == 1
+        assert layer[0].signal_date == date(2026, 7, 1)
+        # Equal-weight fully invested: one symbol per layer -> weight 1.0.
+        assert layer[0].target_weight == Decimal("1")
+
+
+def test_run_factor_selection_default_quantile_not_passed() -> None:
+    """Regression lock: when quantile_backtest is omitted the engine receives no
+    quantile signals/meta, preserving drift comparability of parameters."""
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="no-quantile",
+        factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+        top_n=1,
+        allowed_security_types={"stock"},
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 1),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc",
+        data_version="dv",
+    )
+
+    kwargs = backtest_service.kwargs
+    assert kwargs is not None
+    assert kwargs["quantile_layer_signals"] is None
+    assert kwargs["quantile_meta"] is None
+
+
+def test_rolling_factor_selection_passes_quantile_per_window() -> None:
+    factor_value_repository = FakeFactorValueRepository()
+    backtest_service = FakeBacktestService()
+    training_artifact_repository = FakeTrainingArtifactRepository()
+    service = StrategyResearchService(
+        factor_value_repository=factor_value_repository,
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+        backtest_service=backtest_service,
+        training_artifact_repository=training_artifact_repository,
+    )
+
+    results = service.run_rolling_factor_selection(
+        object(),
+        exchange="SH",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 16),
+        training_days=3,
+        test_days=2,
+        step_days=2,
+        name="rolling-quantile",
+        factor_specs=[FactorScoreSpec("momentum_20", "v1-qfq")],
+        top_n=1,
+        allowed_security_types={"stock"},
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260720",
+        quantile_backtest=QuantileBacktestRequest(
+            split_factor_name="quality_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+        ),
+    )
+
+    assert len(results.windows) == 4
+    for call in backtest_service.calls:
+        assert call["quantile_meta"] is not None
+        assert call["quantile_meta"].split_factor_name == "quality_20"
+        assert len(call["quantile_layer_signals"]) == 2
+    assert results.combined is not None
+    assert results.combined.window_count == 4

@@ -9,6 +9,15 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.backtest import TargetWeightSignal
+from app.backtest.curve_stitch import (
+    CombinedEquityCurve,
+    WindowCostSummary,
+    stitch_equity_curves,
+    window_cost_summary_from_trades,
+)
+from app.backtest.quantile import partition_universe_by_factor
+from app.backtest.quantile_result import QuantileBacktestMeta
 from app.backtest.rebalance import select_rebalance_dates
 from app.config.settings import settings
 from app.portfolio import PortfolioConstraints
@@ -16,9 +25,12 @@ from app.repositories.factor import FactorValueRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.repositories.research_read import WarmResearchReadRepository
 from app.repositories.strategy import TrainingArtifactRepository
-from app.schemas.strategy import RollingWindowRead
+from app.schemas.strategy import QuantileBacktestRequest, RollingWindowRead
 from app.services.backtest import DailyBacktestService, PersistedBacktestResult
-from app.services.rolling_backtest import RollingBacktestWindowResult
+from app.services.rolling_backtest import (
+    RollingBacktestResult,
+    RollingBacktestWindowResult,
+)
 from app.services.training_factor_selector import (
     TrainingSelectionPolicy,
     TrainingSelectionResult,
@@ -410,6 +422,7 @@ class StrategyResearchService:
         research_db: Session | None = None,
         contract_factor_specs: list[FactorScoreSpec] | None = None,
         selection: dict[str, Any] | None = None,
+        quantile_backtest: "QuantileBacktestRequest | None" = None,
     ) -> PersistedBacktestResult:
         self._validate_validation_window(
             validation_mode=validation_mode,
@@ -464,6 +477,21 @@ class StrategyResearchService:
                     "rebalance rule leaves no decision date with factor "
                     "observations in the requested window"
                 )
+        quantile_layer_signals = None
+        quantile_meta = None
+        if quantile_backtest is not None:
+            effective_decision_dates = (
+                decision_dates if decision_dates else set(strategy_frame.observation_dates)
+            )
+            quantile_layer_signals, quantile_meta = self._build_quantile_layer_signals(
+                db,
+                quantile_backtest=quantile_backtest,
+                universe=symbols,
+                invested_weight=invested_weight,
+                start_date=start_date,
+                end_date=end_date,
+                decision_dates=effective_decision_dates,
+            )
         signals = MultiFactorStrategy(
             top_n=top_n,
             allowed_security_types=allowed_security_types,
@@ -550,6 +578,8 @@ class StrategyResearchService:
             training_artifact_id=training_artifact_id,
             portfolio_constraints=portfolio_constraints,
             security_profiles=security_profiles,
+            quantile_layer_signals=quantile_layer_signals,
+            quantile_meta=quantile_meta,
         )
 
     def run_factor_selection(
@@ -590,6 +620,7 @@ class StrategyResearchService:
         transfer_fee_rate: Decimal | None = None,
         exchange_fee_rate: Decimal | None = None,
         research_db: Session | None = None,
+        quantile_backtest: "QuantileBacktestRequest | None" = None,
     ) -> PersistedBacktestResult:
         if validation_mode == "rolling":
             raise ValueError(
@@ -630,9 +661,10 @@ class StrategyResearchService:
             min_commission=min_commission,
             sell_stamp_duty_rate=sell_stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate,
-            exchange_fee_rate=exchange_fee_rate,
-            research_db=research_db,
-        )
+                exchange_fee_rate=exchange_fee_rate,
+                research_db=research_db,
+                quantile_backtest=quantile_backtest,
+            )
 
     def run_rolling_factor_selection(
         self,
@@ -674,7 +706,8 @@ class StrategyResearchService:
         exchange_fee_rate: Decimal | None = None,
         research_db: Session | None = None,
         selection_policy: TrainingSelectionPolicy | None = None,
-    ) -> list[RollingBacktestWindowResult]:
+        quantile_backtest: "QuantileBacktestRequest | None" = None,
+    ) -> "RollingBacktestResult":
         if rebalance_rule != "daily" and exchange != "SH":
             # Rebalance-date selection is anchored on the SH calendar; HK-only
             # windows could drop whole rebalance weeks silently. Reject until
@@ -805,6 +838,7 @@ class StrategyResearchService:
                 research_db=research_db,
                 contract_factor_specs=(normalized_specs if selection_policy is not None else None),
                 selection=selection,
+                quantile_backtest=quantile_backtest,
             )
             results.append(
                 RollingBacktestWindowResult(
@@ -821,7 +855,32 @@ class StrategyResearchService:
                     selection_summary=selection_summary,
                 )
             )
-        return results
+        combined = None
+        stitch_status = None
+        try:
+            combined = self._build_combined_curve(results, initial_cash)
+        except ValueError as exc:
+            # Overlapping test windows (or any stitching precondition failure)
+            # refuse the combined curve but keep every per-window run intact.
+            stitch_status = f"combined curve skipped: {exc}"
+        declarations = {
+            "non_tradable": (
+                "The combined curve concatenates per-window test-period equity on "
+                "a rebased basis; it is a research statistic, not a continuously "
+                "tradable strategy. Training periods are excluded and positions "
+                "are NOT carried across windows."
+            ),
+            "overlap_policy": (
+                "Test windows that overlap are rejected from the combined curve "
+                "(re-run with step_days >= training_days + test_days); per-window "
+                "results remain available individually."
+            ),
+        }
+        if stitch_status is not None:
+            declarations = {**declarations, "stitch_status": stitch_status}
+        return RollingBacktestResult(
+            windows=results, combined=combined, declarations=declarations
+        )
 
     def _load_factor_rows_or_candidates(
         self,
@@ -857,6 +916,124 @@ class StrategyResearchService:
                 f"{start_date.isoformat()} and {end_date.isoformat()}"
             )
         return loaded
+
+    def _build_quantile_layer_signals(
+        self,
+        db: Session,
+        *,
+        quantile_backtest: "QuantileBacktestRequest",
+        universe: set[str],
+        invested_weight: Decimal,
+        start_date: date,
+        end_date: date,
+        decision_dates: set[date],
+    ) -> tuple[list[list[TargetWeightSignal]], QuantileBacktestMeta]:
+        """Build per-layer equal-weight long-only signals + bucket metadata.
+
+        The split factor is read point-in-time (its value on each decision date),
+        so no future data leaks into the bucket assignment. Each decision date is
+        partitioned into ``n_layers`` mutually exclusive buckets; every bucket's
+        symbols become equal-weight (``invested_weight / bucket_size``) long-only
+        signals that the engine runs like the main selection (T+1 execution).
+        """
+        if not decision_dates:
+            raise ValueError("quantile backtest requires at least one decision date")
+        split_spec = FactorScoreSpec(
+            factor_name=quantile_backtest.split_factor_name,
+            factor_version=quantile_backtest.split_factor_version,
+            weight=Decimal(1),
+            higher_is_better=True,
+        )
+        split_rows = self._load_factor_rows(db, [split_spec], start_date, end_date)[split_spec]
+        factor_values_by_date: dict[date, dict[str, Decimal]] = {}
+        for row in split_rows:
+            if row.symbol not in universe:
+                continue
+            factor_values_by_date.setdefault(row.trade_date, {})[row.symbol] = Decimal(
+                str(row.value)
+            )
+        partitions = partition_universe_by_factor(
+            factor_values_by_date,
+            sorted(decision_dates),
+            quantile_backtest.n_layers,
+            max_assets_per_layer=quantile_backtest.max_assets_per_layer,
+        )
+        layer_signals: list[list[TargetWeightSignal]] = [
+            [] for _ in range(quantile_backtest.n_layers)
+        ]
+        for partition in partitions:
+            for layer_index, bucket in enumerate(partition.layers):
+                bucket_size = len(bucket)
+                if bucket_size == 0:
+                    continue
+                per_symbol_weight = invested_weight / Decimal(bucket_size)
+                for symbol in bucket:
+                    layer_signals[layer_index].append(
+                        TargetWeightSignal(
+                            signal_date=partition.decision_date,
+                            symbol=symbol,
+                            target_weight=per_symbol_weight,
+                        )
+                    )
+        layer_bounds = self._quantile_layer_bounds(
+            factor_values_by_date, quantile_backtest.n_layers
+        )
+        meta = QuantileBacktestMeta(
+            split_factor_name=quantile_backtest.split_factor_name,
+            split_factor_version=quantile_backtest.split_factor_version,
+            n_layers=quantile_backtest.n_layers,
+            max_assets_per_layer=quantile_backtest.max_assets_per_layer,
+            layer_bounds=tuple(layer_bounds),
+        )
+        return layer_signals, meta
+
+    @staticmethod
+    def _quantile_layer_bounds(
+        factor_values_by_date: dict[date, dict[str, Decimal]],
+        n_layers: int,
+    ) -> list[tuple[Decimal, Decimal]]:
+        """Empirical factor-value range each bucket represents across all dates."""
+        pooled: list[Decimal] = sorted(
+            value
+            for values in factor_values_by_date.values()
+            for value in values.values()
+        )
+        if not pooled:
+            return [(Decimal(), Decimal()) for _ in range(n_layers)]
+        total = len(pooled)
+        bounds: list[tuple[Decimal, Decimal]] = []
+        for layer_index in range(n_layers):
+            low_index = (layer_index * total) // n_layers
+            high_index = ((layer_index + 1) * total) // n_layers - 1
+            if high_index < 0:
+                high_index = 0
+            bounds.append((pooled[low_index], pooled[high_index]))
+        return bounds
+
+    def _build_combined_curve(
+        self,
+        results: list[RollingBacktestWindowResult],
+        initial_cash: Decimal,
+    ) -> CombinedEquityCurve:
+        """Stitch each window's test-period equity into one combined net curve."""
+        window_curves: list[list[tuple[date, Decimal]]] = []
+        window_costs: list[WindowCostSummary] = []
+        for window_result in results:
+            engine_result = window_result.persisted.result
+            window_curves.append(
+                [
+                    (point.trade_date, point.total_equity)
+                    for point in engine_result.equity_curve
+                ]
+            )
+            trades = engine_result.trades
+            total_commission = sum(
+                (Decimal(str(trade.commission)) for trade in trades), Decimal()
+            )
+            window_costs.append(
+                window_cost_summary_from_trades(trades, commission=total_commission)
+            )
+        return stitch_equity_curves(window_curves, window_costs, initial_cash)
 
     @staticmethod
     def _normalize_factor_rows(rows: list[Any]) -> list[SimpleNamespace]:

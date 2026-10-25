@@ -1218,6 +1218,7 @@ def test_factor_selection_backtest_forwards_research_contract(monkeypatch) -> No
         captured.update(kwargs)
         return SimpleNamespace(
             run_id=7,
+            quantile=None,
             result=SimpleNamespace(
                 initial_cash=Decimal("100000"),
                 final_equity=Decimal("101000"),

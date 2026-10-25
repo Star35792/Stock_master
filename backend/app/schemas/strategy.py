@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -155,6 +157,23 @@ class FactorScoreSpecRequest(BaseModel):
     higher_is_better: bool = True
 
 
+class QuantileBacktestRequest(BaseModel):
+    """Optional quantile (factor-layer) backtest add-on.
+
+    When supplied, the run additionally splits the investable universe into
+    ``n_layers`` mutually exclusive buckets by ``split_factor``'s cross-sectional
+    rank on each decision date and runs one equal-weight long-only portfolio per
+    bucket. The top-minus-bottom return is a *statistical* spread (A-shares
+    cannot be shorted), never a tradable short position.
+    """
+
+    split_factor_name: str = Field(min_length=1)
+    split_factor_version: str = Field(min_length=1)
+    n_layers: int = Field(default=5, ge=2, le=20)
+    max_assets_per_layer: int | None = Field(default=None, ge=1)
+    weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+
+
 class FactorSelectionBacktestRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     strategy_name: str = Field(default="factor_selection", min_length=1, max_length=100)
@@ -191,9 +210,17 @@ class FactorSelectionBacktestRequest(BaseModel):
     validation_mode: Literal["none", "out_of_sample", "rolling"] = "none"
     training_start_date: date | None = None
     training_end_date: date | None = None
+    quantile_backtest: QuantileBacktestRequest | None = Field(
+        default=None,
+        description=(
+            "Optional quantile (factor-layer) backtest add-on; when set, the run "
+            "additionally splits the universe into n_layers by split_factor rank "
+            "and runs one equal-weight long-only portfolio per bucket"
+        ),
+    )
 
     @model_validator(mode="after")
-    def validate_weighting_mode_and_invested_weight(self) -> "FactorSelectionBacktestRequest":
+    def validate_weighting_mode_and_invested_weight(self) -> FactorSelectionBacktestRequest:
         if (
             self.weighting_mode is WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
             and self.minimum_score_policy is MinimumScorePolicy.HOLD_CASH_WHEN_NO_CANDIDATE
@@ -222,6 +249,58 @@ class FactorSelectionBacktestResult(BaseModel):
     trade_count: int
     equity_points: int
     position_snapshots: int
+    quantile: QuantileBacktestResultRead | None = Field(
+        default=None,
+        description=(
+            "Optional quantile (factor-layer) backtest result, present when the "
+            "request carried quantile_backtest; the top-minus-bottom return is a "
+            "statistical spread, not a tradable short position"
+        ),
+    )
+
+
+class QuantileLayerRead(BaseModel):
+    layer_index: int
+    quantile_low: Decimal
+    quantile_high: Decimal
+    universe_size: int
+    asset_count: int
+    top_asset_symbols: list[str] = Field(default_factory=list)
+    equity_curve: list[dict[str, Any]]
+    total_return: Decimal
+    annualized_return: Decimal
+    maximum_drawdown: Decimal
+    sharpe_ratio: Decimal | None
+    turnover_rate: Decimal
+    total_commission: Decimal
+
+
+class QuantileBacktestResultRead(BaseModel):
+    split_factor_name: str
+    split_factor_version: str
+    n_layers: int
+    layers: list[QuantileLayerRead]
+    long_short_spread_return: Decimal
+    spread_curve: list[dict[str, Any]]
+    declarations: dict[str, str]
+
+
+class CombinedEquityCurveRead(BaseModel):
+    trade_dates: list[date]
+    total_equity: list[Decimal]
+    total_return: Decimal
+    annualized_return: Decimal
+    sharpe_ratio: Decimal | None
+    maximum_drawdown: Decimal
+    turnover_rate: Decimal
+    total_commission: Decimal
+    window_count: int
+
+
+class RollingBacktestResultRead(BaseModel):
+    windows: list[FactorSelectionBacktestResult]
+    combined: CombinedEquityCurveRead | None = None
+    declarations: dict[str, str]
 
 
 class BatchFactorSelectionBacktestRequest(BaseModel):
@@ -301,11 +380,20 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
             "and only artifact-bound selections drive the test window"
         ),
     )
+    quantile_backtest: QuantileBacktestRequest | None = Field(
+        default=None,
+        description=(
+            "Optional quantile (factor-layer) backtest add-on applied to every "
+            "test window; the split_factor layer runs are not persisted as "
+            "separate backtest runs - their curves and the top-minus-bottom "
+            "spread are embedded in each window run's parameters"
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_weighting_mode_and_invested_weight(
         self,
-    ) -> "RollingFactorSelectionBacktestRequest":
+    ) -> RollingFactorSelectionBacktestRequest:
         if (
             self.weighting_mode is WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
             and self.minimum_score_policy is MinimumScorePolicy.HOLD_CASH_WHEN_NO_CANDIDATE

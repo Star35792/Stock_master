@@ -18,6 +18,14 @@ from app.backtest import (
     TargetWeightSignal,
     build_fee_model,
 )
+from app.backtest.performance import BacktestPerformanceAnalyzer
+from app.backtest.quantile_result import (
+    QUANTILE_DECLARATIONS,
+    QuantileBacktestMeta,
+    QuantileBacktestResult,
+    QuantileLayerResult,
+    quantile_result_to_json,
+)
 from app.config.settings import settings
 from app.portfolio import PortfolioConstraints
 from app.repositories.market import (
@@ -170,6 +178,7 @@ class BacktestDataChangedError(RuntimeError):
 class PersistedBacktestResult:
     run_id: int
     result: BacktestResult
+    quantile: "QuantileBacktestResult | None" = None
 
 
 class DailyBacktestService:
@@ -336,6 +345,8 @@ class DailyBacktestService:
         portfolio_constraints: PortfolioConstraints | None = None,
         security_profiles: dict[str, tuple[str, str]] | None = None,
         research_db: Session | None = None,
+        quantile_layer_signals: list[list[TargetWeightSignal]] | None = None,
+        quantile_meta: "QuantileBacktestMeta | None" = None,
     ) -> PersistedBacktestResult:
         # Strategy artifacts live in the standalone research database; the
         # main session still serves market/calendar reads. ``None`` keeps the
@@ -538,13 +549,28 @@ class DailyBacktestService:
                     "the backtest was running"
                 )
             self.backtest_repository.save_result(artifacts_db, run=run, result=result)
+            quantile_result = self._maybe_run_quantile_layers(
+                artifacts_db=artifacts_db,
+                run=run,
+                execution_bars=execution_bars,
+                execution_calendar=execution_calendar,
+                fee_model=fee_model,
+                portfolio_constraints=portfolio_constraints,
+                security_profiles=security_profiles,
+                initial_cash=initial_cash,
+                lot_size=lot_size,
+                layer_signals=quantile_layer_signals,
+                quantile_meta=quantile_meta,
+            )
         except Exception as exc:
             self.backtest_repository.fail_run(
                 artifacts_db, run=run, error_message=str(exc)
             )
             artifacts_db.commit()
             raise
-        return PersistedBacktestResult(run_id=run.id, result=result)
+        return PersistedBacktestResult(
+            run_id=run.id, result=result, quantile=quantile_result
+        )
 
     def _load_execution_calendar(
         self,
@@ -579,6 +605,153 @@ class DailyBacktestService:
             for symbol in exchange_symbols:
                 result[symbol] = dates
         return result
+
+    def _maybe_run_quantile_layers(
+        self,
+        *,
+        artifacts_db: Session,
+        run: Any,
+        execution_bars: list[Any],
+        execution_calendar: dict[str, list[date]],
+        fee_model: Any,
+        portfolio_constraints: PortfolioConstraints | None,
+        security_profiles: dict[str, tuple[str, str]] | None,
+        initial_cash: Decimal,
+        lot_size: int,
+        layer_signals: list[list[TargetWeightSignal]] | None,
+        quantile_meta: "QuantileBacktestMeta | None",
+    ) -> "QuantileBacktestResult | None":
+        if layer_signals is None or quantile_meta is None:
+            return None
+        try:
+            result = self._run_quantile_layers(
+                execution_bars=execution_bars,
+                execution_calendar=execution_calendar,
+                fee_model=fee_model,
+                portfolio_constraints=portfolio_constraints,
+                security_profiles=security_profiles,
+                initial_cash=initial_cash,
+                lot_size=lot_size,
+                layer_signals=layer_signals,
+                quantile_meta=quantile_meta,
+            )
+            self.backtest_repository.update_run_parameters(
+                artifacts_db,
+                run=run,
+                extra={"quantile_backtest": quantile_result_to_json(result)},
+            )
+            artifacts_db.commit()
+            return result
+        except Exception as exc:  # layer run is additive; never fail the main run
+            self.backtest_repository.update_run_parameters(
+                artifacts_db,
+                run=run,
+                extra={"quantile_backtest_error": str(exc)},
+            )
+            artifacts_db.commit()
+            return None
+
+    def _run_quantile_layers(
+        self,
+        *,
+        execution_bars: list[Any],
+        execution_calendar: dict[str, list[date]],
+        fee_model: Any,
+        portfolio_constraints: PortfolioConstraints | None,
+        security_profiles: dict[str, tuple[str, str]] | None,
+        initial_cash: Decimal,
+        lot_size: int,
+        layer_signals: list[list[TargetWeightSignal]],
+        quantile_meta: QuantileBacktestMeta,
+    ) -> QuantileBacktestResult:
+        layers: list[QuantileLayerResult] = []
+        top_equity_by_date: dict[date, Decimal] = {}
+        bottom_equity_by_date: dict[date, Decimal] = {}
+        for layer_index, signals in enumerate(layer_signals):
+            if not signals:
+                continue
+            engine_result = DailyEventBacktestEngine(
+                initial_cash=initial_cash,
+                lot_size=lot_size,
+                fee_model=fee_model,
+                portfolio_constraints=portfolio_constraints,
+                security_profiles=security_profiles,
+            ).run(
+                bars=execution_bars,
+                signals=signals,
+                execution_calendar=execution_calendar,
+            )
+            performance = BacktestPerformanceAnalyzer().analyze(
+                run=_QuantileFakeRun(initial_cash),
+                equity_rows=engine_result.equity_curve,
+                trade_rows=engine_result.trades,
+                position_rows=engine_result.positions,
+                industries={},
+                style_values=None,
+            )
+            bounds = quantile_meta.layer_bounds[layer_index]
+            date_symbols: dict[date, set[str]] = {}
+            for sig in signals:
+                date_symbols.setdefault(sig.signal_date, set()).add(sig.symbol)
+            universe_size = max(
+                (len(group) for group in date_symbols.values()), default=0
+            )
+            layers.append(
+                QuantileLayerResult(
+                    layer_index=layer_index,
+                    quantile_low=bounds[0],
+                    quantile_high=bounds[1],
+                    universe_size=universe_size,
+                    asset_count=sum(len(group) for group in date_symbols.values()),
+                    top_asset_symbols=tuple(
+                        sorted({sig.symbol for sig in signals})[:10]
+                    ),
+                    equity_curve=tuple(engine_result.equity_curve),
+                    total_return=performance.total_return,
+                    annualized_return=performance.annualized_return,
+                    maximum_drawdown=performance.maximum_drawdown,
+                    sharpe_ratio=performance.sharpe_ratio,
+                    turnover_rate=performance.turnover_rate,
+                    total_commission=performance.total_commission,
+                )
+            )
+            if layer_index == 0:
+                for point in engine_result.equity_curve:
+                    bottom_equity_by_date[point.trade_date] = point.total_equity
+            if layer_index == quantile_meta.n_layers - 1:
+                for point in engine_result.equity_curve:
+                    top_equity_by_date[point.trade_date] = point.total_equity
+        if len(layers) < 2:
+            raise ValueError(
+                "quantile backtest produced fewer than two non-empty layers"
+            )
+        common_dates = sorted(set(top_equity_by_date) & set(bottom_equity_by_date))
+        if not common_dates:
+            raise ValueError(
+                "quantile backtest top and bottom layers share no trade dates"
+            )
+        spread_curve = tuple(
+            (
+                trade_date,
+                top_equity_by_date[trade_date] - bottom_equity_by_date[trade_date],
+            )
+            for trade_date in common_dates
+        )
+        spread_return = layers[-1].total_return - layers[0].total_return
+        return QuantileBacktestResult(
+            split_factor_name=quantile_meta.split_factor_name,
+            split_factor_version=quantile_meta.split_factor_version,
+            n_layers=quantile_meta.n_layers,
+            layers=tuple(layers),
+            long_short_spread_return=spread_return,
+            spread_curve=spread_curve,
+            declarations=dict(QUANTILE_DECLARATIONS),
+        )
+
+
+@dataclass(frozen=True)
+class _QuantileFakeRun:
+    initial_cash: Decimal
 
 
 class _ResearchReadFacade:

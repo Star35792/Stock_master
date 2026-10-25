@@ -151,8 +151,8 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 路由文件：`strategy_research.py`、`backtests.py`
 
 - `POST /api/v1/strategy-research/rolling-windows`
-- `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`）
-- `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源）
+- `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。可选 `quantile_backtest` 在每个测试窗内做分层回测。返回 `RollingBacktestResult`：各窗 `windows` + 跨窗拼接的 `combined` 组合净收益曲线（重叠窗 fail-closed 拒绝拼接、各窗仍独立可用）+ 非可交易声明）
+- `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源。可选 `quantile_backtest`：`split_factor_name/version` + `n_layers`(2–20) + `max_assets_per_layer` 按 split 因子在决策日横截面分桶，逐桶等权多头跑净收益曲线与 top–bottom 统计收益差，结果内嵌主运行 `parameters.quantile_backtest` 并随响应返回 `quantile`）
 - `POST /api/v1/strategy-research/factor-selection/backtests/batch`
 - 价格价值研究：`POST /api/v1/strategy-research/price-value/evaluate`
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`
