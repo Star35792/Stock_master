@@ -256,6 +256,26 @@ research.valuation_history (温层 Parquet)
 
 两个 IC 脚本此前用 `session.merge(FactorProfile(...))`——ORM 对象不带主键时 `merge` 退化为 **INSERT**，重跑会撞 `(factor_name, factor_version, trade_date)` 唯一约束，**修正后的证据写不进去**。本轮改为 `FactorProfileRepository.upsert()`（`ON CONFLICT DO UPDATE`），并实测重跑后总行数不变（7,169 行）。
 
+### 6.6 初筛 ST 阻断解除的直接验证
+
+`special_treatment_status` 曾**没有任何数据源写入**而恒为 NULL，初筛把「未知」当「受限」，连续 83 次运行 0 个可复核候选。本轮由证券简称派生并回填控制面，验证结果：
+
+| 项目 | 数值 |
+|---|---|
+| `market.security`（`security_type='stock'`） | `normal` 5,383 / `ST` 200 / `delisting` 1 |
+| `market.daily_bar`（2026-09-24） | `normal` 5,361 / `ST` 196 |
+| 初筛 `ready_count`（2026-09-24，完整数据日） | **3,770**（此前连续 83 次为 0） |
+| `treatment_unknown_or_restricted` 剩余原因数 | 196（真实 ST/*ST/退市整理，不再是全市场） |
+| 非个股（指数/概念）ST 状态 | 恒为 NULL——派生只对 `security_type='stock'` 生效，`ST板块` 是板块指数不是个股 ST |
+
+**残留阻断（与本轮无关，属数据新鲜度）**：按「今天」跑初筛时 `ready_count` 仍为 0，但原因不是 ST，而是目标交易日无数据：
+
+- 控制面 `market.daily_bar` 最新仅到 **2026-10-21**，且该日只有 **1** 条 `quality_status='trusted'`；
+- `market.valuation_snapshot` 仅覆盖 **2026-09-18 ~ 2026-09-24**（3 个交易日）；
+- 目标日的 input preparation batch 不存在。
+
+即 `trusted_bars_missing_for_target` / `valuation_missing_for_target` / `roe_reported_missing_for_target` / `input_preparation_missing_for_target` 四条**全局**原因覆盖全部 5,584 只个股，ST 分支根本没被走到。恢复日线/估值日常供给后，同一条路径会直接产出候选。
+
 
 ## 7. 明确不可得、继续挂账的项
 
