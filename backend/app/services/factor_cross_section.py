@@ -244,6 +244,16 @@ class FactorCrossSectionService:
         forward_returns_by_horizon: dict[int, dict[date, dict[str, Decimal]]],
         code_version: str,
     ) -> int:
+        """Persist the daily cross-section profiles.
+
+        **Fail-closed on empty cross-sections.**  A trading day on which the
+        factor produced no observation at all carries no evidence, but writing
+        it would *replace* an existing, valid row for the same
+        ``(factor_name, factor_version, trade_date)`` key -- and that is how a
+        batch run over a factor whose values are absent from the warm layer
+        silently destroys the IC evidence another script produced.  Such days
+        are therefore skipped rather than written.
+        """
         rows_written = 0
         previous_top_symbols: set[str] | None = None
         for trade_date in sorted(set(universe_by_date) | set(values_by_date)):
@@ -251,6 +261,10 @@ class FactorCrossSectionService:
             values = list(symbol_values.values())
             universe_size = universe_by_date.get(trade_date, len(values))
             observation_count = len(values)
+            if observation_count == 0:
+                # No evidence for this day: skip it rather than overwrite an
+                # existing row with an empty cross-section.
+                continue
             missing_count = max(universe_size - observation_count, 0)
             denominator = Decimal(universe_size) if universe_size else Decimal(1)
             mean = self._mean(values)

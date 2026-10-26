@@ -57,11 +57,33 @@ def apply_schema_compatibility(bind: Engine) -> None:
     versioned DuckDB migration runner replaces it.
     """
     statements = (
-        "ALTER TABLE factor.factor_run ADD COLUMN IF NOT EXISTS release_id VARCHAR",
-        "ALTER TABLE market.adjustment_factor ADD COLUMN IF NOT EXISTS release_id VARCHAR",
+        ("factor.factor_run", "ALTER TABLE factor.factor_run "
+         "ADD COLUMN IF NOT EXISTS release_id VARCHAR"),
+        ("market.adjustment_factor", "ALTER TABLE market.adjustment_factor "
+         "ADD COLUMN IF NOT EXISTS release_id VARCHAR"),
+        # Special-treatment status is derived from the security's short name
+        # and stored on the security master, so the daily bars and the screen
+        # read one consistent value.  Additive and idempotent.
+        ("market.security", "ALTER TABLE market.security "
+         "ADD COLUMN IF NOT EXISTS special_treatment_status VARCHAR(20)"),
     )
     with bind.begin() as conn:
-        for statement in statements:
+        for table, statement in statements:
+            # An ALTER on a missing table is a hard error in DuckDB, and the
+            # compatibility bridge runs before ``create_all`` has produced
+            # every table in a fresh database.  The bridge is additive, so
+            # skipping a table that does not exist yet is safe: the column
+            # comes with the table when it is created.
+            schema, name = table.split(".")
+            exists = conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_schema = :schema AND table_name = :name"
+                ),
+                {"schema": schema, "name": name},
+            ).scalar_one()
+            if not exists:
+                continue
             conn.execute(text(statement))
         # DuckDB can invalidate the database when updating a security name
         # while this legacy ART index is present. Name searches use contains
@@ -93,6 +115,71 @@ def apply_schema_compatibility(bind: Engine) -> None:
                 continue
             with bind.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))
+
+    # The factor evidence tables gained columns after the first release:
+    #
+    # * ``factor.factor_profile`` carries the multi-horizon endpoint
+    #   (long-short) spreads used by the pool classifier's endpoint gate;
+    # * ``factor.factor_definition`` carries the point-in-time status of the
+    #   factor definition, which the classifier uses to fail closed.
+    #
+    # Both tables are populated, and DuckDB needs one commit per ALTER on a
+    # populated table, so each column gets its own transaction.
+    additive_factor_columns = (
+        (
+            "factor.factor_profile",
+            (
+                "long_short_forward_return_5d DECIMAL(24, 10)",
+                "long_short_forward_return_20d DECIMAL(24, 10)",
+            ),
+        ),
+        (
+            "factor.factor_definition",
+            (
+                "pit_status VARCHAR(20) DEFAULT 'unknown'",
+                "status VARCHAR(20) DEFAULT 'active'",
+            ),
+        ),
+    )
+    for table, columns in additive_factor_columns:
+        schema, name = table.split(".")
+        with bind.connect() as conn:
+            existing_columns = set(
+                conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = :schema AND table_name = :name"
+                    ),
+                    {"schema": schema, "name": name},
+                ).scalars()
+            )
+        if not existing_columns:
+            continue
+        for column in columns:
+            if column.split()[0] in existing_columns:
+                continue
+            with bind.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))
+        # ``ADD COLUMN ... DEFAULT`` only fills rows that exist at the time of
+        # the ALTER.  Rows written before the column existed keep NULL, and
+        # NULL is not a valid point-in-time verdict -- the fail-closed default
+        # is ``unknown``.  Backfilling is idempotent.
+        if table == "factor.factor_definition" and "pit_status" in existing_columns:
+            with bind.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE factor.factor_definition "
+                        "SET pit_status = 'unknown' WHERE pit_status IS NULL"
+                    )
+                )
+        if table == "factor.factor_definition" and "status" in existing_columns:
+            with bind.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE factor.factor_definition "
+                        "SET status = 'active' WHERE status IS NULL"
+                    )
+                )
 
     # Existing pre-artifact databases need an additive upgrade: create_all does
     # not add columns or indexes to tables that are already present. Keep the

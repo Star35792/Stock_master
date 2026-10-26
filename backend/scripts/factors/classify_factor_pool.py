@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-rank-ic-5d", type=Decimal, default=Decimal("0.01"))
     parser.add_argument("--min-rank-ic-20d", type=Decimal, default=Decimal("0.01"))
     parser.add_argument(
+        "--min-long-short-forward-return-1d",
+        type=Decimal,
+        default=Decimal("0"),
+        help="端点闸门：1 日多空价差必须严格大于该阈值（默认 0，即要求为正）",
+    )
+    parser.add_argument(
         "--output-format",
         default="text",
         choices=("text", "json"),
@@ -47,6 +53,7 @@ def main() -> int:
         min_rank_ic_1d=args.min_rank_ic_1d,
         min_rank_ic_5d=args.min_rank_ic_5d,
         min_rank_ic_20d=args.min_rank_ic_20d,
+        min_long_short_forward_return_1d=args.min_long_short_forward_return_1d,
     )
 
     start_date = date.fromisoformat(args.start_date) if args.start_date else None
@@ -97,6 +104,23 @@ def main() -> int:
                         if c.summary.mean_rank_ic_20d is not None
                         else None
                     ),
+                    "mean_long_short_forward_return_1d": (
+                        str(c.summary.mean_long_short_forward_return_1d)
+                        if c.summary.mean_long_short_forward_return_1d is not None
+                        else None
+                    ),
+                    "mean_long_short_forward_return_5d": (
+                        str(c.summary.mean_long_short_forward_return_5d)
+                        if c.summary.mean_long_short_forward_return_5d is not None
+                        else None
+                    ),
+                    "mean_long_short_forward_return_20d": (
+                        str(c.summary.mean_long_short_forward_return_20d)
+                        if c.summary.mean_long_short_forward_return_20d is not None
+                        else None
+                    ),
+                    "endpoint_observation_count": c.summary.endpoint_observation_count,
+                    "pit_status": c.summary.pit_status,
                 },
             }
             for c in classifications

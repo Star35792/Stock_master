@@ -51,4 +51,5 @@ class Security(TimestampMixin, Base):
     industry: Mapped[str | None] = mapped_column(String(100))
     area: Mapped[str | None] = mapped_column(String(100))
     board: Mapped[str | None] = mapped_column(String(50))
+    special_treatment_status: Mapped[str | None] = mapped_column(String(20))
     source_name: Mapped[str | None] = mapped_column(String(50))

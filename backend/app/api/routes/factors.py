@@ -177,6 +177,7 @@ def classify_factor_pool(
         min_rank_ic_1d=payload.min_rank_ic_1d,
         min_rank_ic_5d=payload.min_rank_ic_5d,
         min_rank_ic_20d=payload.min_rank_ic_20d,
+        min_long_short_forward_return_1d=payload.min_long_short_forward_return_1d,
     )
     classifier = FactorPoolClassifierService(policy=policy)
     summaries, _ = batch_profiler_service.summarize(

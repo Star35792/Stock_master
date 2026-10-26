@@ -35,6 +35,7 @@
 | 选股与持仓管控路线 | `aiDoc/plans/auto-selection-position-roadmap.md` | `aiDoc/plans/hard-gates-execution-plan.md` |
 | 研究产出修复与因子证据 | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) | `aiDoc/plans/roadmap.md`、[温层因子回填与 IC 证据](data/20261023-0247-warm-factor-ic-evidence.md) |
 | 温层因子回填、IC 证据与回测口径 | [温层因子回填与 IC 证据](data/20261023-0247-warm-factor-ic-evidence.md) | `aiDoc/relations/trusted-daily-data-center.md` 第 10.1 节 |
+| 估值历史回填、字段级 PIT 判定与偏差登记 | [估值历史回填](data/20261026-valuation-history-backfill.md) | `aiDoc/modules/schema-plan.md` §17、`aiDoc/data/source-ingestion-policy.md` §13 |
 | 调仓频率与净收益（20 交易日调仓平台复现） | [调仓频率净收益证据](research/20261024-1205-rebalance-frequency-net-return.md) | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) P3 |
 | 策略自演进（训练窗自动选参、rolling 选参策略） | [训练窗自动选参计划](plans/20261024-1522-training-window-selection-plan.md) | `aiDoc/plans/roadmap.md` V4.1、[首次实跑证据](research/20261024-1706-training-window-selection-first-run.md) |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
@@ -57,7 +58,8 @@
 13. [自动选股与持仓管控路线图](plans/auto-selection-position-roadmap.md)
 14. [前置硬门槛执行计划](plans/hard-gates-execution-plan.md)
 15. [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md)
-16. [决策与提交评审协议](plans/decision-review-protocol.md)
+16. [估值历史回填与字段级 PIT 判定](data/20261026-valuation-history-backfill.md)
+17. [决策与提交评审协议](plans/decision-review-protocol.md)
 
 ## 更新原则
 

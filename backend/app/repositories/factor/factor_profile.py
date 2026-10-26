@@ -40,6 +40,8 @@ class FactorProfileRepository:
         top_quantile_forward_return_1d: Decimal | None,
         bottom_quantile_forward_return_1d: Decimal | None,
         long_short_forward_return_1d: Decimal | None,
+        long_short_forward_return_5d: Decimal | None = None,
+        long_short_forward_return_20d: Decimal | None = None,
         quantile_monotonicity_1d: Decimal | None,
         top_quantile_turnover: Decimal | None,
         code_version: str,
@@ -69,6 +71,8 @@ class FactorProfileRepository:
             "top_quantile_forward_return_1d": top_quantile_forward_return_1d,
             "bottom_quantile_forward_return_1d": bottom_quantile_forward_return_1d,
             "long_short_forward_return_1d": long_short_forward_return_1d,
+            "long_short_forward_return_5d": long_short_forward_return_5d,
+            "long_short_forward_return_20d": long_short_forward_return_20d,
             "quantile_monotonicity_1d": quantile_monotonicity_1d,
             "top_quantile_turnover": top_quantile_turnover,
             "code_version": code_version,
@@ -161,6 +165,29 @@ class FactorProfileRepository:
                 func.avg(FactorProfile.rank_ic_5d).label("mean_rank_ic_5d"),
                 func.avg(FactorProfile.ic_20d).label("mean_ic_20d"),
                 func.avg(FactorProfile.rank_ic_20d).label("mean_rank_ic_20d"),
+                # Endpoint (long-short) aggregates.  The pool classifier gates
+                # on these: a factor can carry a positive IC while its extreme
+                # buckets still lose money, and such a factor is not tradable.
+                func.avg(FactorProfile.long_short_forward_return_1d).label(
+                    "mean_long_short_forward_return_1d"
+                ),
+                func.avg(FactorProfile.long_short_forward_return_5d).label(
+                    "mean_long_short_forward_return_5d"
+                ),
+                func.avg(FactorProfile.long_short_forward_return_20d).label(
+                    "mean_long_short_forward_return_20d"
+                ),
+                # How many days actually carry endpoint evidence -- distinguishes
+                # "no endpoint evidence" from "negative endpoint".
+                func.count(FactorProfile.long_short_forward_return_1d).label(
+                    "endpoint_observation_count"
+                ),
+                func.avg(FactorProfile.quantile_monotonicity_1d).label(
+                    "mean_quantile_monotonicity_1d"
+                ),
+                func.avg(FactorProfile.top_quantile_turnover).label(
+                    "mean_top_quantile_turnover"
+                ),
             )
             .where(*filters)
             .group_by(FactorProfile.factor_name, FactorProfile.factor_version)

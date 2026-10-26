@@ -56,3 +56,26 @@ class FactorDefinition(TimestampMixin, Base):
     dependencies: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     parameters_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # Point-in-time status of the factor definition:
+    #
+    # * ``point_in_time`` -- every input was knowable on the trade date itself;
+    # * ``look_ahead``   -- at least one input leaks future information;
+    # * ``unknown``      -- not yet audited, treated as unusable by the pool
+    #   classifier (fail closed).
+    #
+    # The column defaults to ``unknown`` on purpose: a factor that was never
+    # audited must not silently enter the core pool.
+    pit_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'unknown'")
+    )
+    # 定义本身的生命周期状态：
+    #
+    # * ``active``  -- 当前有效版本，可参与因子池分级；
+    # * ``retired`` -- 已被取代或已知有误，只保留证据供审计，硬冻结。
+    #
+    # 与 ``is_active`` 的区别：``is_active`` 表示「是否参与批量画像」，
+    # ``status`` 表示「这个定义是否还是活的证据」。价值因子的证据由专用
+    # 脚本产出，因此 ``is_active=False`` 但 ``status='active'``。
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'active'")
+    )

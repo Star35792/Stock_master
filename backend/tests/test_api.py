@@ -1477,6 +1477,9 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
                     mean_rank_ic_1d=Decimal("0.02"),
                     mean_rank_ic_5d=Decimal("0.02"),
                     mean_rank_ic_20d=Decimal("0.02"),
+                    mean_long_short_forward_return_1d=Decimal("0.002"),
+                    endpoint_observation_count=250,
+                    pit_status="point_in_time",
                 )
             ],
             1,
@@ -1504,6 +1507,45 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
     assert body[0]["category"] == "price_volume_risk"
     assert captured_query["start_date"] == date(2024, 1, 2)
     assert captured_query["end_date"] == date(2025, 12, 31)
+
+
+def test_classify_factor_pool_reports_endpoint_and_pit_verdicts(monkeypatch) -> None:
+    """The response must expose the endpoint and point-in-time verdicts."""
+    from app.services.factor_batch_profiler import FactorProfileSummary
+
+    def fake_summarize(db, **kwargs):
+        return (
+            [
+                FactorProfileSummary(
+                    factor_name="value_pb_mrq",
+                    factor_version="v2-valhist",
+                    category="valuation",
+                    trade_date_count=250,
+                    first_trade_date=date(2024, 1, 2),
+                    last_trade_date=date(2025, 12, 31),
+                    mean_coverage_rate=Decimal("0.90"),
+                    mean_rank_ic_1d=Decimal("0.03"),
+                    mean_rank_ic_5d=Decimal("0.04"),
+                    mean_rank_ic_20d=Decimal("0.05"),
+                    mean_long_short_forward_return_1d=Decimal("0.0003"),
+                    endpoint_observation_count=250,
+                    pit_status="look_ahead",
+                )
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(
+        factors_module.batch_profiler_service, "summarize", fake_summarize
+    )
+
+    response = client.post("/api/v1/factors/pool-classifications", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["pool"] == "frozen"
+    assert body[0]["summary"]["pit_status"] == "look_ahead"
+    assert body[0]["summary"]["mean_long_short_forward_return_1d"] == "0.0003"
 
 
 def test_classify_factor_pool_rejects_reversed_range() -> None:

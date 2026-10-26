@@ -71,6 +71,10 @@ class FactorProfileSummary:
 
     数值来自 ``factor.factor_profile`` 的逐日截面诊断，跨日期取简单平均；
     缺失 horizon 返回 ``None``，不与 0 混淆。
+
+    ``pit_status`` 来自 ``factor.factor_definition``（``point_in_time`` /
+    ``look_ahead`` / ``unknown``），是因子池分级的硬门槛：``look_ahead`` 与
+    ``unknown`` 的因子不得进入核心池。
     """
 
     factor_name: str
@@ -86,6 +90,18 @@ class FactorProfileSummary:
     mean_rank_ic_5d: Decimal | None = None
     mean_ic_20d: Decimal | None = None
     mean_rank_ic_20d: Decimal | None = None
+    #: 端点（多空分位）价差均值：可交易性的直接证据。
+    mean_long_short_forward_return_1d: Decimal | None = None
+    mean_long_short_forward_return_5d: Decimal | None = None
+    mean_long_short_forward_return_20d: Decimal | None = None
+    #: 携带端点证据的天数，用于区分「没有端点证据」与「端点为负」。
+    endpoint_observation_count: int = 0
+    mean_quantile_monotonicity_1d: Decimal | None = None
+    mean_top_quantile_turnover: Decimal | None = None
+    #: 时点性状态；``unknown`` 表示未审计（fail-closed）。
+    pit_status: str = "unknown"
+    #: 定义生命周期状态；``retired`` 表示已被取代或已知有误（硬冻结）。
+    factor_status: str = "active"
 
     @property
     def has_ic_evidence(self) -> bool:
@@ -100,6 +116,11 @@ class FactorProfileSummary:
                 self.mean_rank_ic_20d,
             )
         )
+
+    @property
+    def has_endpoint_evidence(self) -> bool:
+        """是否真的测量过端点价差（而非缺证据）。"""
+        return self.endpoint_observation_count > 0
 
 
 class FactorBatchProfilerService:
@@ -307,6 +328,8 @@ class FactorBatchProfilerService:
 
     def _to_summary(self, row: dict[str, object]) -> FactorProfileSummary:
         category = "unknown"
+        pit_status = "unknown"
+        factor_status = "active"
         if self._summary_db is not None:
             try:
                 definition = self.definition_repository.get_by_name_version(
@@ -318,6 +341,8 @@ class FactorBatchProfilerService:
                 definition = None
             if definition is not None:
                 category = definition.category
+                pit_status = getattr(definition, "pit_status", None) or "unknown"
+                factor_status = getattr(definition, "status", None) or "active"
         return FactorProfileSummary(
             factor_name=str(row["factor_name"]),
             factor_version=str(row["factor_version"]),
@@ -332,6 +357,24 @@ class FactorBatchProfilerService:
             mean_rank_ic_5d=_to_decimal(row.get("mean_rank_ic_5d")),
             mean_ic_20d=_to_decimal(row.get("mean_ic_20d")),
             mean_rank_ic_20d=_to_decimal(row.get("mean_rank_ic_20d")),
+            mean_long_short_forward_return_1d=_to_decimal(
+                row.get("mean_long_short_forward_return_1d")
+            ),
+            mean_long_short_forward_return_5d=_to_decimal(
+                row.get("mean_long_short_forward_return_5d")
+            ),
+            mean_long_short_forward_return_20d=_to_decimal(
+                row.get("mean_long_short_forward_return_20d")
+            ),
+            endpoint_observation_count=int(row.get("endpoint_observation_count") or 0),
+            mean_quantile_monotonicity_1d=_to_decimal(
+                row.get("mean_quantile_monotonicity_1d")
+            ),
+            mean_top_quantile_turnover=_to_decimal(
+                row.get("mean_top_quantile_turnover")
+            ),
+            pit_status=pit_status,
+            factor_status=factor_status,
         )
 
     @staticmethod

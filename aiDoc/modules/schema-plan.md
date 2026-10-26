@@ -510,8 +510,10 @@ V1 暂不引入以下设计：
 ## 16. 当前已扩展表域
 
 以下表域已经不再是“暂不创建”，而是当前代码的一部分：
-
 - `factor.*`：因子定义、运行批次、因子值、横截面 profile。`factor.factor_definition` 新增非空 `category` 字段（11 个决策域分类，见 `aiDoc/research/decision-factor-framework.md`）与 `ix_factor_definition_category` 索引；派生因子（`xxx__transform`）继承基础因子分类，由 Alembic `20260722_0024` 回填。
+  - **2026-10-26 新增两列**：`factor_definition.pit_status`（`point_in_time` / `look_ahead` / `unknown`，默认 `unknown`）与 `factor_definition.status`（`active` / `retired`，默认 `active`）。两者是因子池分级器的硬闸门输入：`look_ahead` 与 `retired` 的定义硬冻结，`unknown` 不得进入核心池。`pit_status` 与 `status` 互不等价于 `is_active`——`is_active` 表示"是否参与批量画像"，`status` 表示"该定义是否还是活的证据"；IC 证据由专用脚本产出的定义因此 `is_active=False` 但 `status='active'`。
+  - **`factor.factor_profile` 新增三个列**：`long_short_forward_return_5d`、`long_short_forward_return_20d`（与既有 `long_short_forward_return_1d` 同义）与 `quantile_monotonicity_1d` / `top_quantile_turnover` 的落库保障。端点价差（top−bottom 分位）是"极端分位是否可交易"的直接证据，分级器以 1 日端点严格为正作为进入核心池的硬闸门。
+  - 这些列由启动兼容桥 `app/database/session.py::apply_schema_compatibility` 幂等补齐（`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + 既有行回填默认值），项目当前**没有** Alembic 迁移目录，schema 变更走该兼容桥。
 - `strategy.*`：回测运行、成交、净值、持仓和绩效。**2026-10-24 起这 6 张表物理上位于独立 `data/research.duckdb`**（模型挂 `ResearchBase`，服务层 `research_db=None` 兼容参数贯穿，迁移脚本 `migrate_strategy_to_research.py`；见 `aiDoc/relations/20261024-1427-research-database-split.md`），schema 限定名 `strategy.*` 不变，SQL/ORM 查询写法不变。新库训练产物关联 `backtest_run.training_artifact_id -> training_artifact.id` 使用默认外键删除限制，禁止删除被回测引用的产物，允许空引用；DuckDB 不支持 `ON DELETE SET NULL`，不能依赖它静默断开血缘。启动兼容桥为旧库幂等添加 nullable 的 `training_artifact_id` 和索引，保留已有回测记录；旧表追加列不追补外键，启用训练产物绑定前仍需正式约束迁移。当前滚动执行关闭，训练产物验证尚未完成；实际用户数据库未在本次开发中直接升级。
   - 价格价值假设回测复用上述表，无新增 schema 或迁移。`backtest_run.parameters` 保存 `price_value_assumption_v1` 合同、显式假设、市场快照、引擎版本、输入哈希及完整 `price_value_report`（含决策日志）；`validation_mode=none`、`pit_verified=false`。标准成交/净值/持仓保持原定点精度，JSON 报告保留 Decimal 字符串精度；写入仅是研究存储，不创建 `trade.*` 事实。
 - `raw.daily_bar / market.daily_bar`：估值研究依赖 `limit_up / limit_down / is_suspended / special_treatment_status`，从选定 raw 记录复制至可信日线。沿用当前 DuckDB 初始化兼容桥幂等补列，旧行限价和特殊处理状态保留 NULL，停牌字段沿用 false 默认值；默认值不证明历史可交易，研究仍要求明确普通状态和有效限价。既有值不覆盖，实际用户数据库未由本次开发直接升级。
@@ -523,6 +525,35 @@ V1 暂不引入以下设计：
 - `market.alternative_data_snapshot`、`market.index_constituent_snapshot` 和 `market.valuation_snapshot`：另类数据、指数成分和估值快照。
 - `lake.release`：按 `dataset + checksum` 生成内容寻址 `release_id`，记录 schema 版本、日期范围、行数、父 release、代码版本、质量状态、文件 manifest 和 active 指针。`factor.factor_run.release_id` 绑定因子输入 release，`market.adjustment_factor.release_id` 绑定复权血缘。现有 DuckDB 由启动/日循环入口执行幂等兼容升级，为这两个既有表补充 nullable `release_id`；新表仍由 SQLAlchemy metadata 创建。
 - `positions`（独立 SQLite，`data/positions.db`）：手工记账的真实持仓账本，是唯一存放在 DuckDB 之外的域（决策见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）。`position_book` 记账本名与现金（`cash_quants` 整数最小单位 0.0001 元，满足定点要求），`position_trade` 记买卖流水（side/quantity/price_quants/fee_quants/trade_date/幂等键）。持仓数量、平均成本与已实现盈亏由流水按 `(trade_date, id)` 重放推导，不落库；估值价格取 DuckDB `market` 可信层，缺价时按成本估值并标记 `price_stale`。卖出校验净持仓非负，删除流水后重放校验不产生负持仓。
+
+## 17. 温层 Parquet 研究层表
+
+除 `raw / market / factor / fundamental` 等控制面表域外，**研究层**还有一类只存在于 Parquet 温层的表。它们不是控制面表的子集，而是独立的研究数据集。
+
+### 17.1 判定标准（四要素齐备才算温层研究表）
+
+一张表同时满足以下四条，才归入温层 Parquet 研究层表：
+
+1. **只存在于 Parquet**：物理文件在 `backend/data/warm/exported/<release_tag>/<schema>/<table>/`，控制面 DuckDB（`data/stock_master.duckdb`）里**没有**对应的基表。
+2. **无 ORM 模型**：没有 `app/models/**` 下的 SQLAlchemy 模型类，也不参与 `Base.metadata.create_all`。
+3. **无 Alembic 迁移**：没有对应的 revision，也没有 `apply_schema_compatibility` 的幂等 ALTER。
+4. **不出现在控制面 `information_schema`**：`SELECT * FROM information_schema.tables WHERE table_catalog='ctrl'` 查不到它。
+
+**读取入口**统一为 `WarmLayerStore.connect()` 返回的 DuckDB 连接，配 `app/repositories/research_read.py` 的 `WarmResearchReadRepository`。
+
+### 17.2 现有温层研究表
+
+| schema.table | 内容 | 关键列 | 读取入口 |
+|---|---|---|---|
+| `research.valuation_history` | 东财估值历史序列（PE/PB/PS、总市值、总股本、流通股本、流通市值、涨跌幅） | `symbol`、`trade_date`、`close`、`pe_ttm`、`pb_mrq`、`ps_ttm`、`total_market_cap`、`total_shares`、`free_shares_a`、`float_market_cap`、`change_rate`、`pit_verified`、`source_name`、`observed_at` | `WarmResearchReadRepository.list_valuation_history` / `valuation_history_coverage` |
+
+`research.valuation_history` 之所以放在 `research` 命名空间而不是 `market`，是因为它的行是**今天采集的历史数据**，不是当时可知的证据：全部行的 `pit_verified=false`。它不得被 `market.valuation_snapshot` 的通用读取器拾取，也不得写入控制面。
+
+### 17.3 与可信层的关系
+
+- 温层研究表**不是**可信层表的替代品。它们服务于「研究口径」而非「交易口径」，消费方向仍然是 `raw -> market -> factor -> research/backtest`。
+- 温层研究表在 ORM 侧有**孪生读取路径**（见 `aiDoc/modules/backend-layer-rules.md`）：`research.valuation_history` 的 ORM 孪生是 `app/repositories/research_valuation.py` 的 `ResearchValuationReadRepository`，读控制面的 `market.valuation_snapshot`。两条路径的列名、排序和过滤语义一致，但覆盖范围不同：控制面只有实际采集过的交易日，温层才有完整回填。
+- 字段级时点有效性差异必须显式暴露：温层的 `pb_mrq` 会前视最多 120 天，ORM 孪生因此把 `pb_mrq` 报为 `None` 而不是假装两者同义；温层 `pit_verified=false`，控制面当日快照为 `true`。
 
 仍暂不创建或不作为当前主线：
 

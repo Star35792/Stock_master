@@ -22,7 +22,25 @@ class FactorDefinitionRepository:
         version: str,
         dependencies: list[str] | None = None,
         parameters_schema: dict[str, Any] | None = None,
+        is_active: bool = True,
+        pit_status: str = "unknown",
+        status: str = "active",
     ) -> FactorDefinition:
+        """Create or refresh a factor definition.
+
+        ``is_active``, ``pit_status`` and ``status`` are explicit arguments
+        because all three change the factor's role in the pipeline:
+
+        * a definition that is **not** active is skipped by the batch
+          profiler, so registering a factor whose evidence is produced by a
+          dedicated script does not let the batch run overwrite that evidence
+          with empty cross-sections;
+        * ``pit_status`` is what the pool classifier reads to decide whether
+          the factor may enter the core pool.  ``unknown`` is the fail-closed
+          default;
+        * ``status='retired'`` marks a superseded or known-wrong definition.
+          Its evidence is kept for audit but the factor is frozen.
+        """
         definition = self.get_by_name_version(db, name=name, version=version)
         values = {
             "display_name": display_name,
@@ -34,7 +52,9 @@ class FactorDefinitionRepository:
             "window_days": window_days,
             "dependencies": dependencies or [],
             "parameters_schema": parameters_schema or {},
-            "is_active": True,
+            "is_active": is_active,
+            "pit_status": pit_status,
+            "status": status,
         }
         if definition is None:
             definition = FactorDefinition(name=name, version=version, **values)

@@ -79,6 +79,16 @@ class FakeSecurityRepository:
     def get_symbols(self, db: object, symbols: set[str]) -> set[str]:
         return symbols
 
+    def get_special_treatment_statuses(
+        self, db: object, symbols: set[str]
+    ) -> dict[str, str]:
+        """Return no known status; the real repository omits unknown securities.
+
+        An omitted status must stay "unknown" rather than become "normal",
+        because a missing name is not evidence of a normal security.
+        """
+        return {}
+
 
 class FakeTradingCalendarRepository:
     def get_open_dates(self, db: object, *, exchange: str, dates: set[date]) -> set[date]:

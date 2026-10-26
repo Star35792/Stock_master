@@ -45,6 +45,11 @@ WARM_TABLES: frozenset[tuple[str, str]] = frozenset(
         ("raw", "corporate_action"),
         ("fundamental", "financial_statement"),
         ("raw", "financial_payload"),
+        # Research-layer valuation history.  It lives in the ``research``
+        # namespace on purpose: the rows are collected today for historical
+        # dates, so they are *not* part of the trusted ``market`` consumption
+        # layer and must not be picked up by generic valuation readers.
+        ("research", "valuation_history"),
     }
 )
 
@@ -59,6 +64,7 @@ WARM_TABLE_DATE_COLUMNS: dict[tuple[str, str], str] = {
     ("raw", "corporate_action"): "ex_date",
     ("fundamental", "financial_statement"): "report_date",
     ("raw", "financial_payload"): "report_date",
+    ("research", "valuation_history"): "trade_date",
 }
 
 # Schemas that live in the control-plane DuckDB file and must be delegated to
@@ -80,6 +86,26 @@ CONTROL_SCHEMAS: tuple[str, ...] = (
 # Schemas for which we build parquet-backed warm views.  Other schemas are fully
 # delegated to the control plane.
 WARM_SCHEMAS: tuple[str, ...] = ("market", "raw", "factor", "fundamental")
+
+# Upper bound for the ``base_release_tag`` chain walk.  Releases are a DAG in
+# practice; the bound only protects against a malformed cycle.
+_MAX_RELEASE_DEPTH = 16
+
+
+def _aligned_select(columns: list[str], glob_columns: list[str]) -> str:
+    """Build a SELECT list aligned to ``columns`` for one parquet glob.
+
+    Columns the glob does not carry are emitted as ``NULL AS <column>`` so
+    that the ``UNION ALL`` of several release exports stays positionally
+    aligned even when the exports disagree on their column set.
+    """
+    parts = []
+    for column in columns:
+        if column in glob_columns:
+            parts.append(column)
+        else:
+            parts.append(f"NULL AS {column}")
+    return ", ".join(parts)
 
 
 class WarmLayerStore:
@@ -104,7 +130,14 @@ class WarmLayerStore:
 
     @property
     def latest_release_tag(self) -> str | None:
-        """Return the most recent release tag directory name, or ``None``."""
+        """Return the most recent *successful* release tag directory name.
+
+        A release directory is published before its export is verified, and a
+        failed export still writes ``export_summary.json`` with ``all_ok=false``.
+        Selecting such a directory would make every research read consume a
+        half-written release.  Only releases whose summary reports
+        ``all_ok=true`` are eligible.
+        """
         exported = self._exported_root()
         if not exported.exists():
             return None
@@ -115,8 +148,28 @@ class WarmLayerStore:
         ]
         if not candidates:
             return None
+        successful = [tag for tag in candidates if self._release_is_complete(tag)]
+        if not successful:
+            return None
         # Tags are YYYYMMDD-HHMMSS; lexicographic sort == chronological sort.
-        return sorted(candidates)[-1]
+        return sorted(successful)[-1]
+
+    def _release_is_complete(self, release_tag: str) -> bool:
+        """Return whether a release finished its export successfully.
+
+        A missing or unreadable summary is treated as incomplete: an
+        unverified release must never become the fact source.
+        """
+        summary = self.release_path(release_tag) / "export_summary.json"
+        if not summary.exists():
+            return False
+        try:
+            payload = json.loads(summary.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("all_ok") is True
 
     def release_path(self, release_tag: str | None = None) -> Path:
         """Return the path to a specific release (latest if not given)."""
@@ -146,39 +199,69 @@ class WarmLayerStore:
         parent = payload.get("base_release_tag")
         return parent if isinstance(parent, str) and parent else None
 
+    def release_lineage(self, release_tag: str | None = None) -> list[str]:
+        """Return the release chain starting at ``release_tag``.
+
+        The chain follows ``base_release_tag`` links upwards: the requested
+        release first, then its parent, then the grandparent, and so on.  A
+        single-level fallback is not enough once releases are stacked (a
+        factor backfill on top of a data release on top of the full release),
+        because the middle release may not carry the table a reader needs.
+        Cycles are broken and the chain is depth-bounded.
+        """
+        tag = release_tag or self.latest_release_tag
+        if tag is None:
+            return []
+        chain: list[str] = []
+        seen: set[str] = set()
+        current: str | None = tag
+        while current and current not in seen and len(chain) < _MAX_RELEASE_DEPTH:
+            seen.add(current)
+            chain.append(current)
+            current = self.base_release_tag_for(current)
+        return chain
+
     def table_globs(
         self,
         schema: str,
         table: str,
         release_tag: str | None = None,
     ) -> list[Path]:
-        """Return the glob path for a warm table's parquet partitions.
+        """Return the glob paths for a warm table's parquet partitions.
 
-        Tables absent from the requested release fall back to
-        ``base_release_tag`` when one is configured, so a release can carry
-        only the tables it changed.
+        Tables absent from the requested release fall back to the parent
+        release, so a release can carry only the tables it changed.  The whole
+        ancestor chain is consulted, which keeps a table readable even when
+        releases are stacked several levels deep.
+
+        Only directories that actually exist are returned.  A table that is
+        missing from the entire chain yields an empty list, and the caller
+        skips it instead of pointing DuckDB at a non-existent path.
         """
         tag = release_tag or self.latest_release_tag
         if tag is None:
             raise ValueError(
                 f"no warm-layer release found under {self._exported_root()}"
             )
-        # Also from a second (child) release then the parent is consulted too, so a
-        # release carrying only ``factor/factor_value`` still exposes every other
-        # table and every untouched date.
         globs: list[Path] = []
         seen: set[Path] = set()
-        for candidate in (tag, self.base_release_tag):
+        # The lineage is ordered newest-first, and that order matters: the
+        # release chain is not guaranteed to export the same column set (an
+        # older release may still carry the surrogate ``id`` column that a
+        # newer one dropped), so the *newest* release defines the view's
+        # shape.  An explicitly configured base is therefore only appended
+        # when the lineage does not already contain it; prepending it would
+        # silently make an ancestor define the schema.
+        candidates: list[str] = list(self.release_lineage(tag))
+        if self.base_release_tag and self.base_release_tag not in candidates:
+            candidates.append(self.base_release_tag)
+        for candidate in candidates:
             if not candidate:
                 continue
             path = self._exported_root() / candidate / schema / table
             if path.exists() and path not in seen:
                 seen.add(path)
                 globs.append(path)
-        if not globs:
-            # Fall through to the primary location so the caller gets a clear
-            # parquet-not-found error instead of an empty union.
-            return [self._exported_root() / (tag or "") / schema / table]
         return globs
 
     def prices_qfq_glob(self) -> Path:
@@ -247,6 +330,13 @@ class WarmLayerStore:
                     """
                 ).fetchall()
                 table_rows.extend((schema, row[0]) for row in rows)
+            # Warm tables that do not exist in the control plane are still
+            # exposed: a Parquet-only release (e.g. a research dataset) has no
+            # control-plane counterpart, so enumerating the control catalog
+            # alone would hide it from every attached caller.
+            for schema, table_name in sorted(WARM_TABLES):
+                if (schema, table_name) not in table_rows:
+                    table_rows.append((schema, table_name))
         else:
             # Parquet-only mode: expose warm tables exclusively.  Control-plane
             # facts must be read through the caller's own handle.
@@ -266,19 +356,42 @@ class WarmLayerStore:
                 continue
 
             globs = self.table_globs(schema, table_name, release_tag)
+            if not globs:
+                # This table is absent from the whole release chain.  Skip it
+                # instead of pointing DuckDB at a non-existent path: a new
+                # warm table must not break the releases that do not carry it.
+                continue
             parquet_globs = [f"{g.as_posix()}/**/*.parquet" for g in globs]
             # Parquet files include hive partition columns (trade_year,
             # trade_month) that the control-plane table does not have.  Build an
             # explicit column list so UNION ALL stays aligned.
-            col_rows = con.execute(
-                f"""
-                DESCRIBE
-                SELECT *
-                FROM read_parquet('{parquet_globs[0]}', hive_partitioning=true)
-                """
-            ).fetchall()
+            #
+            # Releases in one chain do not necessarily export the same column
+            # set: ``factor.factor_value`` was exported with a surrogate
+            # ``id`` column before that column was dropped from the export.
+            # Reusing the first glob's columns for every glob would make the
+            # UNION ALL reference a column a later glob does not have, and
+            # DuckDB raises ``Binder Error: Referenced column "id" not
+            # found``.  Align every glob to the union of the column sets and
+            # fill the columns it lacks with NULL.
             partition_cols = {"trade_year", "trade_month"}
-            columns = [c[0] for c in col_rows if c[0] not in partition_cols]
+            columns_by_glob: list[list[str]] = []
+            for pattern in parquet_globs:
+                col_rows = con.execute(
+                    f"""
+                    DESCRIBE
+                    SELECT *
+                    FROM read_parquet('{pattern}', hive_partitioning=true)
+                    """
+                ).fetchall()
+                columns_by_glob.append(
+                    [c[0] for c in col_rows if c[0] not in partition_cols]
+                )
+            columns: list[str] = []
+            for glob_columns in columns_by_glob:
+                for column in glob_columns:
+                    if column not in columns:
+                        columns.append(column)
             if not columns:
                 raise ValueError(
                     f"no columns found for warm table {schema}.{table_name}"
@@ -287,11 +400,35 @@ class WarmLayerStore:
 
             date_col = WARM_TABLE_DATE_COLUMNS[(schema, table_name)]
             parquet_selects = " UNION ALL ".join(
-                f"SELECT {col_sql} FROM read_parquet('{pattern}', "
-                "hive_partitioning=true)"
-                for pattern in parquet_globs
+                f"SELECT {_aligned_select(columns, glob_columns)} "
+                f"FROM read_parquet('{pattern}', hive_partitioning=true)"
+                for pattern, glob_columns in zip(
+                    parquet_globs, columns_by_glob, strict=True
+                )
             )
             if attach_control:
+                # A warm table may exist only in Parquet (a research dataset
+                # has no control-plane counterpart).  Detect that case instead
+                # of unioning against a table that does not exist.
+                control_has_table = con.execute(
+                    """
+                    SELECT count(*)
+                    FROM information_schema.tables
+                    WHERE table_catalog = 'ctrl'
+                      AND table_schema = ?
+                      AND table_name = ?
+                      AND table_type = 'BASE TABLE'
+                    """,
+                    [schema, table_name],
+                ).fetchone()[0]
+                if not control_has_table:
+                    con.execute(
+                        f"""
+                        CREATE OR REPLACE VIEW {schema}.{table_name} AS
+                        {parquet_selects}
+                        """
+                    )
+                    continue
                 parquet_max = con.execute(
                     f"SELECT MAX({date_col}) FROM ({parquet_selects})"
                 ).fetchone()[0]

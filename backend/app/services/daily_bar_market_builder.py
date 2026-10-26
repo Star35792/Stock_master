@@ -76,6 +76,14 @@ class DailyBarMarketBuildService:
         existing_symbols = self.security_repository.get_symbols(
             db, {candidate.symbol for candidate in candidates}
         )
+        # Special-treatment status comes from the security master, which
+        # derives it from the security's short name.  No daily source writes
+        # the field, so without this lookup every bar would carry a NULL
+        # status and every screen candidate would be rejected as "treatment
+        # unknown".
+        treatment_statuses = self.security_repository.get_special_treatment_statuses(
+            db, {candidate.symbol for candidate in candidates}
+        )
 
         open_dates_by_exchange = {
             exchange: self.trading_calendar_repository.get_open_dates(
@@ -128,6 +136,7 @@ class DailyBarMarketBuildService:
                 quality_status=assessment.quality_status,
                 is_suspect=assessment.is_suspect,
                 source_count=reconciliation.source_counts.get(key, 1),
+                special_treatment_status=treatment_statuses.get(candidate.symbol),
             )
             if assessment.quality_status == "trusted":
                 trusted_count += 1

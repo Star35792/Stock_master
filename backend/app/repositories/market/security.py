@@ -2,6 +2,7 @@ from sqlalchemy import func, insert, or_, select
 from sqlalchemy.orm import Session
 
 from app.data_sources import SecurityRecord
+from app.market.special_treatment import derive_special_treatment_status
 from app.models.market import Security
 from app.repositories.market.sequence_ids import reserve_sequence_ids
 
@@ -50,6 +51,22 @@ class SecurityRepository:
                 "exchange": record.exchange,
                 "currency": record.currency,
                 "is_active": True,
+                # The special-treatment status is derived from the security's
+                # short name, which the exchanges change when a stock enters
+                # or leaves special treatment.  It is stored on the security
+                # master so every consumer (price-limit derivation, screen,
+                # paper execution) reads one consistent value instead of
+                # re-deriving it per call site.
+                #
+                # Only listed companies carry the marker.  The master also
+                # holds concept and sector indices whose names contain the
+                # word (``ST板块`` is a sector index), so those rows keep a
+                # NULL status rather than a false positive.
+                "special_treatment_status": (
+                    derive_special_treatment_status(name)
+                    if record.security_type == "stock"
+                    else None
+                ),
             }
             if record.list_date is not None:
                 values["list_date"] = record.list_date
@@ -94,6 +111,24 @@ class SecurityRepository:
             select(Security.symbol, Security.security_type).where(Security.symbol.in_(symbols))
         ).all()
         return dict(rows)
+
+    def get_special_treatment_statuses(
+        self, db: Session, symbols: set[str]
+    ) -> dict[str, str]:
+        """Return the special-treatment status per symbol.
+
+        Symbols whose status is unknown are omitted rather than reported as
+        normal: "no evidence" must not be read as "verified as normal".
+        """
+        if not symbols:
+            return {}
+        rows = db.execute(
+            select(Security.symbol, Security.special_treatment_status).where(
+                Security.symbol.in_(symbols)
+                & Security.special_treatment_status.is_not(None)
+            )
+        ).all()
+        return {str(symbol): str(status) for symbol, status in rows}
 
     def get_industries(self, db: Session, symbols: set[str]) -> dict[str, str]:
         if not symbols:

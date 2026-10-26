@@ -269,6 +269,103 @@ class WarmResearchReadRepository:
             for record in rows
         ]
 
+    # ------------------------------------------------------- valuation history
+
+    def list_valuation_history(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        symbols: Sequence[str] | None = None,
+    ) -> list[SimpleNamespace]:
+        """Return research-layer valuation rows for the requested window.
+
+        The rows come from ``research.valuation_history``, the Parquet-only
+        warm-layer table produced by the valuation-history sweep.  The table
+        does not exist in the control plane, so the read raises when the bound
+        release does not carry it: the caller must fail closed instead of
+        silently reading an empty set and reporting a zero-information
+        factor.
+
+        ``pit_verified`` is carried through unchanged.  Every row of the
+        current dataset is a late observation of a historical date, so the
+        flag is false throughout; a consumer that needs point-in-time
+        evidence must check it rather than assume the column is absent.
+        """
+        params: list[Any] = [start_date, end_date]
+        symbol_filter = ""
+        if symbols:
+            placeholders = ", ".join("?" for _ in symbols)
+            symbol_filter = f" AND symbol IN ({placeholders})"
+            params.extend(symbol.upper() for symbol in symbols)
+        try:
+            rows = self._con.execute(
+                "SELECT symbol, trade_date, close, pe_ttm, pb_mrq, ps_ttm, "
+                "total_market_cap, total_shares, free_shares_a, "
+                "float_market_cap, change_rate, pit_verified "
+                "FROM research.valuation_history "
+                "WHERE trade_date BETWEEN ? AND ?"
+                f"{symbol_filter} "
+                "ORDER BY trade_date, symbol",
+                params,
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001 - the table may not exist
+            raise ValueError(
+                "research.valuation_history is not available in the bound "
+                "warm-layer release; a value factor needs the valuation "
+                "history dataset to be published first"
+            ) from exc
+        return [
+            SimpleNamespace(
+                symbol=record[0].upper(),
+                trade_date=record[1],
+                close=record[2],
+                pe_ttm=record[3],
+                pb_mrq=record[4],
+                ps_ttm=record[5],
+                total_market_cap=record[6],
+                total_shares=record[7],
+                free_shares_a=record[8],
+                float_market_cap=record[9],
+                change_rate=record[10],
+                pit_verified=bool(record[11]),
+            )
+            for record in rows
+        ]
+
+    def valuation_history_coverage(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> dict[str, Any]:
+        """Return the coverage facts of the valuation-history dataset.
+
+        A value factor needs enough rows to rank the cross-section.  The
+        caller uses the counts to fail closed when the dataset is too thin
+        to say anything.
+        """
+        try:
+            row = self._con.execute(
+                "SELECT count(*), count(DISTINCT trade_date), count(DISTINCT symbol), "
+                "min(trade_date), max(trade_date) "
+                "FROM research.valuation_history "
+                "WHERE trade_date BETWEEN ? AND ?",
+                [start_date, end_date],
+            ).fetchone()
+        except Exception as exc:  # noqa: BLE001 - the table may not exist
+            raise ValueError(
+                "research.valuation_history is not available in the bound "
+                "warm-layer release"
+            ) from exc
+        return {
+            "row_count": int(row[0] or 0),
+            "trading_days": int(row[1] or 0),
+            "symbol_count": int(row[2] or 0),
+            "min_date": row[3],
+            "max_date": row[4],
+        }
+
     # ------------------------------------------------------------- diagnostics
 
     def coverage(

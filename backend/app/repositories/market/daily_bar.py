@@ -263,6 +263,7 @@ class DailyBarRepository:
         quality_status: str,
         is_suspect: bool,
         source_count: int = 1,
+        special_treatment_status: str | None = None,
     ) -> None:
         row = {
             "symbol": raw_bar.symbol,
@@ -283,7 +284,15 @@ class DailyBarRepository:
             "limit_up": getattr(raw_bar, "limit_up", None),
             "limit_down": getattr(raw_bar, "limit_down", None),
             "is_suspended": getattr(raw_bar, "is_suspended", False),
-            "special_treatment_status": getattr(raw_bar, "special_treatment_status", None),
+            # Prefer the vendor's own status; fall back to the security
+            # master, which derives it from the security's short name.  No
+            # daily source ever wrote this field, so without the fallback the
+            # column stayed NULL for every historical bar and every screen
+            # candidate was rejected as "treatment unknown".
+            "special_treatment_status": (
+                getattr(raw_bar, "special_treatment_status", None)
+                or special_treatment_status
+            ),
             "source_name": raw_bar.source_name,
             "source_count": source_count,
             "quality_score": quality_score,

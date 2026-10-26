@@ -95,7 +95,9 @@
 | P2-2 | ST / 退市时点表 | 0.6% 覆盖率 + 0 退市股 = 幸存者偏差。**数据源卡死**：HiThink/Eastmoney/SDK 均无 ST 历史、退市时点、曾用名接口，本地不可修复；等新数据源接入（`security_status_event` 表与仓储已就绪） |
 | P2-3 | 行业时点标签 | **2026-10-24 首切片已回填**：`backfill_industry_history.py` 为 5,579 只有当前标签的股票写入 `effective_from=list_date（或温层首条 bar）→ NULL` 区间（source=`current_label_backfill_20261024`），`industries_as_of` PIT 读路径与 `industry_factors` 的 PIT 分支全历史命中；这是「当前标签回填」近似（假设行业从未变更），真实行业变更史仍需数据源 |
 | P2-4 | 历史 universe | 用 `index_constituent_snapshot` 扩展为多日期成分序列，回测按调仓日取成分 |
-| P2-5 | 估值历史序列 | `valuation_snapshot` 目前仅 3 天，价值类因子无法做历史 IC |
+| P2-5 | 估值历史序列 | **2026-10-26 已交付首切片**：东财 `RPT_VALUEANALYSIS_DET` 补采 2024-05-01 起的估值历史序列，发布为温层 Parquet 研究表 `research.valuation_history`（只存在于 Parquet、无 ORM 模型、无 Alembic 迁移、不在控制面），并新增 `scripts/factors/compute_value_factor_ic.py` 计算 `value_pe_ttm` / `value_pb_mrq` / `value_earnings_yield` 的逐日 IC 与 RankIC 落 `factor.factor_profile`。双闸门为价格零容差一致 + 股票池覆盖 ≥95%（分母只含 `security_type='stock'`）+ 重复键拒收。**口径限制**：全部行 `pit_verified=false`（今天采集的历史数据），`pb_mrq` 按报告期末切换、最前视 120 天因而不可作可交易证据；`close` / `pe_ttm` / `ps_ttm` / 股本市值类为真 PIT。详见 `aiDoc/data/20261026-valuation-history-backfill.md` |
+| P2-2（补充） | ST / 退市时点表 | **2026-10-26 部分解除**：`special_treatment_status` 曾无任何数据源写入而恒为 NULL，导致初筛把「未知」当「受限」、连续 83 次运行 0 候选；现由证券简称派生并回填控制面（个股 200 只 ST + 1 只退市），阻断已解除。但**历史时点仍不可得**（供应商历史行返回当前简称），P2-2 的时点表目标未完成 |
+| P2-3（补充） | 行业时点标签 | **2026-10-26 复核**：`security_industry_history` 实为 5,579 行而非 0 行，但仍是「当前标签回填」（`source=current_label_backfill_20261024`），**不是**时点标签；供应商历史行的 `BOARD_NAME` 亦为当前值（2018 vs 2026 变化数 = 0），历史行业分类不可得 |
 
 ### P3 — 从「单策略回测」升级到「可交易收益」
 

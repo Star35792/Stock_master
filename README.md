@@ -145,6 +145,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 - `GET /api/v1/factors/profiles`
 - `POST /api/v1/factors/batch-profiles`
 - `GET /api/v1/factors/batch-profiles/summary`
+- `POST /api/v1/factors/pool-classifications`（因子池分级：`min_long_short_forward_return_1d` 端点闸门 + `pit_status` PIT 闸门 + `status` 生命周期闸门）
 
 ### 研究与回测
 

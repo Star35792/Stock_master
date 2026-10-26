@@ -16,6 +16,7 @@
 ## 事实源边界
 
 - DuckDB 是当前唯一业务事实存储，本地 Parquet 保存 curated 温层数据集。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
+- 温层 Parquet 除 curated 数据集外还承载**研究层表**：只存在于 Parquet、无 ORM 模型、无 Alembic 迁移、不出现在控制面 `information_schema`。当前有一张：`research.valuation_history`（东财估值历史序列，全部行 `pit_verified=false`，只用于研究口径）。判定标准见 `aiDoc/modules/schema-plan.md` §17，字段级 PIT 判定与偏差登记见 `aiDoc/data/20261026-valuation-history-backfill.md`。研究层表不得被 `market` 层的通用读取器拾取。
 - 唯一例外：手工记账的真实持仓账本存独立 SQLite `data/positions.db`（`positions` 域，2026-10-23 决策，见 [ADR](20261023-1925-position-ledger-sqlite.md)）；账本持仓的估值价格仍取 DuckDB `market` 可信层，持仓与盈亏由流水重放推导、不落库。
 - strategy 回测产物（`backtest_*`、`training_artifact`）自 2026-10-24 起存独立 `data/research.duckdb`：研究脚本持 `data/research_write.lock` 写产物，API/维护进程写主库，两域不再竞争同一把文件级写锁（见 [ADR](20261024-1427-research-database-split.md)）；行情/因子/日历读路径不变。维护/研究脚本写任一库前走 `app/utils/duckdb_write_lock.py` 对应域锁。
 - `raw` 保存来源、批次、原始 payload 和异常数据。

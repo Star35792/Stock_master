@@ -43,6 +43,13 @@ class FactorProfile(TimestampMixin, Base):
     top_quantile_forward_return_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     bottom_quantile_forward_return_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     long_short_forward_return_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
+    # Multi-horizon endpoint spreads.  The factor pool classifier gates on the
+    # endpoint (top-minus-bottom quantile) rather than on the IC alone: a factor
+    # can carry a positive IC while its extreme buckets still lose money, and
+    # such a factor is not tradable.  ``long_short_forward_return_1d`` predates
+    # this gate and is kept for compatibility.
+    long_short_forward_return_5d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
+    long_short_forward_return_20d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     quantile_monotonicity_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     top_quantile_turnover: Mapped[Decimal | None] = mapped_column(Numeric(12, 10))
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)

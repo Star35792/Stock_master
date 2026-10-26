@@ -21,6 +21,8 @@ class FactorDefinitionRead(BaseModel):
     dependencies: list[str]
     parameters_schema: dict[str, Any]
     is_active: bool
+    pit_status: str = "unknown"
+    status: str = "active"
     created_at: datetime
     updated_at: datetime
 
@@ -88,6 +90,8 @@ class FactorProfileRead(BaseModel):
     top_quantile_forward_return_1d: Decimal | None = None
     bottom_quantile_forward_return_1d: Decimal | None = None
     long_short_forward_return_1d: Decimal | None = None
+    long_short_forward_return_5d: Decimal | None = None
+    long_short_forward_return_20d: Decimal | None = None
     quantile_monotonicity_1d: Decimal | None = None
     top_quantile_turnover: Decimal | None
     code_version: str
@@ -143,6 +147,14 @@ class FactorProfileSummaryRead(BaseModel):
     mean_rank_ic_5d: Decimal | None = None
     mean_ic_20d: Decimal | None = None
     mean_rank_ic_20d: Decimal | None = None
+    mean_long_short_forward_return_1d: Decimal | None = None
+    mean_long_short_forward_return_5d: Decimal | None = None
+    mean_long_short_forward_return_20d: Decimal | None = None
+    endpoint_observation_count: int = 0
+    mean_quantile_monotonicity_1d: Decimal | None = None
+    mean_top_quantile_turnover: Decimal | None = None
+    pit_status: str = "unknown"
+    factor_status: str = "active"
     has_ic_evidence: bool = False
 
 
@@ -163,3 +175,5 @@ class FactorPoolClassificationRequest(BaseModel):
     min_rank_ic_1d: Decimal = Decimal("0.01")
     min_rank_ic_5d: Decimal = Decimal("0.01")
     min_rank_ic_20d: Decimal = Decimal("0.01")
+    #: 端点闸门：1 日多空价差必须严格大于该阈值。
+    min_long_short_forward_return_1d: Decimal = Decimal("0")

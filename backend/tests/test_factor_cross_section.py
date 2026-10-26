@@ -233,6 +233,42 @@ def test_cross_section_service_transforms_and_profiles_factor() -> None:
     assert values[("ret_1d__industry_size_neutral", "B")] == Decimal("-24.0000000000")
 
 
+def test_write_profiles_skips_days_without_observations() -> None:
+    """A day with no observation must not overwrite the existing evidence.
+
+    Writing an empty cross-section would replace the row for the same
+    ``(factor_name, factor_version, trade_date)`` key with an
+    ``observation_count=0`` placeholder, which is how a batch run over a
+    factor whose values are absent silently destroys another script's IC
+    evidence.
+    """
+    profile_repository = FakeProfileRepository()
+    service = FactorCrossSectionService(
+        value_repository=FakeFactorValueRepository([], []),
+        profile_repository=profile_repository,
+        definition_repository=FakeDefinitionRepository(),
+        run_repository=FakeRunRepository(),
+        daily_bar_repository=FakeDailyBarRepository(),
+        security_repository=FakeSecurityRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+    )
+
+    rows_written = service._write_profiles(
+        object(),
+        factor_name="ret_1d",
+        factor_version="v1-none",
+        values_by_date={date(2026, 7, 17): {"A": Decimal("1")}},
+        universe_by_date={date(2026, 7, 16): 5, date(2026, 7, 17): 5},
+        forward_returns_by_horizon={},
+        code_version="abc123",
+    )
+
+    assert rows_written == 1
+    assert len(profile_repository.profiles) == 1
+    assert profile_repository.profiles[0]["trade_date"] == date(2026, 7, 17)
+    assert profile_repository.profiles[0]["observation_count"] == 1
+
+
 def test_cross_section_service_validates_size_factor_pair() -> None:
     service = FactorCrossSectionService(
         value_repository=FakeFactorValueRepository([], []),

@@ -21,6 +21,24 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
 
+# Largest page the valuation endpoint accepts.  Verified against the live
+# endpoint: 5000 rows per page turns a full-history sweep into ~1.9k requests
+# instead of ~190k.
+_MAX_VALUATION_PAGE_SIZE = 5000
+
+# Columns pulled for a valuation-history sweep.
+#
+# ``SECURITY_NAME_ABBR`` and ``BOARD_NAME`` are deliberately excluded.  Both
+# are the supplier's *current* value backfilled onto every historical row: a
+# 2018 cross-section and a 2026 cross-section of the same universe report
+# zero name changes and zero industry changes.  Consuming them as historical
+# attributes would be a silent look-ahead, so they are not fetched at all.
+_VALUATION_HISTORY_COLUMNS = (
+    "SECURITY_CODE,SECUCODE,TRADE_DATE,CLOSE_PRICE,PE_TTM,PB_MRQ,PS_TTM,"
+    "TOTAL_MARKET_CAP,TOTAL_SHARES,FREE_SHARES_A,NOTLIMITED_MARKETCAP_A,"
+    "CHANGE_RATE"
+)
+
 
 class EastmoneyDataError(RuntimeError):
     pass
@@ -291,7 +309,7 @@ class EastmoneyDataSource:
         The requested trade date is a supplier label, not proof of when a
         historical value first became available.
         """
-        if page < 1 or not 1 <= page_size <= 500:
+        if page < 1 or not 1 <= page_size <= _MAX_VALUATION_PAGE_SIZE:
             raise ValueError("invalid historical valuation page")
         return self._get_json_with_raw(
             VALUATION_HISTORY_HOST,
@@ -306,6 +324,52 @@ class EastmoneyDataSource:
                 "pageSize": page_size,
                 "sortColumns": "SECURITY_CODE",
                 "sortTypes": 1,
+            },
+        )
+
+    def fetch_valuation_history_page(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        page: int,
+        page_size: int = _MAX_VALUATION_PAGE_SIZE,
+    ) -> tuple[dict, str]:
+        """Fetch one page of the supplier's valuation history across a date range.
+
+        The supplier exposes the same ``RPT_VALUEANALYSIS_DET`` table for a
+        closed date range.  A range query returns the full history in one
+        paginated sweep, which is what a historical backfill needs; a
+        single-date query would need one sweep per trading day.
+
+        The sort must be the composite ``TRADE_DATE,SECURITY_CODE`` with the
+        matching ``sortTypes=1,1``.  Sorting by ``TRADE_DATE`` alone leaves
+        the order *inside* a trading day up to the server, so consecutive
+        pages overlap and drop rows: a measured sweep of eight days returned
+        571 duplicated keys between pages 1 and 2 and lost the same number of
+        rows.  The composite sort makes the page boundaries deterministic and
+        the overlap drops to zero.
+        """
+        if start_date > end_date:
+            raise ValueError("start_date must not be after end_date")
+        if page < 1 or not 1 <= page_size <= _MAX_VALUATION_PAGE_SIZE:
+            raise ValueError("invalid valuation history page")
+        return self._get_json_with_raw(
+            VALUATION_HISTORY_HOST,
+            "/api/data/v1/get",
+            {
+                "reportName": "RPT_VALUEANALYSIS_DET",
+                "columns": _VALUATION_HISTORY_COLUMNS,
+                "source": "WEB",
+                "client": "WEB",
+                "filter": (
+                    f"(TRADE_DATE>='{start_date.isoformat()}')"
+                    f"(TRADE_DATE<='{end_date.isoformat()}')"
+                ),
+                "pageNumber": page,
+                "pageSize": page_size,
+                "sortColumns": "TRADE_DATE,SECURITY_CODE",
+                "sortTypes": "1,1",
             },
         )
 

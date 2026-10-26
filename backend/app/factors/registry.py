@@ -12,6 +12,10 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.factors.categories import FactorCategory
+from app.factors.evidence_catalog import (
+    annotate_price_volume_pit_status,
+    register_evidence_factor_definitions,
+)
 from app.repositories.factor import FactorDefinitionRepository
 from app.services.basic_price_volume_factors import (
     BASIC_FACTOR_SPECS,
@@ -77,6 +81,10 @@ def register_all_factor_definitions(db: Session) -> dict[str, int]:
     """把全部因子 spec 预注册为 factor_definition 目录条目。
 
     幂等：ensure 按 name+version upsert，重复调用只更新不新增行。
+
+    除证据目录与价格量因子外，其余因子家族的 ``pit_status`` 保持默认的
+    ``"unknown"``：它们尚未完成时点性审计，而因子池分级器对 ``unknown``
+    fail-closed（不得进入核心池）。
     """
     repo = FactorDefinitionRepository()
     counts: dict[str, int] = {}
@@ -199,6 +207,14 @@ def register_all_factor_definitions(db: Session) -> dict[str, int]:
     )
     counts["crowding"] = 1
 
+    # IC 证据因子（温层价格量因子 + 价值因子）的目录条目。它们不参与
+    # 批量画像（is_active=False），但必须有定义：否则批量画像的分类查表
+    # 会落空，category 与 pit_status 都会退化为 "unknown"，因子池分级器
+    # 就无法判断这些因子能否进入核心池。
+    counts["evidence_factors"] = register_evidence_factor_definitions(db)["total"]
+    counts["price_volume_pit_annotated"] = annotate_price_volume_pit_status(db)
     db.flush()
-    counts["total"] = sum(counts.values())
+    counts["total"] = sum(
+        value for key, value in counts.items() if key != "price_volume_pit_annotated"
+    )
     return counts

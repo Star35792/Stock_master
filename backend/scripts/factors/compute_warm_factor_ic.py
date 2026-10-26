@@ -20,7 +20,23 @@ Method
 * ``ic`` is the Pearson correlation across the cross-section on that date;
   ``rank_ic`` is the same correlation applied to within-date ranks.
 * Only symbols with both an exposure and a realised forward return enter the
-  correlation, and ``coverage_rate`` records how complete that was.
+  correlation, and ``coverage_rate`` records how complete that was.  The
+  denominator is the **price** universe (securities with a trusted close that
+  day), not the factor's own rows: taking it from the factor's own rows would
+  make the ratio identically 1.0 and hide the coverage gap.
+* The **endpoint** spreads (top minus bottom quantile, 1/5/20 days) and the
+  quantile monotonicity and turnover diagnostics are computed as well.  The
+  endpoint is the tradability evidence the factor pool classifier gates on: a
+  factor can carry a positive IC while its extreme buckets still lose money.
+
+Idempotence
+------------
+
+Re-running this script refreshes the existing rows instead of failing.  The
+persistence path uses ``FactorProfileRepository.upsert`` (``ON CONFLICT DO
+UPDATE`` on ``(factor_name, factor_version, trade_date)``); a plain
+``session.merge`` degrades to an INSERT when the ORM object carries no primary
+key and would hit the unique constraint on the second run.
 
 Caveats (recorded in the output)
 --------------------------------
@@ -44,11 +60,19 @@ import duckdb
 
 from app.config.settings import settings
 from app.database.session import SessionLocal
-from app.models.factor.factor_profile import FactorProfile
+from app.repositories.factor import FactorProfileRepository
 from app.repositories.warm_layer import WarmLayerStore
 
 HORIZONS = (1, 5, 20)
 QUANTILE_COUNT = 5
+
+#: Minimum number of observations in a cross-section for the IC to be
+#: meaningful.  Matches ``compute_value_factor_ic.py``.
+MIN_CROSS_SECTION = 50
+
+#: Share of the cross-section used for the top/bottom quantile spread and the
+#: turnover diagnostic.
+QUANTILE_SHARE = Decimal("0.2")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,6 +121,19 @@ def _load_daily_ic(
         WINDOW symbol_days AS (PARTITION BY symbol ORDER BY trade_date)
         """
     )
+    # The price universe: securities with a trusted close that day.  This is
+    # the denominator of ``coverage_rate`` so that a factor which only covers
+    # part of the market is visible as such.  Taking the denominator from the
+    # factor's own rows would make the ratio identically 1.0 and hide the gap.
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE universe AS
+        SELECT trade_date, COUNT(DISTINCT symbol) AS universe_size
+        FROM px
+        WHERE close > 0
+        GROUP BY 1
+        """
+    )
     con.execute(
         """
         CREATE OR REPLACE TEMP TABLE joined AS
@@ -136,13 +173,71 @@ def _load_daily_ic(
         FROM joined
         """
     )
-    rows = con.execute(
+    # Top-quantile membership per day, so the turnover between consecutive
+    # trading days can be measured the same way the value family measures it.
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE top_members AS
+        SELECT factor_name, trade_date, symbol
+        FROM scored
+        WHERE bucket = {QUANTILE_COUNT}
         """
-        WITH universe AS (
-            SELECT factor_name, trade_date, count(*) AS universe_size
-            FROM fv GROUP BY 1, 2
-        ),
-        per_date AS (
+    )
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE top_sets AS
+        SELECT
+            factor_name,
+            trade_date,
+            list(symbol ORDER BY symbol) AS members
+        FROM top_members
+        GROUP BY 1, 2
+        """
+    )
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE top_turnover AS
+        WITH lagged AS (
+            SELECT
+                factor_name,
+                trade_date,
+                members,
+                LAG(members) OVER (
+                    PARTITION BY factor_name ORDER BY trade_date
+                ) AS prev_members
+            FROM top_sets
+        )
+        SELECT
+            factor_name,
+            trade_date,
+            CASE
+                WHEN prev_members IS NULL THEN NULL
+                ELSE 1.0 - (
+                    len(list_intersect(members, prev_members))
+                    / GREATEST(len(members), 1)
+                )
+            END AS top_quantile_turnover
+        FROM lagged
+        """
+    )
+    # Bucket-level forward returns feed the monotonicity diagnostic: the
+    # correlation between the bucket index and the bucket mean forward return.
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE bucket_returns AS
+        SELECT
+            factor_name,
+            trade_date,
+            bucket,
+            AVG(fwd1) AS bucket_mean_fwd1
+        FROM scored
+        WHERE fwd1 IS NOT NULL
+        GROUP BY 1, 2, 3
+        """
+    )
+    rows = con.execute(
+        f"""
+        WITH per_date AS (
             SELECT
                 factor_name,
                 trade_date,
@@ -162,10 +257,23 @@ def _load_daily_ic(
                 count(*) FILTER (
                     WHERE abs(value) > 10
                 ) AS extreme_count,
-                avg(fwd1) FILTER (WHERE bucket = 5) AS top_q,
-                avg(fwd1) FILTER (WHERE bucket = 1) AS bottom_q
+                avg(fwd1) FILTER (WHERE bucket = {QUANTILE_COUNT}) AS top_q_1d,
+                avg(fwd1) FILTER (WHERE bucket = 1) AS bottom_q_1d,
+                avg(fwd5) FILTER (WHERE bucket = {QUANTILE_COUNT}) AS top_q_5d,
+                avg(fwd5) FILTER (WHERE bucket = 1) AS bottom_q_5d,
+                avg(fwd20) FILTER (WHERE bucket = {QUANTILE_COUNT}) AS top_q_20d,
+                avg(fwd20) FILTER (WHERE bucket = 1) AS bottom_q_20d
             FROM scored
             WHERE fwd1 IS NOT NULL
+            GROUP BY 1, 2
+            HAVING count(*) >= {MIN_CROSS_SECTION}
+        ),
+        mono AS (
+            SELECT
+                factor_name,
+                trade_date,
+                corr(bucket, bucket_mean_fwd1) AS monotonicity_1d
+            FROM bucket_returns
             GROUP BY 1, 2
         )
         SELECT
@@ -175,10 +283,17 @@ def _load_daily_ic(
             p.observation_count,
             p.ic_1d, p.rank_ic_1d, p.ic_5d, p.rank_ic_5d, p.ic_20d, p.rank_ic_20d,
             p.mean_value, p.sd_value, p.min_value, p.max_value,
-            p.p01_value, p.p99_value, p.extreme_count, p.top_q, p.bottom_q
+            p.p01_value, p.p99_value, p.extreme_count,
+            p.top_q_1d, p.bottom_q_1d, p.top_q_5d, p.bottom_q_5d,
+            p.top_q_20d, p.bottom_q_20d,
+            m.monotonicity_1d,
+            t.top_quantile_turnover
         FROM per_date p
-        JOIN universe u ON u.factor_name = p.factor_name
-                        AND u.trade_date = p.trade_date
+        JOIN universe u ON u.trade_date = p.trade_date
+        LEFT JOIN mono m
+            ON m.factor_name = p.factor_name AND m.trade_date = p.trade_date
+        LEFT JOIN top_turnover t
+            ON t.factor_name = p.factor_name AND t.trade_date = p.trade_date
         ORDER BY p.factor_name, p.trade_date
         """
     ).fetchall()
@@ -186,7 +301,10 @@ def _load_daily_ic(
         "factor_name", "trade_date", "universe_size", "observation_count",
         "ic_1d", "rank_ic_1d", "ic_5d", "rank_ic_5d", "ic_20d", "rank_ic_20d",
         "mean_value", "sd_value", "min_value", "max_value",
-        "p01_value", "p99_value", "extreme_count", "top_q", "bottom_q",
+        "p01_value", "p99_value", "extreme_count",
+        "top_q_1d", "bottom_q_1d", "top_q_5d", "bottom_q_5d",
+        "top_q_20d", "bottom_q_20d",
+        "monotonicity_1d", "top_quantile_turnover",
     ]
     return [dict(zip(keys, row, strict=True)) for row in rows]
 
@@ -243,15 +361,37 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
                 entry[f"{kind}_{horizon}_mean"] = round(mean, 6)
                 entry[f"{kind}_{horizon}_ir"] = round(mean / sd, 6) if sd else None
                 entry[f"{kind}_{horizon}_positive_rate"] = round(positive, 4)
-        spreads = []
-        for r in rows:
-            top = _clean(r.get("top_q"))
-            bottom = _clean(r.get("bottom_q"))
-            if top is None or bottom is None:
-                continue
-            spreads.append(top - bottom)
-        entry["top_minus_bottom_1d_mean"] = (
-            round(sum(spreads) / len(spreads), 6) if spreads else None
+        for horizon in ("1d", "5d", "20d"):
+            spreads = []
+            for r in rows:
+                top = _clean(r.get(f"top_q_{horizon}"))
+                bottom = _clean(r.get(f"bottom_q_{horizon}"))
+                if top is None or bottom is None:
+                    continue
+                spreads.append(top - bottom)
+            entry[f"top_minus_bottom_{horizon}_mean"] = (
+                round(sum(spreads) / len(spreads), 6) if spreads else None
+            )
+            entry[f"top_minus_bottom_{horizon}_positive_rate"] = (
+                round(sum(1 for s in spreads if s > 0) / len(spreads), 4)
+                if spreads
+                else None
+            )
+        monotonicity = [
+            cleaned
+            for cleaned in (_clean(r.get("monotonicity_1d")) for r in rows)
+            if cleaned is not None
+        ]
+        entry["mean_quantile_monotonicity_1d"] = (
+            round(sum(monotonicity) / len(monotonicity), 6) if monotonicity else None
+        )
+        turnover = [
+            cleaned
+            for cleaned in (_clean(r.get("top_quantile_turnover")) for r in rows)
+            if cleaned is not None
+        ]
+        entry["mean_top_quantile_turnover"] = (
+            round(sum(turnover) / len(turnover), 6) if turnover else None
         )
         entry["avg_universe"] = round(
             sum(int(r["universe_size"]) for r in rows) / len(rows), 1
@@ -260,49 +400,60 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
     return summary
 
 
+def _spread(row: dict[str, object], horizon: str) -> Decimal | None:
+    """Top-minus-bottom quantile spread for one horizon."""
+    top = _clean(row.get(f"top_q_{horizon}"))
+    bottom = _clean(row.get(f"bottom_q_{horizon}"))
+    if top is None or bottom is None:
+        return None
+    return _quantize(top - bottom)
+
+
 def _persist(session, daily: list[dict[str, object]], version: str, code_version: str) -> int:
+    """Persist the daily evidence into ``factor.factor_profile``.
+
+    Uses :meth:`FactorProfileRepository.upsert` rather than ``session.merge``:
+    ``merge`` degrades to a plain INSERT when the ORM object carries no primary
+    key, so a re-run hits the ``(factor_name, factor_version, trade_date)``
+    unique constraint instead of refreshing the existing row.
+    """
+    repository = FactorProfileRepository()
     written = 0
     for row in daily:
         universe = int(row["universe_size"])
         observed = int(row["observation_count"])
         coverage = Decimal(observed) / Decimal(universe) if universe else Decimal("0")
-        session.merge(
-            FactorProfile(
-                factor_name=str(row["factor_name"]),
-                factor_version=version,
-                trade_date=row["trade_date"],
-                universe_size=universe,
-                observation_count=observed,
-                missing_count=max(universe - observed, 0),
-                coverage_rate=coverage.quantize(Decimal("0.0000000001")),
-                missing_rate=(Decimal("1") - coverage).quantize(Decimal("0.0000000001")),
-                mean=_quantize(row["mean_value"]),
-                standard_deviation=_quantize(row["sd_value"]),
-                minimum=_quantize(row["min_value"]),
-                maximum=_quantize(row["max_value"]),
-                p01=_quantize(row["p01_value"]),
-                p99=_quantize(row["p99_value"]),
-                extreme_count=int(row["extreme_count"] or 0),
-                ic_1d=_quantize(row["ic_1d"]),
-                rank_ic_1d=_quantize(row["rank_ic_1d"]),
-                ic_5d=_quantize(row["ic_5d"]),
-                rank_ic_5d=_quantize(row["rank_ic_5d"]),
-                ic_20d=_quantize(row["ic_20d"]),
-                rank_ic_20d=_quantize(row["rank_ic_20d"]),
-                top_quantile_forward_return_1d=_quantize(row["top_q"]),
-                bottom_quantile_forward_return_1d=_quantize(row["bottom_q"]),
-                long_short_forward_return_1d=(
-                    None
-                    if _clean(row["top_q"]) is None or _clean(row["bottom_q"]) is None
-                    else _quantize(
-                        float(_clean(row["top_q"]))
-                        - float(_clean(row["bottom_q"]))
-                    )
-                ),
-                quantile_monotonicity_1d=None,
-                top_quantile_turnover=None,
-                code_version=code_version,
-            )
+        repository.upsert(
+            session,
+            factor_name=str(row["factor_name"]),
+            factor_version=version,
+            trade_date=row["trade_date"],
+            universe_size=universe,
+            observation_count=observed,
+            missing_count=max(universe - observed, 0),
+            coverage_rate=coverage.quantize(Decimal("0.0000000001")),
+            missing_rate=(Decimal("1") - coverage).quantize(Decimal("0.0000000001")),
+            mean=_quantize(row["mean_value"]),
+            standard_deviation=_quantize(row["sd_value"]),
+            minimum=_quantize(row["min_value"]),
+            maximum=_quantize(row["max_value"]),
+            p01=_quantize(row["p01_value"]),
+            p99=_quantize(row["p99_value"]),
+            extreme_count=int(row["extreme_count"] or 0),
+            ic_1d=_quantize(row["ic_1d"]),
+            rank_ic_1d=_quantize(row["rank_ic_1d"]),
+            ic_5d=_quantize(row["ic_5d"]),
+            rank_ic_5d=_quantize(row["rank_ic_5d"]),
+            ic_20d=_quantize(row["ic_20d"]),
+            rank_ic_20d=_quantize(row["rank_ic_20d"]),
+            top_quantile_forward_return_1d=_quantize(row["top_q_1d"]),
+            bottom_quantile_forward_return_1d=_quantize(row["bottom_q_1d"]),
+            long_short_forward_return_1d=_spread(row, "1d"),
+            long_short_forward_return_5d=_spread(row, "5d"),
+            long_short_forward_return_20d=_spread(row, "20d"),
+            quantile_monotonicity_1d=_quantize(row.get("monotonicity_1d")),
+            top_quantile_turnover=_quantize(row.get("top_quantile_turnover")),
+            code_version=code_version,
         )
         written += 1
     session.commit()
@@ -367,6 +518,22 @@ def main(argv: list[str] | None = None) -> int:
             f"{_fmt(item['rank_ic_5d_positive_rate']):>7}"
             f"{_fmt(item['rank_ic_20d_mean']):>11}"
             f"{_fmt(item['rank_ic_20d_positive_rate']):>7}"
+        )
+    print(
+        f"\n{'factor':<24}{'LS-1d':>12}{'pos%':>8}{'LS-5d':>12}"
+        f"{'pos%':>8}{'LS-20d':>12}{'pos%':>8}{'mono1d':>9}{'turnover':>10}"
+    )
+    for item in summary:
+        print(
+            f"{item['factor']:<24}"
+            f"{_fmt(item['top_minus_bottom_1d_mean']):>12}"
+            f"{_fmt(item['top_minus_bottom_1d_positive_rate']):>8}"
+            f"{_fmt(item['top_minus_bottom_5d_mean']):>12}"
+            f"{_fmt(item['top_minus_bottom_5d_positive_rate']):>8}"
+            f"{_fmt(item['top_minus_bottom_20d_mean']):>12}"
+            f"{_fmt(item['top_minus_bottom_20d_positive_rate']):>8}"
+            f"{_fmt(item['mean_quantile_monotonicity_1d']):>9}"
+            f"{_fmt(item['mean_top_quantile_turnover']):>10}"
         )
 
     if not args.no_persist:
