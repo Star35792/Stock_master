@@ -1,5 +1,9 @@
 # 数据源导入策略
 
+双低一高补数入口（2026-10-28）：`python -m scripts.ingest.prepare_quality_value_financials --all-market --workers 4 --skip-complete --output outputs/quality_value_financial_prep.json`。网络抓取最多8路并行，数据库只在持共享写锁的主线程中串行复用 `HithinkFinancialCollectionService`，保留raw、批次和财报修订。年度取4期、季度取7期；每阶段独立核对具体期末和三表覆盖，源未返回最近期则记incomplete，不能因请求成功宣称补齐。不可用季度指标接口与报表补采分离，不填零或用前期指标代替。证据齐备后用 `scripts.research.screen_quality_value_database` 只读导出覆盖及名单；raw历史估值仍只留证据，不自动转可信或认证PIT。
+
+长时间补采依赖 `duckdb_write_lock` 的OS guard互斥：活跃写进程不因锁文件超过30分钟而失去所有权；进程崩溃后OS释放guard，遗留诊断可安全恢复。`.guard` 文件不可删除，不能混跑仍按文件mtime抢锁的旧版维护脚本；各维护进程须从同一更新后的checkout启动。
+
 本文定义 Stock Master V1 如何接收外部数据。核心原则：任何数据源默认不可信，所有来源必须先进入 `raw` 层，再经过清洗、校验、对账和修复后，才能进入 `market` 可信层。
 
 ## 1. 支持来源分类

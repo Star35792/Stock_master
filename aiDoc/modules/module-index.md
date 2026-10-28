@@ -14,6 +14,7 @@
 | `lake` | Parquet/DuckDB 离线数据湖 |
 | `backtest` | 日频事件回测内核 |
 | `strategies` | 策略研究模板 |
+| `strategies.quality_value_attention` / `services.quality_value_data` / `repositories.strategy.quality_value_data` | 双低一高只读研究筛选：显式证据、硬门槛、归因/催化剂、六维评分；证据包CLI和数据库只读CLI，后者保留全股票池及数据缺口，无收益回测、仓位或交易信号 |
 | `strategies.price_value` / `services.price_value_research` | 纯 Decimal FCFE 情景计算及只读研究编排；消费可信行情与显式用户假设，不认证历史财务、不生成交易信号 |
 | `backtest.price_value` / `services.price_value_backtest` | 单股加现金的版本化假设历史模拟；复用 FCFE 与费用计算，可信未复权行情及交易日历驱动收盘信号、次日开盘成交和持续退出；仅保存 `strategy.backtest_*` 研究事实与合同，不创建 paper/真实订单、不认证历史时点 |
 | `portfolio` | 组合构建内核；`portfolio/defaults.py` 是风险预算默认值的唯一来源（可由 settings 覆盖） |

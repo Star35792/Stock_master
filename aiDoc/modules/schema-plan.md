@@ -4,6 +4,8 @@
 
 ## 1. 设计原则
 
+运维修复（2026-10-28）：`scripts/maintenance/restore_financial_unique_indexes.py` 仅恢复ORM已声明的 `fundamental.financial_statement.uq_financial_statement_key` 与 `fundamental.financial_indicator.uq_financial_indicator_key`，以修复旧库缺唯一索引导致的财务upsert失败；不新增表/字段或改变唯一键语义。应用释放数据库后，脚本持共享写锁、检查重复和空键、事务创建并后验核对，保存独立JSON审计；有重复/空键即拒绝，不自动删行或去重。全库其他缺失约束只审计不扩展修复。
+
 1. **分层存储**：原始数据、可信数据、系统审计分 schema 存放。
 2. **先留痕再消费**：外部数据先进 `raw`，不能直接写入 `market`。
 3. **字段标准化**：`market` 层字段必须符合 `aiDoc/data/daily-bar-contract.md`。

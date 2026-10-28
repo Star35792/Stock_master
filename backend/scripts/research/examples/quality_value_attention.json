@@ -1,0 +1,925 @@
+{
+  "as_of": "2026-10-28",
+  "candidates": [
+    {
+      "symbol": "DEMO_PASS",
+      "industry": "demo_food",
+      "model": "stable_nonfinancial",
+      "attribution": "B",
+      "thesis": "测试假设，非真实证券",
+      "invalidation": "现金流恶化则证伪",
+      "metrics": {
+        "market_cap": {
+          "value": "40000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "listed_days": {
+          "value": "2000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_industry_ratio": {
+          "value": "0.7",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_industry_ratio": {
+          "value": "0.8",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "valuation_history_years": {
+          "value": "5",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_years": {
+          "value": "3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "risk_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_yield": {
+          "value": "0.04",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "amount_mean_20": {
+          "value": "150000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "roe_mean_3y": {
+          "value": "0.16",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "net_income_sum_3y": {
+          "value": "1000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_profit_3y": {
+          "value": "1.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_trend_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "goodwill_equity": {
+          "value": "0.02",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "receivables_quality_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "interest_debt_assets": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "unrestricted_cash_short_debt": {
+          "value": "2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "controller_pledge": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pledge_safety_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "moat_stable": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_coverage_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "coverage_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "institution_percentile": {
+          "value": "0.2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "turnover_percentile": {
+          "value": "0.3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        }
+      },
+      "catalysts": [
+        {
+          "kind": "capital_return",
+          "evidence": {
+            "value": "1",
+            "source_ref": "market:test-fixture:not-real",
+            "known_on": "2026-10-20",
+            "valid_through": "2026-12-31",
+            "trusted": true
+          },
+          "verify_by": "2026-12-01",
+          "thesis": "核对实际注销",
+          "invalidation": "未执行则失效"
+        }
+      ]
+    },
+    {
+      "symbol": "DEMO_WATCH",
+      "industry": "demo_equipment",
+      "model": "stable_nonfinancial",
+      "attribution": "B",
+      "thesis": "测试假设，非真实证券",
+      "invalidation": "现金流恶化则证伪",
+      "metrics": {
+        "market_cap": {
+          "value": "40000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "listed_days": {
+          "value": "2000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_industry_ratio": {
+          "value": "0.7",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_industry_ratio": {
+          "value": "0.8",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "valuation_history_years": {
+          "value": "5",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_years": {
+          "value": "3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "risk_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_yield": {
+          "value": "0.04",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "amount_mean_20": {
+          "value": "150000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "roe_mean_3y": {
+          "value": "0.16",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "net_income_sum_3y": {
+          "value": "1000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_profit_3y": {
+          "value": "1.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_trend_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "goodwill_equity": {
+          "value": "0.02",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "receivables_quality_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "interest_debt_assets": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "unrestricted_cash_short_debt": {
+          "value": "2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "controller_pledge": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pledge_safety_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "moat_stable": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_coverage_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "coverage_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "institution_percentile": {
+          "value": "0.2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "turnover_percentile": {
+          "value": "0.3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        }
+      },
+      "catalysts": []
+    },
+    {
+      "symbol": "DEMO_EXCLUDED",
+      "industry": "demo_utility",
+      "model": "stable_nonfinancial",
+      "attribution": "B",
+      "thesis": "测试假设，非真实证券",
+      "invalidation": "现金流恶化则证伪",
+      "metrics": {
+        "market_cap": {
+          "value": "40000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "listed_days": {
+          "value": "2000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_industry_ratio": {
+          "value": "0.7",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_industry_ratio": {
+          "value": "0.8",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "valuation_history_years": {
+          "value": "5",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_years": {
+          "value": "3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "risk_clear": {
+          "value": "0",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_yield": {
+          "value": "0.04",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "amount_mean_20": {
+          "value": "150000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "roe_mean_3y": {
+          "value": "0.16",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "net_income_sum_3y": {
+          "value": "1000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_profit_3y": {
+          "value": "1.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_trend_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "goodwill_equity": {
+          "value": "0.02",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "receivables_quality_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "interest_debt_assets": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "unrestricted_cash_short_debt": {
+          "value": "2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "controller_pledge": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pledge_safety_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "moat_stable": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_coverage_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "coverage_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "institution_percentile": {
+          "value": "0.2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "turnover_percentile": {
+          "value": "0.3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        }
+      },
+      "catalysts": [
+        {
+          "kind": "capital_return",
+          "evidence": {
+            "value": "1",
+            "source_ref": "market:test-fixture:not-real",
+            "known_on": "2026-10-20",
+            "valid_through": "2026-12-31",
+            "trusted": true
+          },
+          "verify_by": "2026-12-01",
+          "thesis": "核对实际注销",
+          "invalidation": "未执行则失效"
+        }
+      ]
+    },
+    {
+      "symbol": "DEMO_BLOCKED",
+      "industry": "demo_consumer",
+      "model": "stable_nonfinancial",
+      "attribution": "B",
+      "thesis": "测试假设，非真实证券",
+      "invalidation": "现金流恶化则证伪",
+      "metrics": {
+        "market_cap": {
+          "value": "40000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "listed_days": {
+          "value": "2000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_positive": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_history_percentile": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pe_industry_ratio": {
+          "value": "0.7",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pb_industry_ratio": {
+          "value": "0.8",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "valuation_history_years": {
+          "value": "5",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_years": {
+          "value": "3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "risk_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_yield": {
+          "value": "0.04",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "amount_mean_20": {
+          "value": "150000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "roe_mean_3y": {
+          "value": "0.16",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "net_income_sum_3y": {
+          "value": "1000000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_profit_3y": {
+          "value": "1.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "ocf_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_ttm": {
+          "value": "100000000",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "deducted_profit_trend_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "goodwill_equity": {
+          "value": "0.02",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "receivables_quality_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "interest_debt_assets": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "unrestricted_cash_short_debt": {
+          "value": "2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "controller_pledge": {
+          "value": "0.1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "pledge_safety_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "moat_stable": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "dividend_coverage_clear": {
+          "value": "1",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "institution_percentile": {
+          "value": "0.2",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        },
+        "turnover_percentile": {
+          "value": "0.3",
+          "source_ref": "market:test-fixture:not-real",
+          "known_on": "2026-10-20",
+          "valid_through": "2026-12-31",
+          "trusted": true
+        }
+      },
+      "catalysts": [
+        {
+          "kind": "capital_return",
+          "evidence": {
+            "value": "1",
+            "source_ref": "market:test-fixture:not-real",
+            "known_on": "2026-10-20",
+            "valid_through": "2026-12-31",
+            "trusted": true
+          },
+          "verify_by": "2026-12-01",
+          "thesis": "核对实际注销",
+          "invalidation": "未执行则失效"
+        }
+      ]
+    }
+  ],
+  "pause_new_entries": false
+}
