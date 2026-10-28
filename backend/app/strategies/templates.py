@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.backtest import TargetWeightSignal
+from app.factors.rank_ic import rank_values
 from app.strategies.inputs import StrategyFactorFrame
 
 
@@ -414,17 +415,10 @@ class CrossSectionSelectionStrategy:
         *,
         higher_is_better: bool,
     ) -> dict[str, Decimal]:
-        ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
-        if len(ordered) == 1:
-            return {ordered[0][0]: Decimal(1)}
-        return {
-            symbol: (
-                Decimal(index) / Decimal(len(ordered) - 1)
-                if higher_is_better
-                else Decimal(len(ordered) - index - 1) / Decimal(len(ordered) - 1)
-            )
-            for index, (symbol, _) in enumerate(ordered)
-        }
+        ranks = rank_values(values)
+        if higher_is_better:
+            return ranks
+        return {symbol: Decimal(1) - rank for symbol, rank in ranks.items()}
 
 
 class IndexTimingStrategy:

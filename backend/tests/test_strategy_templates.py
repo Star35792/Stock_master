@@ -97,6 +97,73 @@ def test_cross_section_selection_is_deterministic_for_equal_scores() -> None:
     assert first == second
 
 
+def test_cross_section_percentile_ranks_use_average_ranks_for_ties() -> None:
+    values = {
+        "BBB": Decimal("1"),
+        "AAA": Decimal("1"),
+        "CCC": Decimal("3"),
+    }
+
+    higher = StockPoolStrategy._percentile_ranks(values, higher_is_better=True)
+    lower = StockPoolStrategy._percentile_ranks(values, higher_is_better=False)
+
+    assert higher == {
+        "AAA": Decimal("0.25"),
+        "BBB": Decimal("0.25"),
+        "CCC": Decimal("1"),
+    }
+    assert lower == {
+        symbol: Decimal(1) - rank for symbol, rank in higher.items()
+    }
+
+
+def test_cross_section_percentile_ranks_are_neutral_without_dispersion() -> None:
+    all_equal = StockPoolStrategy._percentile_ranks(
+        {"CCC": Decimal("2"), "AAA": Decimal("2"), "BBB": Decimal("2")},
+        higher_is_better=True,
+    )
+    singleton = StockPoolStrategy._percentile_ranks(
+        {"AAA": Decimal("2")}, higher_is_better=True
+    )
+
+    assert all_equal == {
+        "AAA": Decimal("0.5"),
+        "BBB": Decimal("0.5"),
+        "CCC": Decimal("0.5"),
+    }
+    assert singleton == {"AAA": Decimal("0.5")}
+
+
+def test_score_weighted_mode_gives_equal_weight_to_equal_factor_values() -> None:
+    spec = FactorScoreSpec("momentum", "v1")
+    strategy = StockPoolStrategy(
+        top_n=3,
+        weighting_mode=WeightingMode.SCORE_WEIGHTED,
+        minimum_score_policy=MinimumScorePolicy.HOLD_CASH_WHEN_NO_CANDIDATE,
+        invested_weight=Decimal("0.6"),
+    )
+
+    decision = strategy.decide(
+        frame=StrategyFactorFrame.from_rows(
+            as_of_date=date(2026, 7, 1),
+            rows_by_factor={
+                spec: [
+                    _row(date(2026, 7, 1), "CCC", "2"),
+                    _row(date(2026, 7, 1), "AAA", "2"),
+                    _row(date(2026, 7, 1), "BBB", "2"),
+                ]
+            },
+        ),
+        security_types={"AAA": "stock", "BBB": "stock", "CCC": "stock"},
+    )
+
+    assert {
+        signal.target_weight
+        for signal in decision.signals
+        if signal.target_weight > 0
+    } == {Decimal("0.2")}
+
+
 def test_etf_rotation_filters_non_etf_symbols() -> None:
     spec = FactorScoreSpec("momentum", "v1")
     signals = EtfRotationStrategy().generate(

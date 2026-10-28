@@ -208,6 +208,8 @@ complete_scores = {
 
 `backend/app/strategies/templates.py`、`backend/app/strategies/inputs.py`
 
+- 2026-10-28 修复横截面排名并列值口径：策略模板复用 `app/factors/rank_ic.py::rank_values` 的 Decimal 平均秩；同值证券共享分数，单标的与全体同值取中性 `0.5`，反向因子使用 `1-rank`。Top-N 容量切穿同分组时仍以证券代码稳定决胜，但代码不再进入因子分数或分数加权。旧研究运行不重写，新运行必须按代码版本区分。
+
 - 新增 `WeightingMode`：`EQUAL_WEIGHT_FULLY_INVESTED`（默认，保持原行为，**始终满仓等权**，不读取 `invested_weight` 表达的部分仓位语义）、`EQUAL_WEIGHT_PARTIAL`（入选集等权，但总仓位为 `invested_weight`，剩余持币）、`SCORE_WEIGHTED`（按归一化分数加权）。
 - 新增 `MinimumScorePolicy`：`ALWAYS_FULLY_INVESTED`（默认）、`HOLD_CASH_WHEN_NO_CANDIDATE`。
 - 新增 `coverage_ratio` 参数（默认 `None`，等价于 1.0）：因子覆盖数 / 因子总数低于阈值的证券不参与评分，不再要求全因子齐备。
