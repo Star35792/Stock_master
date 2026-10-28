@@ -514,6 +514,11 @@ def _bulk_import_adjustments_duckdb(
           AND coalesce(per_share_bonus, 0) >= 0
           AND coalesce(allotment_ratio, 0) >= 0
           AND coalesce(allotment_price, 0) >= 0
+          AND (
+              coalesce(dividend_per_share, 0) > 0
+              OR coalesce(per_share_bonus, 0) > 0
+              OR coalesce(allotment_ratio, 0) > 0
+          )
         ON CONFLICT (symbol, ex_date, action_type, source_name) DO NOTHING
         """,
         [source_name, str(path)],
@@ -573,7 +578,9 @@ def _valid_market_action(row: dict) -> bool:
         row["rights_issue_ratio"],
         row["rights_issue_price"],
     )
-    return all(value is None or value >= 0 for value in values)
+    return all(value is None or value >= 0 for value in values) and any(
+        value is not None and value > 0 for value in values[:3]
+    )
 
 
 def _json_value(value: object) -> object:

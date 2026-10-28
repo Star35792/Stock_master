@@ -67,6 +67,37 @@ WARM_TABLE_DATE_COLUMNS: dict[tuple[str, str], str] = {
     ("research", "valuation_history"): "trade_date",
 }
 
+# Business keys used when a delta release overlays an ancestor.  The newest
+# release wins for the same key, while genuinely new historical rows from the
+# parent remain visible.
+WARM_TABLE_KEYS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("market", "daily_bar"): ("symbol", "trade_date", "adjust_type"),
+    ("market", "adjustment_factor"): (
+        "symbol",
+        "trade_date",
+        "adjust_type",
+        "source_name",
+        "version",
+    ),
+    ("raw", "daily_bar"): ("id",),
+    ("factor", "factor_value"): (
+        "symbol",
+        "trade_date",
+        "factor_name",
+        "factor_version",
+    ),
+    ("raw", "corporate_action"): ("id",),
+    ("fundamental", "financial_statement"): (
+        "symbol",
+        "statement_type",
+        "period",
+        "fiscal_year",
+        "fiscal_period",
+    ),
+    ("raw", "financial_payload"): ("id",),
+    ("research", "valuation_history"): ("symbol", "trade_date"),
+}
+
 # Schemas that live in the control-plane DuckDB file and must be delegated to
 # the ATTACHed database.  We create local views for every table in these schemas
 # so that ``schema.table`` references resolve without a ``ctrl.`` prefix.
@@ -199,6 +230,27 @@ class WarmLayerStore:
         parent = payload.get("base_release_tag")
         return parent if isinstance(parent, str) and parent else None
 
+    def table_mode_for(
+        self, release_tag: str, schema: str, table: str
+    ) -> str | None:
+        """Return a table's release mode (``snapshot`` or ``delta``), if declared."""
+        summary = self.release_path(release_tag) / "export_summary.json"
+        if not summary.exists():
+            return None
+        try:
+            payload = json.loads(summary.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        for item in payload.get("tables", []) if isinstance(payload, dict) else []:
+            if (
+                isinstance(item, dict)
+                and item.get("schema") == schema
+                and item.get("table") == table
+            ):
+                mode = item.get("mode")
+                return mode if mode in {"snapshot", "delta"} else None
+        return None
+
     def release_lineage(self, release_tag: str | None = None) -> list[str]:
         """Return the release chain starting at ``release_tag``.
 
@@ -262,6 +314,10 @@ class WarmLayerStore:
             if path.exists() and path not in seen:
                 seen.add(path)
                 globs.append(path)
+                # A full snapshot supersedes the same table in every ancestor.
+                # Delta releases intentionally continue walking the lineage.
+                if self.table_mode_for(candidate, schema, table) == "snapshot":
+                    break
         return globs
 
     def prices_qfq_glob(self) -> Path:
@@ -399,13 +455,30 @@ class WarmLayerStore:
             col_sql = ", ".join(columns)
 
             date_col = WARM_TABLE_DATE_COLUMNS[(schema, table_name)]
-            parquet_selects = " UNION ALL ".join(
-                f"SELECT {_aligned_select(columns, glob_columns)} "
+            parquet_union = " UNION ALL ".join(
+                f"SELECT {_aligned_select(columns, glob_columns)}, "
+                f"{rank} AS __release_rank "
                 f"FROM read_parquet('{pattern}', hive_partitioning=true)"
-                for pattern, glob_columns in zip(
-                    parquet_globs, columns_by_glob, strict=True
+                for rank, (pattern, glob_columns) in enumerate(
+                    zip(parquet_globs, columns_by_glob, strict=True)
                 )
             )
+            key_columns = WARM_TABLE_KEYS[(schema, table_name)]
+            missing_keys = [key for key in key_columns if key not in columns]
+            if missing_keys:
+                raise ValueError(
+                    f"warm table {schema}.{table_name} is missing key columns: "
+                    f"{missing_keys}"
+                )
+            key_sql = ", ".join(key_columns)
+            parquet_selects = f"""
+                SELECT {col_sql}
+                FROM ({parquet_union})
+                QUALIFY row_number() OVER (
+                    PARTITION BY {key_sql}
+                    ORDER BY __release_rank
+                ) = 1
+            """
             if attach_control:
                 # A warm table may exist only in Parquet (a research dataset
                 # has no control-plane counterpart).  Detect that case instead

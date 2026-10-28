@@ -54,7 +54,10 @@ def partition_universe_by_factor(
         values = factor_values_by_date.get(decision_date)
         if not values:
             partitions.append(
-                QuantilePartition(decision_date=decision_date, layers=tuple())
+                QuantilePartition(
+                    decision_date=decision_date,
+                    layers=tuple(tuple() for _ in range(n_layers)),
+                )
             )
             continue
         # Ascending by factor value, symbol tiebreak -> stable, deterministic.

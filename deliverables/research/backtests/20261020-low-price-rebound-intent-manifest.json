@@ -1,0 +1,51 @@
+{
+  "artifact_set": "low_price_rebound_intent_2024-10-14_2026-10-14_20d_top20",
+  "evidence_level": "restricted_research_only",
+  "captured_at": "2026-10-27T05:45:35-07:00",
+  "source_commit": "f7ec2e0259834346cf81fca0365675c286ae8a77",
+  "run": {
+    "script": "backend/research/backtests/low_price_rebound_backtest.py",
+    "start": "2024-10-14",
+    "end": "2026-10-14",
+    "rebalance_days": 20,
+    "top_n": 20,
+    "rank_mode": "intent"
+  },
+  "artifacts": [
+    {
+      "path": "backend/outputs/backtest/equity_2024-10-14_2026-10-14_20d_top20_intent.csv",
+      "bytes": 38785,
+      "sha256": "2e75d8b75b504f7f4b806a79895747f3d706332c957f522a438f90893845877f",
+      "role": "daily_equity_curve"
+    },
+    {
+      "path": "backend/outputs/backtest/picks_2024-10-14_2026-10-14_20d_top20_intent.csv",
+      "bytes": 51254,
+      "sha256": "2c863ff174e65310b1edc393c4a86c2d6333a5e2897495c6ce72164fea9fef41",
+      "role": "rebalance_picks"
+    },
+    {
+      "path": "backend/outputs/backtest/trades_2024-10-14_2026-10-14_20d_top20_intent.csv",
+      "bytes": 70075,
+      "sha256": "9ca49ffefbbfcde858766f28aee9754aabbe366700b162e6b703604ff62b331c",
+      "role": "simulated_trades"
+    },
+    {
+      "path": "backend/outputs/backtest/summary_2024-10-14_2026-10-14_20d_top20_intent.json",
+      "bytes": 2070,
+      "sha256": "35a9ec4a3f5b7caa0e78f5541ce5c74a11a4360cb7d4949a524badbc0d63e0a4",
+      "role": "metrics_and_data_snapshot"
+    }
+  ],
+  "reported_metrics": {
+    "total_return": 0.07825992135860194,
+    "annualized_return": 0.03998240033171241,
+    "max_drawdown": -0.24329864441874438,
+    "sharpe": 0.2065812218722842
+  },
+  "limitations": [
+    "This is one in-sample research run, not an out-of-sample or tradable-return claim.",
+    "Limit-up, limit-down, suspension, delisting, historical ST, and corporate-action coverage remain incomplete.",
+    "No parameter-sensitivity or significance artifacts are bound to this data snapshot."
+  ]
+}

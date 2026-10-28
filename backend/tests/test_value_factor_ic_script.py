@@ -87,8 +87,8 @@ def test_value_pe_ttm_is_retired() -> None:
     assert "pe_ttm > 0" in SCRIPT.FACTOR_SQL["value_earnings_yield"]
 
 
-def test_pit_status_marks_pb_as_look_ahead() -> None:
-    assert SCRIPT.PIT_STATUS["value_earnings_yield"] == "point_in_time"
+def test_pit_status_keeps_late_history_unverified() -> None:
+    assert SCRIPT.PIT_STATUS["value_earnings_yield"] == "unknown"
     assert SCRIPT.PIT_STATUS["value_pb_mrq"] == "look_ahead"
 
 

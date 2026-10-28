@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { BarChart3, Check, Filter, Info, Play, Trash2 } from "@lucide/vue";
 
 import { fetchFactorDefinitions, fetchFactorProfiles } from "../api";
@@ -9,6 +9,23 @@ import {
   fetchBacktestFinalHoldingsTyped,
   runFactorSelectionBacktest,
 } from "../factorSelectionApi";
+import type { FactorScoreSpecInput } from "../factorSelectionApi";
+
+type FactorDirection = "unconfigured" | "higher" | "lower";
+
+interface SelectedFactorConfig {
+  factor: FactorDefinition;
+  direction: FactorDirection;
+}
+
+interface FactorDirectionSnapshot {
+  factor_name: string;
+  factor_version: string;
+  display_name: string;
+  weight: "1";
+  higher_is_better: boolean;
+  direction_source: "manual";
+}
 
 const backtestForm = reactive({
   name: `工作台选股回测 ${new Date().toISOString().slice(0, 10)}`,
@@ -30,31 +47,102 @@ const backtestForm = reactive({
 });
 const isRunningBacktest = ref(false);
 const backtestError = ref<string | null>(null);
+const selected = ref<SelectedFactorConfig[]>([]);
+const missingDirectionKeys = ref<string[]>([]);
+const selectionPanel = ref<HTMLElement | null>(null);
 const backtestResult = ref<Awaited<
   ReturnType<typeof runFactorSelectionBacktest>
 > | null>(null);
+const backtestFactorSnapshot = ref<FactorDirectionSnapshot[]>([]);
 const backtestHoldings = ref<Awaited<
   ReturnType<typeof fetchBacktestFinalHoldingsTyped>
 > | null>(null);
 const isLoadingHoldings = ref(false);
 let backtestRequestId = 0;
 let backtestController: AbortController | null = null;
+let holdingsRequestId = 0;
+let holdingsController: AbortController | null = null;
 
-watch(
-  backtestForm,
-  () => {
-    backtestResult.value = null;
-    backtestHoldings.value = null;
-    backtestError.value = null;
-  },
-  { deep: true },
-);
+function factorKey(factor: FactorDefinition) {
+  return `${factor.name}@${factor.version}`;
+}
 
-onBeforeUnmount(() => backtestController?.abort());
+function invalidateBacktestState() {
+  backtestRequestId += 1;
+  backtestController?.abort();
+  backtestController = null;
+  holdingsRequestId += 1;
+  holdingsController?.abort();
+  holdingsController = null;
+  isRunningBacktest.value = false;
+  isLoadingHoldings.value = false;
+  backtestResult.value = null;
+  backtestFactorSnapshot.value = [];
+  backtestHoldings.value = null;
+  backtestError.value = null;
+  missingDirectionKeys.value = [];
+}
+
+watch([backtestForm, selected], invalidateBacktestState, { deep: true });
+
+onBeforeUnmount(() => {
+  backtestRequestId += 1;
+  holdingsRequestId += 1;
+  backtestController?.abort();
+  holdingsController?.abort();
+});
+
+function toFactorScoreSpec(config: SelectedFactorConfig): FactorScoreSpecInput {
+  let higherIsBetter: boolean;
+  switch (config.direction) {
+    case "higher":
+      higherIsBetter = true;
+      break;
+    case "lower":
+      higherIsBetter = false;
+      break;
+    case "unconfigured":
+      throw new Error(`因子 ${localizedName(config.factor)} 尚未确认方向`);
+  }
+  return {
+    factor_name: config.factor.name,
+    factor_version: config.factor.version,
+    weight: "1",
+    higher_is_better: higherIsBetter,
+  };
+}
+
+function directionSnapshot(
+  config: SelectedFactorConfig,
+  spec: FactorScoreSpecInput,
+): FactorDirectionSnapshot {
+  return {
+    factor_name: spec.factor_name,
+    factor_version: spec.factor_version,
+    display_name: localizedName(config.factor),
+    weight: "1",
+    higher_is_better: spec.higher_is_better,
+    direction_source: "manual",
+  };
+}
 
 async function runBacktest() {
   if (selected.value.length === 0) {
     backtestError.value = "请先在左侧选择至少一个因子。";
+    return;
+  }
+  const missing = selected.value.filter((item) => item.direction === "unconfigured");
+  if (missing.length > 0) {
+    missingDirectionKeys.value = missing.map((item) => factorKey(item.factor));
+    const names = missing.slice(0, 3).map((item) => localizedName(item.factor));
+    const remainder = missing.length - names.length;
+    backtestError.value = `请先确认因子方向：${names.join("、")}${remainder > 0 ? ` 等 ${missing.length} 项` : ""}。`;
+    selectionPanel.value?.scrollIntoView({ behavior: "smooth", block: "center" });
+    void nextTick(() => {
+      selectionPanel.value
+        ?.querySelector<HTMLSelectElement>(".direction-select[aria-invalid='true']")
+        ?.focus();
+    });
     return;
   }
   const topN = Number(backtestForm.top_n);
@@ -70,24 +158,21 @@ async function runBacktest() {
     backtestError.value = "调仓间隔必须是正整数。";
     return;
   }
+  const factorSpecs = selected.value.map(toFactorScoreSpec);
+  const factorSnapshot = selected.value.map((config, index) =>
+    directionSnapshot(config, factorSpecs[index]),
+  );
+  invalidateBacktestState();
   isRunningBacktest.value = true;
-  backtestError.value = null;
-  backtestResult.value = null;
-  backtestHoldings.value = null;
-  const requestId = ++backtestRequestId;
-  backtestController = new AbortController();
+  const requestId = backtestRequestId;
+  const controller = new AbortController();
+  backtestController = controller;
   try {
     const result = await runFactorSelectionBacktest(
       {
         name: backtestForm.name || "工作台选股回测",
         strategy_name: "factor_selection",
-        factor_specs: selected.value.map((factor) => ({
-          factor_name: factor.name,
-          factor_version: factor.version,
-          // 与研究脚本 ic_aligned 相同的等权约定；方向开关属后续切片。
-          weight: "1",
-          higher_is_better: true,
-        })),
+        factor_specs: factorSpecs,
         top_n: topN,
         signal_lag: 1,
         rebalance_rule: backtestForm.rebalance_rule,
@@ -125,41 +210,58 @@ async function runBacktest() {
         data_version: "workbench",
         validation_mode: "none",
       },
-      backtestController.signal,
+      controller.signal,
     );
     if (requestId !== backtestRequestId) return;
     backtestResult.value = result;
+    backtestFactorSnapshot.value = factorSnapshot;
   } catch (error) {
     if (requestId !== backtestRequestId) return;
+    if (error instanceof DOMException && error.name === "AbortError") return;
     backtestError.value = error instanceof Error ? error.message : "回测发起失败";
   } finally {
-    if (requestId === backtestRequestId) isRunningBacktest.value = false;
+    if (requestId === backtestRequestId) {
+      isRunningBacktest.value = false;
+      backtestController = null;
+    }
   }
 }
 
 async function loadBacktestHoldings() {
   if (!backtestResult.value) return;
+  const runId = backtestResult.value.run_id;
+  holdingsController?.abort();
+  const requestId = ++holdingsRequestId;
+  const controller = new AbortController();
+  holdingsController = controller;
   isLoadingHoldings.value = true;
   try {
-    backtestHoldings.value = await fetchBacktestFinalHoldingsTyped(
-      backtestResult.value.run_id,
-      new AbortController().signal,
-    );
+    const holdings = await fetchBacktestFinalHoldingsTyped(runId, controller.signal);
+    if (requestId !== holdingsRequestId || backtestResult.value?.run_id !== runId) return;
+    backtestHoldings.value = holdings;
   } catch (error) {
+    if (requestId !== holdingsRequestId) return;
+    if (error instanceof DOMException && error.name === "AbortError") return;
     backtestError.value = error instanceof Error ? error.message : "最终持仓读取失败";
   } finally {
-    isLoadingHoldings.value = false;
+    if (requestId === holdingsRequestId) {
+      isLoadingHoldings.value = false;
+      holdingsController = null;
+    }
   }
 }
 
 
 const definitions = ref<FactorDefinition[]>([]);
-const selected = ref<FactorDefinition[]>([]);
 const activeFactor = ref<FactorDefinition | null>(null);
 const profiles = ref<FactorProfile[]>([]);
 const search = ref("");
 const frequency = ref("");
 const category = ref("");
+
+function profileOverlapsBacktest(profile: FactorProfile) {
+  return Boolean(backtestForm.start_date && profile.trade_date >= backtestForm.start_date);
+}
 
 const factorCategoryLabels: Record<string, string> = {
   price_volume_risk: "价量与风险",
@@ -277,14 +379,17 @@ function localizedTransform(name: string) {
 }
 
 function isSelected(factor: FactorDefinition) {
-  return selected.value.some((item) => item.id === factor.id);
+  return selected.value.some((item) => item.factor.id === factor.id);
 }
 
 function toggleFactor(factor: FactorDefinition) {
   if (isSelected(factor)) {
-    selected.value = selected.value.filter((item) => item.id !== factor.id);
+    selected.value = selected.value.filter((item) => item.factor.id !== factor.id);
   } else {
-    selected.value = [...selected.value, factor];
+    selected.value = [
+      ...selected.value,
+      { factor, direction: "unconfigured" },
+    ];
     parameterValues[factor.name] ??= Object.fromEntries(
       schemaProperties(factor).map(({ key, value }) => [key, String(value.default ?? "")]),
     );
@@ -293,7 +398,7 @@ function toggleFactor(factor: FactorDefinition) {
 }
 
 function removeFactor(factor: FactorDefinition) {
-  selected.value = selected.value.filter((item) => item.id !== factor.id);
+  selected.value = selected.value.filter((item) => item.factor.id !== factor.id);
   if (activeFactor.value?.id === factor.id) activeFactor.value = null;
 }
 
@@ -385,12 +490,40 @@ onMounted(loadDefinitions);
         </article>
       </div>
 
-      <aside class="factor-selection">
+      <aside ref="selectionPanel" class="factor-selection">
         <div class="panel-heading"><div><h2>已选择因子</h2><span>{{ selected.length }} 个因子</span></div></div>
         <div v-if="!selected.length" class="empty-panel">从左侧因子卡片加入研究组合。</div>
-        <ul v-else class="selection-list"><li v-for="factor in selected" :key="factor.id"><div><strong>{{ localizedName(factor) }}</strong><code>{{ factor.name }} · {{ factor.version }}</code></div><button class="icon-button" type="button" title="移除因子" @click="removeFactor(factor)"><Trash2 :size="15" /></button></li></ul>
+        <template v-else>
+          <p class="direction-guidance">方向是本次回测预先设定的研究假设，决定横截面排序；请勿根据本次回测结果反向挑选。</p>
+          <ul class="selection-list">
+            <li
+              v-for="item in selected"
+              :key="factorKey(item.factor)"
+              :class="{ 'direction-missing': missingDirectionKeys.includes(factorKey(item.factor)) }"
+            >
+              <div class="selected-factor-copy">
+                <strong>{{ localizedName(item.factor) }}</strong>
+                <code>{{ item.factor.name }} · {{ item.factor.version }}</code>
+              </div>
+              <label class="direction-field">
+                <span>排序方向</span>
+                <select
+                  v-model="item.direction"
+                  class="direction-select"
+                  :aria-invalid="missingDirectionKeys.includes(factorKey(item.factor))"
+                  :aria-label="`${localizedName(item.factor)}排序方向`"
+                >
+                  <option value="unconfigured" disabled>请选择方向</option>
+                  <option value="higher">数值越高越优先</option>
+                  <option value="lower">数值越低越优先</option>
+                </select>
+              </label>
+              <button class="icon-button" type="button" title="移除因子" @click="removeFactor(item.factor)"><Trash2 :size="15" /></button>
+            </li>
+          </ul>
+        </template>
 
-        <div v-if="activeFactor" class="factor-detail"><h2>{{ localizedName(activeFactor) }}</h2><p>{{ localizedDescription(activeFactor) }}</p><dl><div><dt>输入数据</dt><dd>{{ activeFactor.inputs.join("、") || "由服务端定义" }}</dd></div><div><dt>依赖</dt><dd>{{ activeFactor.dependencies.join("、") || "无" }}</dd></div><div><dt>适用类型</dt><dd>{{ activeFactor.applicable_security_types.map(securityTypeLabel).join("、") || "未限制" }}</dd></div></dl><div v-if="schemaProperties(activeFactor).length" class="parameter-list"><strong>参数配置</strong><label v-for="parameter in schemaProperties(activeFactor)" :key="parameter.key">{{ parameter.label }}<input v-model="parameterValues[activeFactor.name][parameter.key]" :type="parameter.value.type === 'number' || parameter.value.type === 'integer' ? 'number' : 'text'" :placeholder="String(parameter.value.default ?? '')" /></label></div><div class="profile-summary"><strong>最近画像</strong><span v-if="isLoadingProfiles">读取中…</span><span v-else-if="!profiles.length">暂无画像数据</span><span v-else>覆盖率 {{ (Number(profiles[profiles.length - 1].coverage_rate) * 100).toFixed(1) }}% · IC {{ profiles[profiles.length - 1].ic_1d ?? "-" }}</span></div></div>
+        <div v-if="activeFactor" class="factor-detail"><h2>{{ localizedName(activeFactor) }}</h2><p>{{ localizedDescription(activeFactor) }}</p><dl><div><dt>输入数据</dt><dd>{{ activeFactor.inputs.join("、") || "由服务端定义" }}</dd></div><div><dt>依赖</dt><dd>{{ activeFactor.dependencies.join("、") || "无" }}</dd></div><div><dt>适用类型</dt><dd>{{ activeFactor.applicable_security_types.map(securityTypeLabel).join("、") || "未限制" }}</dd></div></dl><div v-if="schemaProperties(activeFactor).length" class="parameter-list"><strong>参数配置</strong><label v-for="parameter in schemaProperties(activeFactor)" :key="parameter.key">{{ parameter.label }}<input v-model="parameterValues[activeFactor.name][parameter.key]" :type="parameter.value.type === 'number' || parameter.value.type === 'integer' ? 'number' : 'text'" :placeholder="String(parameter.value.default ?? '')" /></label></div><div class="profile-summary"><strong>最近画像</strong><span v-if="isLoadingProfiles">读取中…</span><span v-else-if="!profiles.length">暂无画像数据</span><template v-else><span>截至 {{ profiles[profiles.length - 1].trade_date }} · 覆盖率 {{ (Number(profiles[profiles.length - 1].coverage_rate) * 100).toFixed(1) }}% · IC {{ profiles[profiles.length - 1].ic_1d ?? "-" }}</span><span class="profile-caveat">仅用于诊断，不会自动设置方向；可能包含所选回测期间或其后的信息。</span><span v-if="profileOverlapsBacktest(profiles[profiles.length - 1])" class="profile-leakage-warning" role="alert">该画像日期与测试期重叠或更晚，存在信息泄漏风险，请勿据此选择方向。</span></template></div></div>
       </aside>
     </div>
 
@@ -442,6 +575,17 @@ onMounted(loadDefinitions);
           <div><span>净收益</span><strong>{{ (Number(backtestResult.total_return) * 100).toFixed(2) }}%</strong></div>
           <div><span>期末权益</span><strong>{{ Number(backtestResult.final_equity).toLocaleString("zh-CN", { maximumFractionDigits: 0 }) }}</strong></div>
           <div><span>成交笔数</span><strong>{{ backtestResult.trade_count }}</strong></div>
+        </div>
+        <div class="result-assumptions">
+          <strong>本次提交的因子方向</strong>
+          <ul>
+            <li v-for="factor in backtestFactorSnapshot" :key="`${factor.factor_name}@${factor.factor_version}`">
+              <span>{{ factor.display_name }}</span>
+              <code>{{ factor.factor_name }} · {{ factor.factor_version }}</code>
+              <b>{{ factor.higher_is_better ? "↑ 高值优先" : "↓ 低值优先" }}</b>
+            </li>
+          </ul>
+          <p>方向来源：人工预设；因子等权。当前为探索性单次回测（validation_mode=none），未经过训练窗自动选参或样本外验证，不构成收益认证。</p>
         </div>
         <div class="result-actions">
           <button class="secondary-action" type="button" :disabled="isLoadingHoldings" @click="loadBacktestHoldings">
@@ -495,6 +639,12 @@ input, select { min-height: 40px; border: 1px solid #cbd5e1; border-radius: 6px;
 .factor-selection { padding: 18px; }
 .selection-list { display: grid; gap: 8px; padding: 0; list-style: none; }
 .selection-list li { padding: 10px 0; border-bottom: 1px solid #eef1f5; }
+.selection-list li.direction-missing { margin: 0 -8px; padding: 10px 8px; border: 1px solid #f2b8b5; border-radius: 7px; background: #fff7f6; }
+.selected-factor-copy { flex: 1; min-width: 150px; }
+.direction-guidance { margin: 12px 0 4px; color: #667085; font-size: 12px; line-height: 1.55; }
+.direction-field { display: grid; gap: 4px; color: #667085; font-size: 11px; font-weight: 700; }
+.direction-field select { min-width: 150px; min-height: 34px; }
+.direction-field select[aria-invalid="true"] { border-color: #c43d3d; }
 .icon-button { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #d7dde6; border-radius: 6px; background: #fff; cursor: pointer; }
 .factor-detail { margin-top: 18px; padding-top: 18px; border-top: 1px solid #e3e7ee; }
 .factor-detail dl { display: grid; gap: 8px; }
@@ -502,9 +652,11 @@ input, select { min-height: 40px; border: 1px solid #cbd5e1; border-radius: 6px;
 .factor-detail dt { color: #667085; }.factor-detail dd { margin: 0; }
 .parameter-list { display: grid; gap: 10px; margin-top: 18px; }
 .profile-summary { display: grid; gap: 5px; margin-top: 18px; padding: 12px; border-radius: 7px; background: #f8fafc; font-size: 12px; }
+.profile-caveat { color: #667085; line-height: 1.55; }
+.profile-leakage-warning { color: #b42318; font-weight: 700; line-height: 1.55; }
 .empty-panel { padding: 24px; color: #667085; text-align: center; }
 @media (max-width: 900px) { .factor-page { padding: 24px 16px 48px; }.factor-layout { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .page-heading, .factor-toolbar { align-items: stretch; flex-direction: column; }.factor-catalog { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .page-heading, .factor-toolbar { align-items: stretch; flex-direction: column; }.factor-catalog { grid-template-columns: 1fr; }.selection-list li { align-items: stretch; flex-wrap: wrap; }.direction-field { width: 100%; }.direction-field select { width: 100%; } }
 </style>
 <style scoped>
 .backtest-launcher {
@@ -597,6 +749,50 @@ input, select { min-height: 40px; border: 1px solid #cbd5e1; border-radius: 6px;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.result-assumptions {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dbe5f3;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fbff;
+}
+
+.result-assumptions > strong {
+  font-size: 13px;
+}
+
+.result-assumptions ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result-assumptions li {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.result-assumptions code,
+.result-assumptions p {
+  color: #667085;
+  font-size: 11px;
+}
+
+.result-assumptions p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+  .result-assumptions li { grid-template-columns: 1fr; gap: 2px; }
 }
 
 .result-hint {

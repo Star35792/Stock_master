@@ -55,7 +55,7 @@
 | 字段 | PIT 判定 | 依据 | 偏差方向 | 可否用于因子证据 |
 |---|---|---|---|---|
 | `close` | **真 PIT** | 与可信日线逐笔零误差（8/8 交易日 mismatch=0） | 无 | 可 |
-| `pe_ttm` | **真 PIT** | 按**披露日**切换，即 TTM 口径随新财报披露而更新，切换点早于报告期末 | 无 | 可（但需注意这是"披露日口径"而非"报告期末口径"） |
+| `pe_ttm` | 字段切换看似 PIT、但**证据未验证** | 供应商历史回填显示按披露日切换，但没有当时采集快照或修订链 | 可能使用事后修订值 | 仅研究；不可取得策略资格 |
 | `pb_mrq` | **前视** | 按**报告期末**切换，最早在报告期末当天即为真值，而披露通常滞后 28~120 天 | **向上偏乐观**（用了尚未披露的净资产） | **不可**。可采集、可展示，不可作为可交易证据 |
 | `ps_ttm` | 同 `pe_ttm` | 按披露日切换 | 无 | 可 |
 | `total_market_cap` | **真 PIT** | 随行情逐日变化的时点量 | 无 | 可 |
@@ -136,8 +136,8 @@ research.valuation_history (温层 Parquet)
       → value_earnings_yield / value_pb_mrq
       → 逐日 IC / RankIC + 端点价差 + 分位单调性 + 顶分位换手
   → factor.factor_profile（upsert，幂等）
-  → FactorBatchProfilerService.summarize()  聚合 IC + 端点 + PIT 判定
-  → FactorPoolClassifierService 分级（IC 闸门 + 端点闸门 + PIT 闸门 + 生命周期闸门）
+  → FactorBatchProfilerService.summarize()  聚合 IC + 端点 + PIT 判定 + 证据资格
+  → FactorPoolClassifierService 分级（IC 闸门 + 端点闸门 + PIT 闸门 + 生命周期 + 证据资格闸门）
 ```
 
 ### 6.1 ORM 孪生路径
@@ -234,6 +234,8 @@ research.valuation_history (温层 Parquet)
 
 唯一幸存者 `volume_stability_20@v2-qfq-2y` 的端点证据最强：多空 1d **+0.000947** / 5d +0.003953 / 20d +0.004179，分位单调性 +0.121，RankIC 1d +0.043498（IR 0.602，胜率 72.5%）。
 
+后续状态更正（2026-10-27）：本节记录旧口径下的历史分级；新增 §6.3.1 的证据资格闸门后，当前库 `core=0`，该 v2 版本因旧画像默认 `research_only` 降为 observation。不得将本节的旧 core 结论直接用于 v1-qfq 回测。复核见 [策略资格与后续验证前置审计](../research/20261027-2122-strategy-readiness-audit.md)。
+
 ### 6.3 时点性闸门（PIT，fail-closed）
 
 `factor_definition` 新增 `pit_status` 列，取值：
@@ -244,7 +246,13 @@ research.valuation_history (温层 Parquet)
 | `look_ahead` | 至少一项输入泄漏未来信息 | **硬冻结**，任何池都不得进 |
 | `unknown` | 尚未审计（**默认值**） | **不得进核心池**，可进观察池 |
 
-`unknown` 是默认值，因此一个从未被审计的因子不会悄悄进入核心池。本轮已完成审计的只有：7 个温层价格量因子（纯历史价格/成交量，天然时点安全）与 3 个价值因子。其余因子家族保持 `unknown`。
+`unknown` 是默认值，因此一个从未被审计的因子不会悄悄进入核心池。本轮已完成定义级时点审计的只有 7 个温层价格量因子（纯历史价格/成交量，天然时点安全）；价值因子虽保留字段级偏差分析，但历史补采缺少观测快照与修订血缘，保持 `unknown`。其余因子家族也保持 `unknown`。
+
+### 6.3.1 证据资格闸门（provenance，fail-closed）
+
+定义级 `pit_status` 不能替代某一批 IC 证据的来源资格：同一个因子未来可由真实快照重算，也可能来自今天补采的历史行。因此每条 `factor.factor_profile` 额外记录 `evidence_eligibility` 与 machine-readable reason；默认 `research_only`，只有 `strategy_eligible` 才能进入核心池。任一交易日为研究限定时，汇总结果也保持研究限定。
+
+当前 `research.valuation_history` 的所有价值因子证据均为 `research_only`：虽然 `pe_ttm` 的字段切换规则看似按披露日，整批历史行仍没有观测快照与修订血缘，不能声称当日可得或可交易。温层价格量脚本使用可信历史价格/成交量输入，重算后可显式写为 `strategy_eligible`。旧 profile 在启动兼容升级后默认研究限定，必须重跑具备资格的脚本才可恢复策略资格。
 
 ### 6.4 生命周期闸门
 

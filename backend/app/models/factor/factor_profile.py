@@ -1,7 +1,17 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, Index, Integer, Numeric, Sequence, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    Index,
+    Integer,
+    Numeric,
+    Sequence,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -52,4 +62,15 @@ class FactorProfile(TimestampMixin, Base):
     long_short_forward_return_20d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     quantile_monotonicity_1d: Mapped[Decimal | None] = mapped_column(Numeric(24, 10))
     top_quantile_turnover: Mapped[Decimal | None] = mapped_column(Numeric(12, 10))
+    # Eligibility belongs to evidence rows, not the factor definition: the same
+    # factor can later be recomputed from an actually observed PIT feed.
+    evidence_eligibility: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="research_only", server_default=text("'research_only'")
+    )
+    evidence_eligibility_reason: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        default="unverified_evidence_eligibility",
+        server_default=text("'unverified_evidence_eligibility'"),
+    )
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)

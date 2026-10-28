@@ -9,10 +9,10 @@
    ``backfill_warm_factors.py --exclude-corporate-actions`` 剔除了窗口内有
    除权除息/送转的 606 只证券。这构成真实的筛选偏差（红利支付者被系统性剔除），
    结果不代表全市场。
-2. **幸存者偏差未修正**：``market.security`` 7,728 只证券全部 ``is_active=True``、
-   ``delist_date`` 全为空，退市证券不在样本内。
-3. **行业时点缺失**：``market.security_industry_history`` 为 0 行，本次未使用
-   行业中性化。
+2. **幸存者偏差未修正**：``market.security`` 的 ``delist_date`` 全为空，
+   退市证券的可信价格未覆盖全量历史样本。
+3. **行业时点缺失**：现有历史表仅含当前标签回填，不能当历史 PIT；
+   回测的行业权重约束仍读取当前标签，不能视作历史可交易约束。
 4. **停牌事件表为空**：``market.security_status_event`` 0 行，停牌仍依赖
    「当日无 bar」推断。
 5. **样本区间单一**：仅一段 6 个月窗口，无样本外滚动验证。
@@ -59,6 +59,8 @@ from app.schemas.strategy import (  # noqa: E402
     FactorSelectionBacktestRequest,
     WeightingMode,
 )
+from app.services.factor_batch_profiler import FactorBatchProfilerService  # noqa: E402
+from app.services.factor_pool_classifier import FactorPoolClassifierService  # noqa: E402
 from app.services.performance import BacktestPerformanceService  # noqa: E402
 from app.services.strategy_research import StrategyResearchService  # noqa: E402
 from app.strategies import FactorScoreSpec  # noqa: E402
@@ -102,6 +104,13 @@ IC_ALIGNED_SPECS = [
 
 SPEC_SETS = {"default": DEFAULT_SPECS, "ic_aligned": IC_ALIGNED_SPECS}
 
+# Historical preset name retained for reproducibility. Its v1-qfq values are
+# not certified by the v2-qfq-2y IC profile, and current profiles remain
+# research_only. Do not interpret the name as a passed strategy gate.
+SPEC_SETS["evidence_gated"] = [
+    ("volume_stability_20", Decimal("1"), True),
+]
+
 #: 宽候选池：温层回填的全部 13 个价量因子，先验方向一律用平台
 #: ``basic_price_volume_factors`` 的文档默认方向（不含全样本 IC 知识），
 #: 供 ``--selection-policy training_ic_v1`` 逐窗自动选参使用；权重不参与选择。
@@ -141,6 +150,7 @@ FACTOR_LIMITATIONS = [
     "universe_excludes_symbols_with_corporate_actions_in_window",
     "survivorship_bias_not_corrected",
     "industry_point_in_time_labels_unavailable",
+    "portfolio_industry_constraint_uses_current_labels",
     "suspension_events_not_populated",
     "single_window_no_out_of_sample_validation",
 ]
@@ -168,7 +178,12 @@ def build_request(args: argparse.Namespace) -> FactorSelectionBacktestRequest:
         benchmark=args.benchmark,
         allowed_security_types={"stock"},
         coverage_ratio=Decimal("0.8"),
-        weighting_mode=WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED,
+        weighting_mode=(
+            WeightingMode.EQUAL_WEIGHT_PARTIAL
+            if Decimal(args.invested_weight) < 1
+            else WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+        ),
+        invested_weight=Decimal(args.invested_weight),
         portfolio_constraints=(
             BacktestPortfolioConstraintsRequest(
                 max_symbol_weight=Decimal(args.max_symbol_weight),
@@ -196,6 +211,36 @@ def build_request(args: argparse.Namespace) -> FactorSelectionBacktestRequest:
     )
 
 
+def factor_qualification_report(db: Session, spec_set: str) -> list[dict[str, object]]:
+    """Classify the exact factor versions used by this research preset."""
+    profiler = FactorBatchProfilerService()
+    classifier = FactorPoolClassifierService()
+    report: list[dict[str, object]] = []
+    for name, _, _ in SPEC_SETS[spec_set]:
+        summaries, _ = profiler.summarize(
+            db, factor_name=name, factor_version=FACTOR_VERSION, limit=1
+        )
+        if not summaries:
+            report.append({
+                "factor_name": name,
+                "factor_version": FACTOR_VERSION,
+                "pool": "frozen",
+                "reasons": ["no profile for the exact factor version"],
+            })
+            continue
+        result = classifier.classify(summaries)[0]
+        report.append({
+            "factor_name": name,
+            "factor_version": FACTOR_VERSION,
+            "pool": result.pool,
+            "reasons": result.reasons,
+            "trade_date_count": result.summary.trade_date_count,
+            "pit_status": result.summary.pit_status,
+            "evidence_eligibility": result.summary.evidence_eligibility,
+        })
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="温层因子选股回测")
     parser.add_argument("--start-date", default="2025-11-03")
@@ -209,6 +254,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--release-tag", default="20261022-181648")
     parser.add_argument("--initial-cash", default="1000000")
+    parser.add_argument(
+        "--invested-weight", default="1",
+        help="目标股票仓位预算，1 为原策略；例如 0.8 保留至少 20% 现金",
+    )
     parser.add_argument("--benchmark", default=None)
     parser.add_argument(
         "--rebalance-rule",
@@ -234,7 +283,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--code-version", default="local")
     parser.add_argument("--data-version", default="warm-20261022-175052")
     parser.add_argument("--out", help="结果 JSON 落盘路径")
+    parser.add_argument(
+        "--qualification-only",
+        action="store_true",
+        help="只审计本预设所用因子版本的当前资格，不运行回测",
+    )
     args = parser.parse_args(argv)
+
+    if args.qualification_only:
+        with SessionLocal() as db:
+            qualifications = factor_qualification_report(db, args.spec_set)
+        payload = {
+            "spec_set": args.spec_set,
+            "research_factor_version": FACTOR_VERSION,
+            "research_release_tag": settings.research_release_tag,
+            "factor_qualifications": qualifications,
+            "all_factors_core": all(item["pool"] == "core" for item in qualifications),
+            "strategy_validation_status": "research_only",
+        }
+        output = json.dumps(payload, ensure_ascii=False, indent=2)
+        if args.out:
+            out_path = Path(args.out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(output, encoding="utf-8")
+        print(output)
+        return 0
 
     print(f"research_read_source = {settings.research_read_source}")
     print(f"窗口 {args.start_date} ~ {args.end_date}, top_n={args.top_n}")
@@ -287,6 +360,7 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             allowed_security_types=request.allowed_security_types,
             coverage_ratio=request.coverage_ratio,
             weighting_mode=request.weighting_mode,
+            invested_weight=request.invested_weight,
             adjust_type=request.adjust_type,
             start_date=request.start_date,
             end_date=request.end_date,
@@ -314,12 +388,14 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             style_factors=None,
         )
         performance = report.report
+        qualifications = factor_qualification_report(db, args.spec_set)
         payload = {
             "run_id": result.run_id,
             "window": [args.start_date, args.end_date],
             "top_n": args.top_n,
             "rebalance_rule": args.rebalance_rule,
             "rebalance_interval": args.rebalance_interval,
+            "invested_weight": str(request.invested_weight),
             "portfolio_constraints": (
                 None
                 if request.portfolio_constraints is None
@@ -331,8 +407,23 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             ],
             "spec_set": args.spec_set,
             "factor_version": FACTOR_VERSION,
+            "research_release_tag": settings.research_release_tag,
+            "factor_qualifications": qualifications,
+            "strategy_validation_status": "research_only",
             "research_read_source": settings.research_read_source,
-            "limitations": FACTOR_LIMITATIONS,
+            "limitations": FACTOR_LIMITATIONS + (
+                ["exact_factor_version_not_in_core_pool"]
+                if any(item["pool"] != "core" for item in qualifications)
+                else []
+            ),
+            "interpretation": (
+                "research_only_profile_selected_in_sample"
+                if args.spec_set == "evidence_gated"
+                else "research_only"
+            ),
+            "snapshot_screen_filters_aligned": (
+                False if args.spec_set == "evidence_gated" else None
+            ),
             "performance": {
                 "total_return": str(performance.total_return),
                 "annualized_return": str(performance.annualized_return),

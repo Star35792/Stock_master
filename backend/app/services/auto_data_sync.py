@@ -1,5 +1,6 @@
 """Synchronize the published unadjusted daily dump, retaining raw lineage."""
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,21 @@ from app.repositories.system.auto_data_sync import AUTO_DATA_SYNC_JOB, AutoDataS
 from app.services.hithink_dump_collection import HithinkDumpCollectionService
 from app.services.job_logging import logged_job
 from app.services.reference_data import ReferenceDataSyncService
+
+MIN_STOCK_COVERAGE_RATE = 0.95
+
+
+@dataclass(frozen=True)
+class AutoDataSyncResult:
+    previous_end_date: date | None
+    end_date: date
+    advanced: bool
+    release_tag: str
+    batch_nos: tuple[str, ...]
+    rows_read: int
+    rows_inserted: int
+    market_rows: int
+    coverage: dict
 
 
 def completed_daily_cutoff(now: datetime | None = None) -> date:
@@ -33,7 +49,7 @@ class AutoDataSyncService:
         self.reference = reference or ReferenceDataSyncService()
         self.repository = repository or AutoDataSyncRepository()
 
-    def sync(self, db: Session, *, cutoff: date | None = None) -> None:
+    def sync(self, db: Session, *, cutoff: date | None = None) -> AutoDataSyncResult:
         cutoff = cutoff or completed_daily_cutoff()
         with logged_job(db, job_name=AUTO_DATA_SYNC_JOB, job_type="import") as job:
             try:
@@ -78,11 +94,21 @@ class AutoDataSyncService:
                     rows_inserted += result.accepted_count
                     rows_skipped += result.skipped_count
                     batches.append(result.batch_no)
+                end_date = min(recent_end, cutoff)
+                coverage = self.repository.market_coverage_on_date(
+                    db, trade_date=end_date
+                )
+                if coverage["stock_coverage_rate"] < MIN_STOCK_COVERAGE_RATE:
+                    raise ValueError(
+                        "Latest stock cross-section is incomplete: "
+                        f"{coverage['covered_stocks']}/{coverage['eligible_stocks']} "
+                        f"({coverage['stock_coverage_rate']:.4f}) on {end_date}; "
+                        f"minimum={MIN_STOCK_COVERAGE_RATE:.4f}"
+                    )
                 job.rows_read = rows_read
                 job.rows_inserted = rows_inserted
                 # A successful scan is a processing watermark, not a promise
                 # that every security traded or passed the quality gate.
-                end_date = min(recent_end, cutoff)
                 if previous is not None:
                     end_date = max(previous, end_date)
                 job.metadata_ = {
@@ -93,8 +119,21 @@ class AutoDataSyncService:
                     "skipped_rows": rows_skipped,
                     "market_rows": market_rows,
                     "adjust_type": "none",
+                    "coverage": coverage,
                 }
+                result = AutoDataSyncResult(
+                    previous_end_date=previous,
+                    end_date=end_date,
+                    advanced=previous is None or end_date > previous,
+                    release_tag=recent.release_tag,
+                    batch_nos=tuple(batches),
+                    rows_read=rows_read,
+                    rows_inserted=rows_inserted,
+                    market_rows=market_rows,
+                    coverage=coverage,
+                )
             except Exception:
                 # Recover the transaction before logged_job persists failure.
                 db.rollback()
                 raise
+        return result

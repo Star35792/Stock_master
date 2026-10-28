@@ -73,7 +73,7 @@
 | P0-1 | 修复温层历史日线继承 | 让 `20261021-1407` 或新 release 继承 `20261021-1045` 的 1066 万行历史；`latest_release_tag` 不应被字典序主导，应按「历史完整度」选取 | `WarmLayerStore.connect()` 读 `market.daily_bar` 得到 2483 交易日 |
 | P0-2 | 重建 `market.prices_qfq` 视图 | 用 `market.daily_bar(none)` × `market.adjustment_factor` 物化前复权价，并纳入温层导出 | 回测脚本 `low_price_rebound_backtest.py` 可跑 2 年 |
 | P0-3 | 回测报告数字对账 | 定位 +24.75% 的来源（报告 vs 落盘 +7.83%），修正 `aiDoc/data/20261019-low-price-rebound-backtest.md`，或补齐 5 组参数敏感性与显著性结果落盘 | 报告数字 = 落盘 JSON 数字 |
-| P0-4 | 产物纳入版本控制 | `backend/outputs/`、`backend/data/backtests/` 已被 `.gitignore` 排除，研究产出无留痕 | 关键 summary JSON 提交或归档到 `deliverables/` |
+| P0-4 | 产物纳入版本控制 | **已完成（2026-10-27）**：唯一可核验的 intent 运行四类产物均已在版本控制中，并由 `deliverables/research/backtests/20261020-low-price-rebound-intent-manifest.json` 锁定路径、大小与 SHA-256；该清单仅证明受限研究证据的一致性，不补足敏感性、显著性或交易可得性缺口 | manifest 回归测试校验 equity / picks / trades / summary 四件套及核心指标 |
 
 ### P1 — 产出第一张因子有效性证据表
 

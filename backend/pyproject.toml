@@ -17,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 data = [
-    "akshare>=1.16.0",
+    "akshare>=1.20.1",
     "pandas>=2.3.0",
 ]
 backtest = [
@@ -32,7 +32,7 @@ dev = [
     "ruff>=0.12.0",
 ]
 all = [
-    "akshare>=1.16.0",
+    "akshare>=1.20.1",
     "backtrader>=1.9.78.123",
     "pandas>=2.3.0",
     "plotly>=6.0.0",

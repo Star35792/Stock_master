@@ -448,6 +448,11 @@ class StrategyResearchService:
         normalized_security_types = {
             symbol.upper(): security_type for symbol, security_type in security_types.items()
         }
+        investable_symbols = {
+            symbol
+            for symbol in symbols
+            if normalized_security_types.get(symbol) in allowed_security_types
+        }
         strategy_frame = StrategyFactorFrame.from_rows(
             as_of_date=end_date,
             rows_by_factor=factor_rows,
@@ -486,7 +491,7 @@ class StrategyResearchService:
             quantile_layer_signals, quantile_meta = self._build_quantile_layer_signals(
                 db,
                 quantile_backtest=quantile_backtest,
-                universe=symbols,
+                universe=investable_symbols,
                 invested_weight=invested_weight,
                 start_date=start_date,
                 end_date=end_date,
@@ -935,6 +940,8 @@ class StrategyResearchService:
         partitioned into ``n_layers`` mutually exclusive buckets; every bucket's
         symbols become equal-weight (``invested_weight / bucket_size``) long-only
         signals that the engine runs like the main selection (T+1 execution).
+        Symbols that leave a layer receive an explicit zero target; without that
+        target the engine would retain the previous position indefinitely.
         """
         if not decision_dates:
             raise ValueError("quantile backtest requires at least one decision date")
@@ -961,13 +968,26 @@ class StrategyResearchService:
         layer_signals: list[list[TargetWeightSignal]] = [
             [] for _ in range(quantile_backtest.n_layers)
         ]
+        previous_symbols: list[set[str]] = [
+            set() for _ in range(quantile_backtest.n_layers)
+        ]
         for partition in partitions:
             for layer_index, bucket in enumerate(partition.layers):
-                bucket_size = len(bucket)
+                current_symbols = set(bucket)
+                for symbol in sorted(previous_symbols[layer_index] - current_symbols):
+                    layer_signals[layer_index].append(
+                        TargetWeightSignal(
+                            signal_date=partition.decision_date,
+                            symbol=symbol,
+                            target_weight=Decimal(),
+                        )
+                    )
+                bucket_size = len(current_symbols)
                 if bucket_size == 0:
+                    previous_symbols[layer_index] = current_symbols
                     continue
                 per_symbol_weight = invested_weight / Decimal(bucket_size)
-                for symbol in bucket:
+                for symbol in sorted(current_symbols):
                     layer_signals[layer_index].append(
                         TargetWeightSignal(
                             signal_date=partition.decision_date,
@@ -975,6 +995,7 @@ class StrategyResearchService:
                             target_weight=per_symbol_weight,
                         )
                     )
+                previous_symbols[layer_index] = current_symbols
         layer_bounds = self._quantile_layer_bounds(
             factor_values_by_date, quantile_backtest.n_layers
         )

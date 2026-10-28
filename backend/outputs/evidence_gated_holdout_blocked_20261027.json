@@ -1,0 +1,13 @@
+{
+  "status": "blocked",
+  "requested_window": [
+    "2026-05-06",
+    "2026-10-19"
+  ],
+  "release_tag": "20261027-data-close-v2",
+  "factor": "volume_stability_20@v1-qfq",
+  "reason_code": "CORPORATE_ACTION_EVENT_ACCOUNTING_UNIMPLEMENTED",
+  "error": "backtest interval contains corporate actions; event accounting is not implemented",
+  "interpretation": "no_holdout_performance_result",
+  "next_requirement": "corporate action event accounting or an explicitly biased no-corporate-action research universe"
+}

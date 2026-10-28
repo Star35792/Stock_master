@@ -4,10 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.backtest import DailyEventBacktestEngine
 from app.schemas.strategy import QuantileBacktestRequest
 from app.services import StrategyResearchService
 from app.services.training_factor_selector import TrainingSelectionPolicy
-from app.strategies import FactorScoreSpec
+from app.strategies import FactorScoreSpec, WeightingMode
 
 
 class FakeFactorValueRepository:
@@ -1025,6 +1026,164 @@ def test_run_factor_selection_passes_quantile_backtest_to_engine() -> None:
         assert layer[0].signal_date == date(2026, 7, 1)
         # Equal-weight fully invested: one symbol per layer -> weight 1.0.
         assert layer[0].target_weight == Decimal("1")
+
+
+def test_quantile_request_rejects_unsupported_weighting_mode() -> None:
+    with pytest.raises(
+        ValueError,
+        match="quantile backtest only supports weighting_mode=equal_weight_fully_invested",
+    ):
+        QuantileBacktestRequest(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+            weighting_mode=WeightingMode.SCORE_WEIGHTED,
+        )
+
+
+def test_quantile_universe_respects_allowed_security_types() -> None:
+    class MixedSecurityFactorRepository(FakeFactorValueRepository):
+        def list_for_cross_section(
+            self, db: object, **kwargs: object
+        ) -> list[SimpleNamespace]:
+            trade_date = date(2026, 7, 1)
+            return [
+                SimpleNamespace(trade_date=trade_date, symbol="AAA", value=Decimal("1")),
+                SimpleNamespace(trade_date=trade_date, symbol="BBB", value=Decimal("2")),
+                SimpleNamespace(trade_date=trade_date, symbol="ETF", value=Decimal("3")),
+                SimpleNamespace(
+                    trade_date=trade_date,
+                    symbol="UNKNOWN",
+                    value=Decimal("4"),
+                ),
+            ]
+
+    class MixedSecurityRepository(FakeSecurityRepository):
+        def get_security_types(
+            self, db: object, symbols: set[str]
+        ) -> dict[str, str]:
+            return {"AAA": "stock", "BBB": "stock", "ETF": "etf"}
+
+    backtest_service = FakeBacktestService()
+    service = StrategyResearchService(
+        factor_value_repository=MixedSecurityFactorRepository(),
+        security_repository=MixedSecurityRepository(),
+        backtest_service=backtest_service,
+    )
+
+    service.run_factor_selection(
+        object(),
+        name="quantile-stock-only",
+        factor_specs=[FactorScoreSpec("quality_20", "v1-qfq", weight=Decimal("1"))],
+        top_n=1,
+        allowed_security_types={"stock"},
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 1),
+        adjust_type="qfq",
+        initial_cash=Decimal("100000"),
+        commission_rate=Decimal("0.0003"),
+        slippage_bps=Decimal("2"),
+        lot_size=100,
+        code_version="abc",
+        data_version="dv",
+        quantile_backtest=QuantileBacktestRequest(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+        ),
+    )
+
+    kwargs = backtest_service.kwargs
+    assert kwargs is not None
+    quantile_symbols = {
+        signal.symbol
+        for layer in kwargs["quantile_layer_signals"]
+        for signal in layer
+    }
+    assert quantile_symbols == {"AAA", "BBB"}
+
+
+def test_quantile_layer_signals_exit_rotated_and_missing_buckets() -> None:
+    first = date(2026, 7, 1)
+    second = date(2026, 7, 2)
+    missing = date(2026, 7, 3)
+
+    class RotatingQuantileRepository(FakeFactorValueRepository):
+        def list_for_cross_section(
+            self, db: object, **kwargs: object
+        ) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(trade_date=first, symbol="AAA", value=Decimal("1")),
+                SimpleNamespace(trade_date=first, symbol="BBB", value=Decimal("2")),
+                SimpleNamespace(trade_date=second, symbol="AAA", value=Decimal("2")),
+                SimpleNamespace(trade_date=second, symbol="BBB", value=Decimal("1")),
+            ]
+
+    service = StrategyResearchService(
+        factor_value_repository=RotatingQuantileRepository(),
+        backtest_service=FakeBacktestService(),
+    )
+    layer_signals, _ = service._build_quantile_layer_signals(
+        object(),
+        quantile_backtest=QuantileBacktestRequest(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+        ),
+        universe={"AAA", "BBB"},
+        invested_weight=Decimal("1"),
+        start_date=first,
+        end_date=missing,
+        decision_dates={first, second, missing},
+    )
+
+    assert [
+        (signal.signal_date, signal.symbol, signal.target_weight)
+        for signal in layer_signals[0]
+    ] == [
+        (first, "AAA", Decimal("1")),
+        (second, "AAA", Decimal("0")),
+        (second, "BBB", Decimal("1")),
+        (missing, "BBB", Decimal("0")),
+    ]
+    assert [
+        (signal.signal_date, signal.symbol, signal.target_weight)
+        for signal in layer_signals[1]
+    ] == [
+        (first, "BBB", Decimal("1")),
+        (second, "BBB", Decimal("0")),
+        (second, "AAA", Decimal("1")),
+        (missing, "AAA", Decimal("0")),
+    ]
+
+    final_day = date(2026, 7, 6)
+    calendar = [first, second, missing, final_day]
+    bars = [
+        SimpleNamespace(
+            trade_date=trade_date,
+            symbol=symbol,
+            open=Decimal("10"),
+            close=Decimal("10"),
+        )
+        for trade_date in calendar
+        for symbol in ("AAA", "BBB")
+    ]
+    for layer_index, expected_rotated_symbol in ((0, "BBB"), (1, "AAA")):
+        result = DailyEventBacktestEngine(
+            initial_cash=Decimal("10000"),
+            commission_rate=Decimal(),
+            slippage_bps=Decimal(),
+            lot_size=100,
+        ).run(
+            bars=bars,
+            signals=layer_signals[layer_index],
+            execution_calendar={"AAA": calendar, "BBB": calendar},
+        )
+        assert {
+            row.symbol for row in result.positions if row.trade_date == missing
+        } == {expected_rotated_symbol}
+        assert not [row for row in result.positions if row.trade_date == final_day]
+        assert [trade.side for trade in result.trades] == ["buy", "sell", "buy", "sell"]
 
 
 def test_run_factor_selection_default_quantile_not_passed() -> None:

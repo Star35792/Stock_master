@@ -275,12 +275,13 @@ def test_profile_repository_summarize_aggregates_across_dates() -> None:
                 "INSERT INTO factor.factor_profile ("
                 "id, factor_name, factor_version, trade_date, universe_size, "
                 "observation_count, missing_count, coverage_rate, missing_rate, "
-                "extreme_count, ic_1d, rank_ic_1d, ic_5d, rank_ic_5d, code_version"
+                "extreme_count, ic_1d, rank_ic_1d, ic_5d, rank_ic_5d, "
+                "evidence_eligibility, evidence_eligibility_reason, code_version"
                 ") VALUES "
                 "(1, 'ret_1d', 'v1-qfq', DATE '2026-07-01', 100, 90, 10, 0.9, 0.1, "
-                "0, 0.02, 0.03, 0.01, 0.01, 'local'), "
+                "0, 0.02, 0.03, 0.01, 0.01, 'strategy_eligible', 'trusted', 'local'), "
                 "(2, 'ret_1d', 'v1-qfq', DATE '2026-07-02', 100, 95, 5, 0.95, 0.05, "
-                "0, 0.04, 0.05, NULL, NULL, 'local')"
+                "0, 0.04, 0.05, NULL, NULL, 'research_only', 'late history', 'local')"
             )
         )
         db.commit()
@@ -299,4 +300,6 @@ def test_profile_repository_summarize_aggregates_across_dates() -> None:
     assert summary.mean_rank_ic_1d == pytest.approx(Decimal("0.04"))
     assert summary.mean_ic_5d == pytest.approx(Decimal("0.01"))
     assert summary.mean_ic_20d is None
+    assert summary.evidence_eligibility == "research_only"
+    assert summary.evidence_eligibility_reason == "late history"
     assert summary.has_ic_evidence is True

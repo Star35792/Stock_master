@@ -108,6 +108,10 @@ def _reset_daily_loop_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # Mock trading calendar so all existing tests see today as a trading day.
     day = date.today()
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.completed_daily_cutoff",
+        lambda: day,
+    )
 
     def fake_get_open_dates(self, db, *, exchange, dates):
         return {day}
@@ -260,6 +264,44 @@ def test_daily_loop_fetches_active_symbols_when_none_provided(
     assert sync_calls[0]["symbols"] == ["000001.SZ"]
 
 
+def test_daily_loop_can_close_a_pre_synced_full_market_dump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.AutoDataSyncRepository.market_coverage_on_date",
+        lambda self, db, trade_date: {
+            "trade_date": trade_date.isoformat(),
+            "eligible_stocks": 100,
+            "covered_stocks": 99,
+            "stock_coverage_rate": 0.99,
+            "by_exchange": {},
+            "index_rows": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: pytest.fail("per-symbol sync must stay bypassed"),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        skip_sync=True,
+        target_date=date.today(),
+        session_factory=lambda: session,
+        job_log_repository=job_log_repo,
+    )
+
+    assert result.failed is False
+    assert result.sync_result is None
+    assert job_log_repo.jobs[0].metadata_["sync_skipped"] is True
+
+
 def test_daily_loop_marks_failed_when_sync_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
@@ -400,8 +442,16 @@ def test_daily_loop_rebuilds_curated_when_enabled(
         lambda path: "c" * 64,
     )
     monkeypatch.setattr(
+        "app.scheduler.daily_loop.ReleaseService.build_parquet_manifest",
+        lambda path: [],
+    )
+    monkeypatch.setattr(
         "app.scheduler.daily_loop._compute_market_qfq_checksum",
-        lambda db: "m" * 64,
+        lambda db, **kwargs: "m" * 64,
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.CuratedLayer.publish_prices_qfq",
+        lambda self, staged: staged,
     )
     monkeypatch.setattr(
         "app.scheduler.daily_loop._market_qfq_result",
@@ -438,7 +488,8 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     assert len(curated_calls) == 1
     assert curated_calls[0][0].endswith(".duckdb")
     assert curated_calls[0][1].get("factor_source_name") == "hithink_finance_dump"
-    assert curated_calls[0][1].get("factor_version") == "local"
+    assert curated_calls[0][1].get("factor_version") == "v1"
+    assert curated_calls[0][1].get("publish") is False
     assert job_log_repo.jobs[0].metadata_["curated_rebuilt"] is True
     assert job_log_repo.jobs[0].metadata_["adjustment_factor_rows"] == 10
 

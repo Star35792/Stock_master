@@ -66,7 +66,7 @@ def test_partition_empty_date_yields_empty_layers() -> None:
     present = date(2026, 1, 2)
     values = {present: {"AAA": Decimal("1"), "BBB": Decimal("2")}}
     partitions = partition_universe_by_factor(values, [missing], n_layers=2)
-    assert partitions[0].layers == tuple()
+    assert partitions[0].layers == (tuple(), tuple())
 
 
 def test_partition_applies_max_assets_per_layer() -> None:

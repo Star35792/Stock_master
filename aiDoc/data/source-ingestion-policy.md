@@ -193,6 +193,8 @@ QMT 数据同样先进 `raw`，不直接覆盖 `market`。
 
 HiThink Parquet dump 的批量导入进一步约定：
 
+- 公司行为调整包的所有行先保留在 `raw.corporate_action`；现金、送股、配股比例全部为零的行不发布到 `market.corporate_action`，不能靠默认分支误标为配股。既有误标行须单独审计，不在导入时静默删除。现有包只含除权日、金额和比例，不含登记日、支付日与源事件 ID，不能据此解锁回测的事件会计拒绝闸门。
+
 - 先把价格、成交量和成交额转换为 `raw.daily_bar` 的目标 `DECIMAL` 精度，再判断内容是否相同。
 - 同一 `source_name + symbol + trade_date + adjust_type` 下，`security_type`、OHLC、`volume`、`amount` 完全相同的记录不重复写入；历史快速导入留下的空 `row_hash` 也按这些业务字段兼容识别。
 - 新写入记录保存供应商完整行的 `raw_payload`，并对包含代码、币种、周期、复权标记、时间、OHLCV 和成交额的 payload 计算 `row_hash`。
@@ -241,9 +243,10 @@ manual < vendor < qmt < csv < api < akshare
 - “增量”指入库按内容去重；近期包仍整包下载，以识别窗口内修订和恢复缺失可信层。历史包下载不是每次启动都会执行。供应商历史包的可用范围以实际发布为限。
 - 窗口衔接按 SH/SZ/BJ 的开放交易日判断，周末和节假日不算缺口；导入前要求三个交易所的日历范围覆盖本轮发布窗口，日历缺失或陈旧时任务失败，不把未构建的窗口当作已处理。
 - 原始导入遵守第 9 节内容版本规则；可信层按来源与本次窗口复用最新 raw 候选，执行价格、成交和交易日校验，保留 `manual_fixed`。即使本批新增 raw 为零，也必须可以重试可信层构建。
-- 上海时间 18:00 前，只向 market 发布前一自然日及以前的数据；18:00 后允许当天，仍受供应商实际发布与交易日历限制。不把停牌、节假日或缺失记录填为零，不自动重建 qfq/hfq、复权因子或因子结果。
+- 上海时间 18:00 前，只向 market 发布前一自然日及以前的数据；18:00 后允许当天，仍受供应商实际发布与交易日历限制。不把停牌、节假日或缺失记录填为零。最新日股票横截面覆盖低于 active 且已上市股票的 95% 时，同步失败且不推进水位；指数覆盖单独报告，不混入股票分母。
+- 全市场未复权日线成功推进后，自动任务继续触发 `qfq(v1)` 复权因子、`curated/prices_qfq` 与因子批量计算；若同一行情水位尚无 `publish_eligible=true` 的 `daily_loop`，即使日期没有再次前进也会重试。curated 先写临时目录，目标日股票与 7 个生产价量因子覆盖、重复键和 QFQ 完整性闸门通过后才原子切换正式目录并激活 release。零行因子族记为 `empty/partial`，不得伪装为成功；它不替代相应上游数据源，也不自动进入研究或交易。
 - 来源若携带停牌、ST、*ST、退市整理等状态字段，应写入 `market.security_status_event` 并记录来源与批次；这些记录不进入 `market.daily_bar`。
-- 成功任务的 `metadata.end_date` 是整体处理水位，只有参考数据、raw 和 market 构建流程全部完成才更新；不是每只证券数据完整或通过质量校验的保证。失败任务保留错误日志，下轮仍从上次成功水位判断覆盖。批次号、release、跳过数和可信记录数留在任务 metadata 中。
+- 成功任务的 `metadata.end_date` 是整体处理水位，只有参考数据、raw、market 构建和最新日股票横截面覆盖闸门全部完成才更新；它仍不代表指数或每只停牌证券都有 bar。成功水位按 `started_at`（再以 id 作同刻 tie-breaker）取最近任务，不能依赖可能在控制面重建后回退的序列 id。失败任务保留错误日志，下轮仍从上次成功水位判断覆盖。批次号、release、跳过数、可信记录数和逐所覆盖留在任务 metadata 中。
 - `AUTO_DATA_SYNC_ENABLED` 控制开关，`AUTO_DATA_SYNC_INTERVAL_SECONDS` 控制间隔（最小 60 秒）；测试默认禁用外部同步。单 worker 串行运行，关闭等待正在执行的任务完成；不可同时对同一库启动独立写库调度进程。
 
 ## 13. 全市场相对估值的晚间研究观察值
@@ -258,3 +261,23 @@ manual < vendor < qmt < csv < api < akshare
 - **历史补采的发布位置（2026-10-26 修订）**：上一条禁止的是「把历史补采直接发布到 `market` 可信层」，不是禁止研究层使用历史补采。估值历史补采现在发布为**温层 Parquet 研究表** `research.valuation_history`（判定标准见 `aiDoc/modules/schema-plan.md` §17：只存在于 Parquet、无 ORM 模型、无 Alembic 迁移、不出现在控制面 `information_schema`），由 `scripts/ingest/eastmoney/collect_valuation_history.py` 执行。约束不变：全部行 `pit_verified=false`，不写 `market.*`，不进入通用估值因子；消费方必须显式选择研究路径。ORM 侧孪生读取 `app/repositories/research_valuation.py` 读控制面的 `market.valuation_snapshot`，两条路径的列名/排序/过滤语义一致，但 `pb_mrq` 在 ORM 侧报 `None`、`pit_verified` 在 ORM 侧为 `true`——两处差异都是刻意的不等价，见 `aiDoc/data/20261026-valuation-history-backfill.md` §6.1。
 - **历史补采的供应商分页必须用复合排序**：东财 `RPT_VALUEANALYSIS_DET` 的分页请求须带 `sortColumns=TRADE_DATE,SECURITY_CODE` 与 `sortTypes=1,1`。只按 `TRADE_DATE` 排序时服务端对同一交易日内部的行序不作保证，实测 8 个交易日的分页在第 1、2 页之间重复 571 个 `(symbol, trade_date)` 键并同量丢行；这种缺口会以「覆盖率不足」的形式伪装成供应商数据缺失，必须在采集侧挡住。
 - **历史补采的原始响应体不写控制面**：`raw.vendor_snapshot` 只落页级元数据（请求参数、响应 SHA256、行数、响应字节数、抓取时刻），明细留在温层 Parquet。完整响应体约 1.6 MB/页，一次中断的采集即可让控制面增长约 1 GB；`scripts/maintenance/shrink_control_plane.py` 可剥离早期版本遗留的响应体而保留 SHA256 与审计能力。
+
+## 14. 公司行为登记日与派息日补证据
+
+现有同花顺 A 股 `adjustment-factors` 接口和全市场调整包已经提供除权除息日 `ex_date_ms`、每股现金分红 `dividend_per_share`、送股比例 `per_share_bonus`，并已进入 `raw.corporate_action` / `market.corporate_action`。2026-10-28 对 `600519.SH` 的 REST 实测返回 30 条事件，字段并集仅有 `ticker/ex_date_ms/dividend_per_share/per_share_bonus`；本地调整包列也没有登记日或派息日。因此这里补的是**同一 A 股事件**的股权登记日与实际派息日，不重复计算已有的除权除息日期和分红金额。同花顺的基金分红接口虽另有登记/派息日，但基金事件不能代替 A 股公司行为。
+
+- `CORPORATE_ACTION_EVIDENCE_SYNC_ENABLED` 开启后，`AutoDataSyncWorker` 每轮对缺登记日或派息日的证券按 Tushare `dividend` → AKShare 巨潮 `stock_dividend_cninfo` → AKShare 包装的东方财富 `stock_fhps_detail_em` 尝试。Tushare 每轮最多 1 只且最近一次尝试未过 65 分钟时跳过；巨潮每轮默认最多 10 只，东财仅在前两者缺完整日期时请求。主源报错、空结果或**当前待补除权日**没有有效登记/除权/派息日期时切换；该证券旧事件的完整行不能算当前事件已补齐。东财接口没有派息日，最多标记 `partial`，不能算完整公司行为。手工入口 `python -m scripts.ingest.collect_corporate_action_evidence --source auto` 共用服务层逻辑；维护脚本写主库前持有 DuckDB 写锁。
+- 每次请求先建 `raw.import_batch`，记录证券、接口、UTC 抓取时间和 `raw_only/pit_verified=false`；供应商完整行数组保存在 `raw.vendor_snapshot`，按来源、证券、接口和响应内容计算 SHA256。内容不变只记新批次，内容修订追加新快照；空响应和失败均留批次。令牌只在 `.env`/settings 中，绝不写请求参数、原始 payload 或日志。
+- 原始记录尚未按公告日、实施进度、除权日、每股/每 10 股分红和送转口径逐事件配对，也未完成跨源冲突核验，因此不得自动写 `market.corporate_action`、不得把晚采历史记录标成当时已知、不得解除价格价值回测的公司行为事件会计拒绝闸门。历史 ST/行业与退市宇宙缺口仍独立存在。
+
+## 15. 换手率因子输入的分阶段验收
+
+- `Tushare daily_basic` 可以按交易日获取全市场 `turnover_rate`，口径为流通股本换手率的**百分数值**；`turnover_rate_f` 是自由流通股本换手率，二者不得互换。AKShare `stock_zh_a_hist(adjust="")` 可按证券获取未复权行情与换手率，亦为百分数值。新入口 `python -m scripts.ingest.collect_turnover_evidence --source tushare --trade-date YYYY-MM-DD` 或 `--source akshare --trade-date YYYY-MM-DD --symbol 600519.SH` 先写 `raw.import_batch/raw.vendor_snapshot`，包含接口、参数、UTC 观察时刻、完整返回行、响应哈希与同日可信未复权收盘价对账统计。
+- 同一证券/日期重复、缺换手率、非有限或超出 0%~100%、供应商收盘价与可信收盘价相差超过 0.01 元，分别计入异常；缺可信 bar 单独统计。返回行和验收报告均保留为 `raw_only/pit_verified=false`。晚采历史数据缺当时快照与修订链，不能把对账通过等同于 PIT 通过。
+- 当前 `market.daily_bar` 仍无字段级换手率来源引用；整行 raw 发布器会一起替换可信 OHLCV。因此本阶段不把供应商换手率发布到 market/curated，也不生成 `turnover_rate`、`turnover_percentile_120` 或依赖它们的拥挤度生产因子。后续需先补字段级血缘、历史 120 个交易观测与两条 curated 构建路径，再进行发布评审。
+- `--source auto --trade-date YYYY-MM-DD --symbol 600519.SH` 对同一证券先尝试 Tushare 全市场 `daily_basic`，再尝试东财（经 AKShare）逐股 `stock_zh_a_hist`。仅当有有效换手率且未复权收盘价与可信 bar 相差不超过 0.01 元时停止切换。`TURNOVER_EVIDENCE_SYNC_ENABLED` 开启后，每轮对目标日可信未复权 bar 中缺换手率的证券轮转补采，默认最多 20 只；Tushare 全局最近一次请求未过 65 分钟时跳过，单轮最多请求一次，余下逐股走东财。结果仍仅是 raw 证据。
+
+## 16. 退市信息的分字段兜底
+
+- `python -m scripts.ingest.collect_delist_evidence --source auto --exchange SZ` 或 `SH` 优先尝试 Tushare `stock_basic(list_status=D)`；失败或该交易所缺有效退市日期时，改采 AKShare 包装的交易所名单。深交所 `stock_info_sz_delist(symbol="终止上市公司")` 的 `终止上市日期` 可以作为退市日期候选。上交所 `stock_info_sh_delist(symbol="全部")` 的 `暂停上市日期` 仅是暂停上市日期，不能用来填 `delist_date`；此时返回 `partial`，不宣称退市信息补齐。
+- `DELIST_EVIDENCE_SYNC_ENABLED` 开启后，每 24 小时最多运行一次；Tushare 全市场名单只请求一次，再按 SH/SZ 判断是否需要交易所兜底。每个请求均保存独立 `raw.import_batch`、原始快照、抓取时刻、哈希、失败原因及字段语义。`market.security` 尚未建立字段级来源/历史有效期校验，故不自动发布，亦不解除退市样本偏差闸门。

@@ -102,6 +102,9 @@ class FactorProfileSummary:
     pit_status: str = "unknown"
     #: 定义生命周期状态；``retired`` 表示已被取代或已知有误（硬冻结）。
     factor_status: str = "active"
+    #: Evidence-level strategy eligibility, independent from definition PIT status.
+    evidence_eligibility: str = "research_only"
+    evidence_eligibility_reason: str = "unverified_evidence_eligibility"
 
     @property
     def has_ic_evidence(self) -> bool:
@@ -330,6 +333,10 @@ class FactorBatchProfilerService:
         category = "unknown"
         pit_status = "unknown"
         factor_status = "active"
+        evidence_eligibility = str(row.get("evidence_eligibility") or "research_only")
+        evidence_eligibility_reason = str(
+            row.get("evidence_eligibility_reason") or "unverified_evidence_eligibility"
+        )
         if self._summary_db is not None:
             try:
                 definition = self.definition_repository.get_by_name_version(
@@ -375,6 +382,8 @@ class FactorBatchProfilerService:
             ),
             pit_status=pit_status,
             factor_status=factor_status,
+            evidence_eligibility=evidence_eligibility,
+            evidence_eligibility_reason=evidence_eligibility_reason,
         )
 
     @staticmethod

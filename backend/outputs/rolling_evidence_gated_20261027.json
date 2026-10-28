@@ -1,0 +1,109 @@
+{
+  "start_date": "2025-11-03",
+  "end_date": "2026-04-30",
+  "top_n": 20,
+  "spec_set": "evidence_gated",
+  "exchange": "SH",
+  "training_days": 40,
+  "test_days": 20,
+  "step_days": 20,
+  "rebalance_rule": "every_n_trading_days",
+  "rebalance_interval": 20,
+  "selection_policy": "none",
+  "portfolio_constraints": {
+    "max_symbol_weight": "0.20",
+    "max_industry_weight": "0.40",
+    "cash_reserve_rate": "0.05",
+    "security_type_budgets": null
+  },
+  "factor_version": "v1-qfq",
+  "research_read_source": "warm",
+  "interpretation": "fixed_rule_window_sensitivity_only",
+  "limitations": [
+    "corporate_action_event_accounting_not_implemented",
+    "universe_excludes_symbols_with_corporate_actions_in_window",
+    "survivorship_bias_not_corrected",
+    "industry_point_in_time_labels_unavailable",
+    "suspension_events_not_populated",
+    "training_window_does_not_select_parameters",
+    "every_n_anchor_restarts_per_window",
+    "factor_admission_profile_overlaps_2024_2026_test_period",
+    "snapshot_screen_filters_not_in_backtest_contract"
+  ],
+  "combined_curve": {
+    "total_return": "0.183688039652044560630973992",
+    "maximum_drawdown": "-0.1463955116733286804803362517",
+    "total_commission": "1330.506445",
+    "turnover_rate": "3.380925549781712205695344016"
+  },
+  "combined_declarations": {
+    "non_tradable": "The combined curve concatenates per-window test-period equity on a rebased basis; it is a research statistic, not a continuously tradable strategy. Training periods are excluded and positions are NOT carried across windows.",
+    "overlap_policy": "Test windows that overlap are rejected from the combined curve (re-run with step_days >= training_days + test_days); per-window results remain available individually."
+  },
+  "windows": [
+    {
+      "window_id": "rolling:SH:2025-11-03:2025-12-26:2025-12-29:2026-01-27",
+      "test_window": [
+        "2025-12-29",
+        "2026-01-27"
+      ],
+      "run_id": 68,
+      "total_return": "0.1027307909",
+      "maximum_drawdown": "-0.0070167390128478216180667665",
+      "turnover_rate": "0.8887118187235052735026705761",
+      "total_commission": "335.295876",
+      "sharpe_ratio": "11.43104662507563726071243705",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2025-12-01:2026-01-27:2026-01-28:2026-03-04",
+      "test_window": [
+        "2026-01-28",
+        "2026-03-04"
+      ],
+      "run_id": 69,
+      "total_return": "-0.0158385627",
+      "maximum_drawdown": "-0.0499247610387811398560215254",
+      "turnover_rate": "0.9133018922942818615773859918",
+      "total_commission": "331.670488",
+      "sharpe_ratio": "-0.9610177121572022601503811404",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2025-12-29:2026-03-04:2026-03-05:2026-04-01",
+      "test_window": [
+        "2026-03-05",
+        "2026-04-01"
+      ],
+      "run_id": 70,
+      "total_return": "-0.0263160039",
+      "maximum_drawdown": "-0.1377132275513632010696787883",
+      "turnover_rate": "0.9511573325748674534633215201",
+      "total_commission": "338.374493",
+      "sharpe_ratio": "-0.7197269289652589699648364750",
+      "selection": null
+    },
+    {
+      "window_id": "rolling:SH:2026-01-28:2026-04-01:2026-04-02:2026-04-30",
+      "test_window": [
+        "2026-04-02",
+        "2026-04-30"
+      ],
+      "run_id": 71,
+      "total_return": "0.1201685684",
+      "maximum_drawdown": "-0.0269367269963153386779075241",
+      "turnover_rate": "0.8374385087508546179411585716",
+      "total_commission": "325.165588",
+      "sharpe_ratio": "6.739456741803671560541497706",
+      "selection": null
+    }
+  ],
+  "summary": {
+    "window_count": 4,
+    "positive_windows": 2,
+    "mean_return": "0.045186198175",
+    "min_return": "-0.0263160039",
+    "max_return": "0.1201685684",
+    "worst_drawdown": "-0.1377132275513632010696787883"
+  }
+}

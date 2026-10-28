@@ -1,0 +1,64 @@
+{
+  "as_of_date": "2026-10-26",
+  "status": "research_observation_only",
+  "factor": "volume_stability_20@v1-qfq",
+  "direction": "higher",
+  "invested_weight": "0.8",
+  "cash_weight": "0.2",
+  "per_symbol_research_weight": "0.04",
+  "filters": {
+    "security_type": "stock",
+    "active": true,
+    "list_date_on_or_before": "2026-06-26",
+    "special_treatment_status": "normal",
+    "bar_quality_status": "trusted",
+    "is_suspect": false,
+    "is_suspended": false,
+    "liquidity_20_min_cny": "30000000",
+    "volatility_20_max": "0.0446184584",
+    "industry_current_max_names": 4
+  },
+  "counts": {
+    "joined": 5553,
+    "quality_and_status_eligible": 5311,
+    "risk_eligible": 4271,
+    "shortlist": 100,
+    "selected": 20
+  },
+  "factor_frame_snapshot": {
+    "contract_version": "strategy_factor_frame_v1",
+    "as_of_date": "2026-10-26",
+    "row_count": 4271,
+    "factor_run_ids": [
+      1293
+    ],
+    "sha256": "03d4812d41c4cbc1d2e1028a41c4a13982663f1ce002f38c377d45443aa02ade"
+  },
+  "symbols": [
+    "003006.SZ",
+    "300070.SZ",
+    "000800.SZ",
+    "002506.SZ",
+    "002697.SZ",
+    "601998.SH",
+    "600248.SH",
+    "688416.SH",
+    "000959.SZ",
+    "002247.SZ",
+    "002678.SZ",
+    "601225.SH",
+    "688599.SH",
+    "301333.SZ",
+    "000705.SZ",
+    "000652.SZ",
+    "002495.SZ",
+    "600859.SH",
+    "688720.SH",
+    "600073.SH"
+  ],
+  "limitations": [
+    "current ST and industry labels only",
+    "snapshot screen filters differ from backtest run 79/80",
+    "research weights are illustrative, not execution orders"
+  ]
+}

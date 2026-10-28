@@ -34,7 +34,7 @@ class PriceValueScreenRepository:
         for job in db.scalars(
             select(JobLog)
             .where(JobLog.job_name == "auto_data_sync", JobLog.status == "success")
-            .order_by(JobLog.id.desc())
+            .order_by(JobLog.started_at.desc(), JobLog.id.desc())
             .limit(20)
         ):
             if (job.metadata_ or {}).get("end_date", "") >= trade_date.isoformat():
@@ -44,7 +44,7 @@ class PriceValueScreenRepository:
     def latest_daily_sync_job(self, db: Session) -> JobLog | None:
         return db.scalar(
             select(JobLog).where(JobLog.job_name == "auto_data_sync")
-            .order_by(JobLog.id.desc()).limit(1)
+            .order_by(JobLog.started_at.desc(), JobLog.id.desc()).limit(1)
         )
 
     def latest_historical_archive(self, db: Session, *, trade_date: date) -> JobLog | None:
@@ -52,7 +52,7 @@ class PriceValueScreenRepository:
             select(JobLog).where(
                 JobLog.job_name == "price_value_historical_valuation_collect",
                 JobLog.status == "success",
-            ).order_by(JobLog.id.desc()).limit(20)
+            ).order_by(JobLog.started_at.desc(), JobLog.id.desc()).limit(20)
         ):
             if (job.metadata_ or {}).get("target_trade_date") == trade_date.isoformat():
                 return job
@@ -68,7 +68,7 @@ class PriceValueScreenRepository:
                         JobLog.job_name == "price_value_input_prep",
                         JobLog.status == "success",
                     )
-                    .order_by(JobLog.id.desc())
+                    .order_by(JobLog.started_at.desc(), JobLog.id.desc())
                     .limit(20)
                 )
                 if (job.metadata_ or {}).get("target_trade_date") == trade_date.isoformat()

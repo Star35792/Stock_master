@@ -29,11 +29,13 @@
 ## 工具边界
 
 - `backend/app/lake`：本地 Parquet 数据湖和批量扫描工具；curated 数据集是因子服务可配置的生产消费源，与 DuckDB 事实层共同组成单机存储架构。
+- Warm release 表带 `snapshot/delta` 模式：完整快照截断同表父链，增量表按业务键由新层覆盖旧层；`all_ok=false` 的失败 release 不参与 latest 解析。同 tag 导出禁止覆盖。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。
-- API 生命周期管理 `AutoDataSyncWorker`：启动后在后台线程串行执行全市场未复权日线同步，每次结束后等待配置间隔再检查，关闭时等待当前同步结束；使用单 worker，任务与水位复用 `JobLog`（物理表 `metadata.job_log`）。
+- API 生命周期管理 `AutoDataSyncWorker`：启动后在后台线程串行执行全市场未复权日线同步；股票横截面覆盖达标后触发 `daily_loop(skip_sync=true)`，依次更新 QFQ、暂存 curated 价格、计算因子并经发布闸门原子切换。行情日期未前进但该日没有已发布闭环时仍会重试。每次结束后等待配置间隔再检查，关闭时等待当前任务完成；使用单 worker，任务与水位复用 `JobLog`（物理表 `metadata.job_log`）。
+- 可选的证据补采在每轮自动同步结束时独立执行：公司行为按 Tushare → 巨潮 → 东方财富逐证券兜底；换手率按 Tushare → 东方财富逐证券兜底；退市名单每天最多一次，Tushare 全市场响应复用给沪深两所，缺口再走交易所接口。每次尝试各写 `raw.import_batch`，成功响应写 `raw.vendor_snapshot`；同一数据源故障不会回滚已认证的日线/因子发布。字段缺失时只返回部分证据，三条链均不自动写 `market` 或解锁策略/回测。
 - 同进程 `PriceValueInputPrepWorker` 于交易日 21:00 后准备当晚估值观察值与供应商披露 ROE，不生成通用 ROE 代理；`PriceValueScreenWorker` 在 00:00 生成上一完成交易日的只读全市场报告，并于启动和白天补查。三个 worker 共用进程内数据库写锁；仅适用于单 API worker，其他独立写库进程仍须避开。HiThink 证券与日历刷新先留 raw，证券上市日低覆盖时重取小页，实际变化才写 market，已知上市日冲突即失败。东方财富当前估值接口失败时，同日晚间可使用供应商标注**当天**交易日期的估值分析分页；估值与 ROE 原始页先入 `raw`，同日可信日线及公告时间验收后才附入研究用 `market.valuation_snapshot`。这些行带 `_research_batch_id`，通用估值/市值因子读取会排除；报告仅作人工复核。旧估值直写入口已禁用。
 - 手工历史估值补采脚本按供应商 `TRADE_DATE` 获取估值分析日期列表，只向 DuckDB `raw` 留存独立批次和真实抓取时刻。因尚无历史首次可得时间与生产因子消费隔离，它不发布 `market`、`factor` 或筛选报告；运行脚本需与持有 DuckDB 的 API 进程错开。
-- 独立调度脚本仍基于 APScheduler blocking scheduler；`daily_loop` 编排器按交易日串联 `daily_sync` 与 `factor_pipeline`，sync 失败时不继续执行因子计算。不要与 API 自动同步同时对同一 DuckDB 文件运行独立写库进程；API 自动同步不触发因子或交易。
+- 独立调度脚本仍基于 APScheduler blocking scheduler；`daily_loop` 编排器既可自行串联逐证券 `daily_sync`，也可消费已通过覆盖闸门的全市场 dump。它以供应商 QFQ `hithink_finance_dump@v1` 为统一版本，curated 临时数据与目标日 7 个生产价量因子均通过认证后才发布；零行族记 partial。不要与 API 自动同步同时对同一 DuckDB 文件运行独立写库进程；自动链不触发研究、组合或交易。
 
 ## 文档同步触发
 

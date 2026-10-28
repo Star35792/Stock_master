@@ -45,6 +45,8 @@ class FactorProfileRepository:
         quantile_monotonicity_1d: Decimal | None,
         top_quantile_turnover: Decimal | None,
         code_version: str,
+        evidence_eligibility: str = "research_only",
+        evidence_eligibility_reason: str = "unverified_evidence_eligibility",
     ) -> None:
         row = {
             "factor_name": factor_name,
@@ -75,6 +77,8 @@ class FactorProfileRepository:
             "long_short_forward_return_20d": long_short_forward_return_20d,
             "quantile_monotonicity_1d": quantile_monotonicity_1d,
             "top_quantile_turnover": top_quantile_turnover,
+            "evidence_eligibility": evidence_eligibility,
+            "evidence_eligibility_reason": evidence_eligibility_reason,
             "code_version": code_version,
         }
         statement = insert(FactorProfile).values(row)
@@ -187,6 +191,13 @@ class FactorProfileRepository:
                 ),
                 func.avg(FactorProfile.top_quantile_turnover).label(
                     "mean_top_quantile_turnover"
+                ),
+                # A mixed batch is strategy-eligible only when every daily
+                # evidence row is eligible. The lexical minimum is deterministic
+                # for the supported research_only/strategy_eligible values.
+                func.min(FactorProfile.evidence_eligibility).label("evidence_eligibility"),
+                func.min(FactorProfile.evidence_eligibility_reason).label(
+                    "evidence_eligibility_reason"
                 ),
             )
             .where(*filters)

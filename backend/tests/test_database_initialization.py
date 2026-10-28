@@ -7,8 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database.research_session import initialize_research_database
-from app.database.session import apply_schema_compatibility, initialize_database
+from app.database.session import (
+    apply_schema_compatibility,
+    ensure_duckdb_sequences,
+    initialize_database,
+)
 from app.models.strategy import BacktestRun, TrainingArtifact
+from app.models.system import JobLog
 
 
 def test_fresh_database_preserves_referenced_training_artifacts(tmp_path) -> None:
@@ -88,6 +93,27 @@ def test_schema_compatibility_adds_release_lineage_columns(tmp_path) -> None:
     engine.dispose()
 
 
+def test_legacy_factor_profiles_default_to_research_only_evidence(tmp_path) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'legacy-profile.duckdb'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE SCHEMA factor"))
+        connection.execute(text("CREATE TABLE factor.factor_profile (id BIGINT)"))
+        connection.execute(text("INSERT INTO factor.factor_profile VALUES (7)"))
+
+    apply_schema_compatibility(engine)
+    apply_schema_compatibility(engine)
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT evidence_eligibility, evidence_eligibility_reason "
+                "FROM factor.factor_profile WHERE id = 7"
+            )
+        ).one()
+    assert row == ("research_only", "unverified_evidence_eligibility")
+    engine.dispose()
+
+
 def test_schema_compatibility_removes_legacy_security_name_index(tmp_path) -> None:
     engine = create_engine(f"duckdb:///{tmp_path / 'legacy-security.duckdb'}")
     initialize_database(engine)
@@ -142,4 +168,30 @@ def test_existing_backtest_database_gets_nullable_artifact_column_and_index(tmp_
             WHERE schema_name='strategy' AND table_name='backtest_run'
               AND index_name='ix_backtest_run_training_artifact'
         """)) == 1
+    engine.dispose()
+
+
+def test_sequence_repair_restarts_above_retained_ids(tmp_path) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'slimmed.duckdb'}")
+    initialize_database(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE metadata.job_log ALTER COLUMN id DROP DEFAULT")
+        )
+        connection.execute(text("DROP SEQUENCE system_job_log_id_seq"))
+        connection.execute(
+            text("""
+                INSERT INTO metadata.job_log (id, job_name, job_type)
+                VALUES (900, 'retained', 'schedule')
+            """)
+        )
+
+    ensure_duckdb_sequences(engine)
+
+    with Session(engine) as db:
+        row = JobLog(job_name="after-slim", job_type="schedule")
+        db.add(row)
+        db.flush()
+        assert row.id == 901
+        db.rollback()
     engine.dispose()

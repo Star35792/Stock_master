@@ -62,16 +62,26 @@ QUANTILE_DECLARATIONS: dict[str, str] = {
     ),
     "bias_disclosure": (
         "Quantile layer returns do NOT deduct survivor, ST/halt, or industry "
-        "point-in-time biases (security_status_event=0 rows, "
-        "security_industry_history=0 rows); corporate-action event accounting "
-        "is unimplemented and intervals containing it are rejected, so samples "
-        "carry selection-survivor bias."
+        "point-in-time biases. The status facts are still missing: "
+        "security_status_event=0 rows, so a halt can only be inferred from a "
+        "missing bar. The industry labels are present "
+        "(security_industry_history=5,579 rows) but they are a current-label "
+        "backfill (source=current_label_backfill_20261024), so they are NOT "
+        "point-in-time labels and industry neutralisation on them is not "
+        "trustworthy. The ST state is available only for the CURRENT status "
+        "(derived from the security short name, 200 ST + 1 delisting among "
+        "the listed companies); its dated history is unavailable because the "
+        "supplier serves the current name on every historical row. "
+        "Corporate-action event accounting is unimplemented and intervals "
+        "containing it are rejected, so samples carry selection-survivor bias."
     ),
     "method": (
         "Each layer is an independent equal-weight long-only portfolio of that "
-        "bucket's symbols, executed T+1 like the main selection; layer curves "
-        "are net of fees/slippage/taxes."
+        "bucket's symbols, executed T+1 like the main selection; symbols leaving "
+        "a bucket receive explicit zero-weight exit targets; layer curves are net "
+        "of fees/slippage/taxes."
     ),
+    "position_target_policy": "explicit_zero_exit_v2",
 }
 
 

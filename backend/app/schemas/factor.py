@@ -94,6 +94,8 @@ class FactorProfileRead(BaseModel):
     long_short_forward_return_20d: Decimal | None = None
     quantile_monotonicity_1d: Decimal | None = None
     top_quantile_turnover: Decimal | None
+    evidence_eligibility: str = "research_only"
+    evidence_eligibility_reason: str = "unverified_evidence_eligibility"
     code_version: str
     created_at: datetime
     updated_at: datetime
@@ -155,6 +157,8 @@ class FactorProfileSummaryRead(BaseModel):
     mean_top_quantile_turnover: Decimal | None = None
     pit_status: str = "unknown"
     factor_status: str = "active"
+    evidence_eligibility: str = "research_only"
+    evidence_eligibility_reason: str = "unverified_evidence_eligibility"
     has_ic_evidence: bool = False
 
 

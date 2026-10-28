@@ -60,12 +60,24 @@ def _write_release(
             "CREATE TABLE t (symbol VARCHAR, trade_date DATE, value DOUBLE)"
         )
         con.executemany("INSERT INTO t VALUES (?, ?, ?)", rows)
-        select = "SELECT * FROM t"
+        required_keys = {
+            "market.daily_bar": "'none' AS adjust_type",
+            "market.adjustment_factor": (
+                "'qfq' AS adjust_type, 'test' AS source_name, 'v1' AS version"
+            ),
+            "factor.factor_value": (
+                "'test_factor' AS factor_name, 'v1' AS factor_version"
+            ),
+        }.get(table)
+        suffix = f", {required_keys}" if required_keys else ""
+        select = f"SELECT *{suffix} FROM t"
         if extra:
             # Materialise the extra columns with deterministic values so the
             # two releases differ in shape but not in row count.
             assignments = ", ".join(f"{expr} AS {col}" for col, expr in extra)
-            select = f"SELECT {assignments}, symbol, trade_date, value FROM t"
+            select = (
+                f"SELECT {assignments}, symbol, trade_date, value{suffix} FROM t"
+            )
         con.execute(
             f"COPY ({select} ORDER BY symbol, trade_date) "
             f"TO '{target.as_posix()}/data_0.parquet' (FORMAT PARQUET)"
@@ -237,7 +249,8 @@ def test_warm_table_is_visible_with_and_without_control_attachment(
     # warm table: the attached connection unions the Parquet rows with the
     # control-plane rows that are newer than the Parquet cutoff.
     con0.execute(
-        "CREATE TABLE market.daily_bar (symbol VARCHAR, trade_date DATE, value DOUBLE)"
+        "CREATE TABLE market.daily_bar "
+        "(symbol VARCHAR, trade_date DATE, value DOUBLE, adjust_type VARCHAR)"
     )
     con0.close()
 
@@ -284,6 +297,66 @@ def test_release_chain_with_differing_column_sets_is_readable(warm_root: Path) -
     # The release that lacks the column contributes NULL for it.
     assert rows[0][2] is not None
     assert rows[1][2] is None
+    con.close()
+
+
+def test_snapshot_table_supersedes_same_table_in_parent(warm_root: Path) -> None:
+    """A complete export must not be UNIONed with an older full snapshot."""
+    _write_release(
+        warm_root,
+        "20260101-0000",
+        tables={"market.daily_bar": [("000001.SZ", _TRADE_DATES[0], 1.0)]},
+    )
+    release = _write_release(
+        warm_root,
+        "20260102-0000",
+        tables={
+            "market.daily_bar": [
+                ("000001.SZ", _TRADE_DATES[0], 1.0),
+                ("000002.SZ", _TRADE_DATES[1], 2.0),
+            ]
+        },
+        base="20260101-0000",
+    )
+    summary_path = release / "export_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["tables"] = [
+        {"schema": "market", "table": "daily_bar", "mode": "snapshot"}
+    ]
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    store = WarmLayerStore(warm_root)
+    assert len(store.table_globs("market", "daily_bar", "20260102-0000")) == 1
+    con = store.connect(release_tag="20260102-0000", attach_control=False)
+    assert con.execute("SELECT count(*) FROM market.daily_bar").fetchone()[0] == 2
+    con.close()
+
+
+def test_delta_release_overrides_parent_on_business_key(warm_root: Path) -> None:
+    """Delta rows replace parent keys instead of duplicating observations."""
+    _write_release(
+        warm_root,
+        "20260101-0000",
+        tables={"factor.factor_value": [("000001.SZ", _TRADE_DATES[0], 1.0)]},
+    )
+    _write_release(
+        warm_root,
+        "20260102-0000",
+        tables={
+            "factor.factor_value": [
+                ("000001.SZ", _TRADE_DATES[0], 9.0),
+                ("000002.SZ", _TRADE_DATES[1], 2.0),
+            ]
+        },
+        base="20260101-0000",
+    )
+
+    store = WarmLayerStore(warm_root)
+    con = store.connect(release_tag="20260102-0000", attach_control=False)
+    rows = con.execute(
+        "SELECT symbol, value FROM factor.factor_value ORDER BY symbol"
+    ).fetchall()
+    assert rows == [("000001.SZ", 9.0), ("000002.SZ", 2.0)]
     con.close()
 
 

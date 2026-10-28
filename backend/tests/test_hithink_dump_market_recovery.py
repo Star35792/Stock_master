@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.database.session import initialize_database
-from app.models.market import TradingCalendar
+from app.models.market import Security, TradingCalendar
 from app.models.raw import ImportBatch, RawDailyBar
 from app.services.hithink_dump_collection import HithinkDumpCollectionService
 
@@ -138,6 +138,19 @@ def test_auto_sync_real_parquet_repeats_and_recovers_market_gap(db, tmp_path):
 
     class LocalReference:
         def sync_hithink_reference_data(self, session):
+            if session.scalar(
+                select(Security.id).where(Security.symbol == "600000.SH")
+            ) is None:
+                session.add(
+                    Security(
+                        symbol="600000.SH",
+                        name="浦发银行",
+                        security_type="stock",
+                        exchange="SH",
+                        list_date=date(1999, 11, 10),
+                        is_active=True,
+                    )
+                )
             for exchange in ("SH", "SZ", "BJ"):
                 for day in (20, 21, 22):
                     existing = session.scalar(select(TradingCalendar.id).where(

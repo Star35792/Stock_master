@@ -121,6 +121,8 @@ def main() -> int:
                     ),
                     "endpoint_observation_count": c.summary.endpoint_observation_count,
                     "pit_status": c.summary.pit_status,
+                    "evidence_eligibility": c.summary.evidence_eligibility,
+                    "evidence_eligibility_reason": c.summary.evidence_eligibility_reason,
                 },
             }
             for c in classifications

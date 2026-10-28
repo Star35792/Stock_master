@@ -1,0 +1,499 @@
+[
+  {
+    "factor_name": "downside_volatility_20",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=119 < 200",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.0379141395210084 < 0.01",
+      "mean_rank_ic_5d=-0.03943456210347826 < 0.01",
+      "mean_rank_ic_20d=-0.042868486901 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 119,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "-0.0379141395210084",
+      "mean_rank_ic_5d": "-0.03943456210347826",
+      "mean_rank_ic_20d": "-0.042868486901",
+      "mean_long_short_forward_return_1d": "0.00025557047983193275",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "downside_volatility_20",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.033273004589233955 < 0.01",
+      "mean_rank_ic_5d=-0.03929160615010439 < 0.01",
+      "mean_rank_ic_20d=-0.044101090978448276 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 483,
+      "mean_coverage_rate": "0.9999852329904761",
+      "mean_rank_ic_1d": "-0.033273004589233955",
+      "mean_rank_ic_5d": "-0.03929160615010439",
+      "mean_rank_ic_20d": "-0.044101090978448276",
+      "mean_long_short_forward_return_1d": "0.00033235511407867494",
+      "mean_long_short_forward_return_5d": "0.0029861649688935283",
+      "mean_long_short_forward_return_20d": "0.010061183760991379",
+      "endpoint_observation_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "liquidity_20",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=119 < 200",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.026006826499159665 < 0.01",
+      "mean_rank_ic_5d=-0.022980446764347826 < 0.01",
+      "mean_rank_ic_20d=-0.011522517267 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 119,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "-0.026006826499159665",
+      "mean_rank_ic_5d": "-0.022980446764347826",
+      "mean_rank_ic_20d": "-0.011522517267",
+      "mean_long_short_forward_return_1d": "0.00017652435546218487",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "liquidity_20",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "mean_long_short_forward_return_1d=-0.0015753906436853002 <= 0",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.04006168007556936 < 0.01",
+      "mean_rank_ic_5d=-0.06507799335991649 < 0.01",
+      "mean_rank_ic_20d=-0.10281729516853448 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 483,
+      "mean_coverage_rate": "0.9999852329904761",
+      "mean_rank_ic_1d": "-0.04006168007556936",
+      "mean_rank_ic_5d": "-0.06507799335991649",
+      "mean_rank_ic_20d": "-0.10281729516853448",
+      "mean_long_short_forward_return_1d": "-0.0015753906436853002",
+      "mean_long_short_forward_return_5d": "-0.006823061002713987",
+      "mean_long_short_forward_return_20d": "-0.024079687910560345",
+      "endpoint_observation_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "max_drawdown_20",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=119 < 200",
+      "mean_long_short_forward_return_1d=-0.000021402931092436976 <= 0",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_20d=0.003611483302 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 119,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "0.02083645965882353",
+      "mean_rank_ic_5d": "0.01575646400782609",
+      "mean_rank_ic_20d": "0.003611483302",
+      "mean_long_short_forward_return_1d": "-0.000021402931092436976",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "max_drawdown_20",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "observation",
+    "reasons": [
+      "mean_long_short_forward_return_1d=-0.0005187485378881988 <= 0",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 483,
+      "mean_coverage_rate": "0.9999852329904761",
+      "mean_rank_ic_1d": "0.017893243272670806",
+      "mean_rank_ic_5d": "0.02258632671336117",
+      "mean_rank_ic_20d": "0.018860877316163795",
+      "mean_long_short_forward_return_1d": "-0.0005187485378881988",
+      "mean_long_short_forward_return_5d": "-0.0028111524830897704",
+      "mean_long_short_forward_return_20d": "-0.010839577939655173",
+      "endpoint_observation_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "momentum_20",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=119 < 200",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.033514259690756304 < 0.01",
+      "mean_rank_ic_5d=-0.037959229108695654 < 0.01",
+      "mean_rank_ic_20d=-0.04820571763 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 119,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "-0.033514259690756304",
+      "mean_rank_ic_5d": "-0.037959229108695654",
+      "mean_rank_ic_20d": "-0.04820571763",
+      "mean_long_short_forward_return_1d": "0.0003754581025210084",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "momentum_20",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "mean_long_short_forward_return_1d=-0.0006726547126293996 <= 0",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.05049087338550725 < 0.01",
+      "mean_rank_ic_5d=-0.06903584914592902 < 0.01",
+      "mean_rank_ic_20d=-0.07171145011314656 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 483,
+      "mean_coverage_rate": "0.9983288056846791",
+      "mean_rank_ic_1d": "-0.05049087338550725",
+      "mean_rank_ic_5d": "-0.06903584914592902",
+      "mean_rank_ic_20d": "-0.07171145011314656",
+      "mean_long_short_forward_return_1d": "-0.0006726547126293996",
+      "mean_long_short_forward_return_5d": "-0.003946254784551149",
+      "mean_long_short_forward_return_20d": "-0.0076421033575431035",
+      "endpoint_observation_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "momentum_60",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=109 < 200",
+      "mean_long_short_forward_return_1d=-0.00006401147155963302 <= 0",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.03560967907614679 < 0.01",
+      "mean_rank_ic_5d=-0.04289444934190476 < 0.01",
+      "mean_rank_ic_20d=-0.04091927484444444 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 109,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "-0.03560967907614679",
+      "mean_rank_ic_5d": "-0.04289444934190476",
+      "mean_rank_ic_20d": "-0.04091927484444444",
+      "mean_long_short_forward_return_1d": "-0.00006401147155963302",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 109,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "momentum_60",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "mean_long_short_forward_return_1d=-0.0006143484723044397 <= 0",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.040804161028118395 < 0.01",
+      "mean_rank_ic_5d=-0.06617810705437101 < 0.01",
+      "mean_rank_ic_20d=-0.08843145184889868 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 473,
+      "mean_coverage_rate": "0.9950464692832981",
+      "mean_rank_ic_1d": "-0.040804161028118395",
+      "mean_rank_ic_5d": "-0.06617810705437101",
+      "mean_rank_ic_20d": "-0.08843145184889868",
+      "mean_long_short_forward_return_1d": "-0.0006143484723044397",
+      "mean_long_short_forward_return_5d": "-0.003802361810021322",
+      "mean_long_short_forward_return_20d": "-0.00902310942599119",
+      "endpoint_observation_count": 473,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "value_earnings_yield",
+    "factor_version": "v1-valhist",
+    "category": "valuation",
+    "pool": "frozen",
+    "reasons": [
+      "mean_long_short_forward_return_1d=-0.0001377728193277311 <= 0",
+      "factor_status=retired: 定义已被取代或已知有误，仅保留证据供审计",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 595,
+      "mean_coverage_rate": "0.9983943107253781",
+      "mean_rank_ic_1d": "0.019422151882184872",
+      "mean_rank_ic_5d": "0.026799123953468697",
+      "mean_rank_ic_20d": "0.021990157994618054",
+      "mean_long_short_forward_return_1d": "-0.0001377728193277311",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 595,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "value_earnings_yield",
+    "factor_version": "v2-valhist",
+    "category": "valuation",
+    "pool": "frozen",
+    "reasons": [
+      "mean_coverage_rate=0.6956814255280672 < 0.70",
+      "mean_long_short_forward_return_1d=-0.00012199991764705883 <= 0",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 595,
+      "mean_coverage_rate": "0.6956814255280672",
+      "mean_rank_ic_1d": "0.018719706017815127",
+      "mean_rank_ic_5d": "0.025254805402030456",
+      "mean_rank_ic_20d": "0.020143358667534722",
+      "mean_long_short_forward_return_1d": "-0.00012199991764705883",
+      "mean_long_short_forward_return_5d": "-0.0008363267260575296",
+      "mean_long_short_forward_return_20d": "-0.006855002248958333",
+      "endpoint_observation_count": 595,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "value_pb_mrq",
+    "factor_version": "v1-valhist",
+    "category": "valuation",
+    "pool": "frozen",
+    "reasons": [
+      "pit_status=look_ahead: 因子输入含前视信息，禁止进入任何池",
+      "factor_status=retired: 定义已被取代或已知有误，仅保留证据供审计",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 595,
+      "mean_coverage_rate": "0.9958353323971428",
+      "mean_rank_ic_1d": "0.032851481651932773",
+      "mean_rank_ic_5d": "0.04821447190169205",
+      "mean_rank_ic_20d": "0.059487109230034724",
+      "mean_long_short_forward_return_1d": "0.00032157276588235293",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 595,
+      "pit_status": "look_ahead",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "value_pb_mrq",
+    "factor_version": "v2-valhist",
+    "category": "valuation",
+    "pool": "frozen",
+    "reasons": [
+      "pit_status=look_ahead: 因子输入含前视信息，禁止进入任何池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 595,
+      "mean_coverage_rate": "0.9502160835546218",
+      "mean_rank_ic_1d": "0.03248412612235294",
+      "mean_rank_ic_5d": "0.04751528613350254",
+      "mean_rank_ic_20d": "0.05916757249565972",
+      "mean_long_short_forward_return_1d": "0.00034262336907563026",
+      "mean_long_short_forward_return_5d": "0.0014966003822335025",
+      "mean_long_short_forward_return_20d": "0.0009507423973958333",
+      "endpoint_observation_count": 595,
+      "pit_status": "look_ahead",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "value_pe_ttm",
+    "factor_version": "v1-valhist",
+    "category": "valuation",
+    "pool": "frozen",
+    "reasons": [
+      "factor_status=retired: 定义已被取代或已知有误，仅保留证据供审计",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=0.006193898383865546 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 595,
+      "mean_coverage_rate": "0.9958353323971428",
+      "mean_rank_ic_1d": "0.006193898383865546",
+      "mean_rank_ic_5d": "0.011494775560406092",
+      "mean_rank_ic_20d": "0.014530252304513889",
+      "mean_long_short_forward_return_1d": "0.00022710269243697478",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 595,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "volatility_20",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=119 < 200",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.05595403892184874 < 0.01",
+      "mean_rank_ic_5d=-0.06082579561043478 < 0.01",
+      "mean_rank_ic_20d=-0.06124512316 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 119,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "-0.05595403892184874",
+      "mean_rank_ic_5d": "-0.06082579561043478",
+      "mean_rank_ic_20d": "-0.06124512316",
+      "mean_long_short_forward_return_1d": "0.00037403475966386554",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "volatility_20",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池",
+      "mean_rank_ic_1d=-0.052251150790890266 < 0.01",
+      "mean_rank_ic_5d=-0.06857512551544885 < 0.01",
+      "mean_rank_ic_20d=-0.06934184529935344 < 0.01"
+    ],
+    "summary": {
+      "trade_date_count": 483,
+      "mean_coverage_rate": "0.9998994420544514",
+      "mean_rank_ic_1d": "-0.052251150790890266",
+      "mean_rank_ic_5d": "-0.06857512551544885",
+      "mean_rank_ic_20d": "-0.06934184529935344",
+      "mean_long_short_forward_return_1d": "0.00028215949855072466",
+      "mean_long_short_forward_return_5d": "0.0008841755022964509",
+      "mean_long_short_forward_return_20d": "0.007709744813793103",
+      "endpoint_observation_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "volume_stability_20",
+    "factor_version": "v1-qfq",
+    "category": "price_volume_risk",
+    "pool": "frozen",
+    "reasons": [
+      "trade_date_count=119 < 200",
+      "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 119,
+      "mean_coverage_rate": "1.0",
+      "mean_rank_ic_1d": "0.048167068897478994",
+      "mean_rank_ic_5d": "0.06620253903391304",
+      "mean_rank_ic_20d": "0.089038831966",
+      "mean_long_short_forward_return_1d": "0.0010774754823529413",
+      "mean_long_short_forward_return_5d": null,
+      "mean_long_short_forward_return_20d": null,
+      "endpoint_observation_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  },
+  {
+    "factor_name": "volume_stability_20",
+    "factor_version": "v2-qfq-2y",
+    "category": "price_volume_risk",
+    "pool": "observation",
+    "reasons": [
+      "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+    ],
+    "summary": {
+      "trade_date_count": 483,
+      "mean_coverage_rate": "0.9999852329904761",
+      "mean_rank_ic_1d": "0.043497676844720494",
+      "mean_rank_ic_5d": "0.0578336378611691",
+      "mean_rank_ic_20d": "0.05591097502025862",
+      "mean_long_short_forward_return_1d": "0.0009471042563146998",
+      "mean_long_short_forward_return_5d": "0.003953105760542797",
+      "mean_long_short_forward_return_20d": "0.004179135862068965",
+      "endpoint_observation_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only",
+      "evidence_eligibility_reason": "unverified_evidence_eligibility"
+    }
+  }
+]

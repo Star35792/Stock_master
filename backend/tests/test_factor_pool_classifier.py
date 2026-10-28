@@ -16,6 +16,8 @@ def _summary(
     endpoint_observation_count: int = 250,
     pit_status: str = "point_in_time",
     factor_status: str = "active",
+    evidence_eligibility: str = "strategy_eligible",
+    evidence_eligibility_reason: str = "verified PIT evidence",
 ) -> FactorProfileSummary:
     return FactorProfileSummary(
         factor_name="ret_1d",
@@ -35,6 +37,8 @@ def _summary(
         endpoint_observation_count=endpoint_observation_count,
         pit_status=pit_status,
         factor_status=factor_status,
+        evidence_eligibility=evidence_eligibility,
+        evidence_eligibility_reason=evidence_eligibility_reason,
     )
 
 
@@ -161,6 +165,21 @@ def test_unknown_pit_status_cannot_enter_core() -> None:
     result = service.classify([summary])[0]
     assert result.pool == "observation"
     assert any("pit_status=unknown" in reason for reason in result.reasons)
+
+
+def test_research_only_evidence_cannot_enter_core() -> None:
+    """Late or otherwise unverified evidence stays usable only for research."""
+    service = FactorPoolClassifierService()
+    result = service.classify(
+        [
+            _summary(
+                evidence_eligibility="research_only",
+                evidence_eligibility_reason="late observation without revision history",
+            )
+        ]
+    )[0]
+    assert result.pool == "observation"
+    assert any("evidence_eligibility=research_only" in reason for reason in result.reasons)
 
 
 def test_default_pit_status_is_unknown() -> None:

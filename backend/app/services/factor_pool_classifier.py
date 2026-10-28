@@ -193,6 +193,16 @@ class FactorPoolClassifierService:
                 "factor_status=retired: 定义已被取代或已知有误，仅保留证据供审计"
             )
 
+        # --- 证据资格闸门（fail-closed） ---------------------------------
+        evidence_eligibility = (summary.evidence_eligibility or "research_only").strip().lower()
+        evidence_is_strategy_eligible = evidence_eligibility == "strategy_eligible"
+        if not evidence_is_strategy_eligible:
+            structural_reasons.append(
+                "evidence_eligibility="
+                f"{evidence_eligibility}: {summary.evidence_eligibility_reason}; "
+                "不得进入核心池"
+            )
+
         # --- 池归属 -----------------------------------------------------
         if (
             has_minimum_history
@@ -201,6 +211,7 @@ class FactorPoolClassifierService:
             and pit_is_clean
             and endpoint_ok
             and not is_retired
+            and evidence_is_strategy_eligible
         ):
             pool: FactorPool = "core"
             reasons = structural_reasons + ic_reasons

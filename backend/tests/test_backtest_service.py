@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.backtest import TargetWeightSignal
+from app.backtest.quantile_result import QuantileBacktestMeta
 from app.services import DailyBacktestService
 from app.services.backtest import _independent_verification_session
 
@@ -82,6 +83,7 @@ class FakeBacktestRepository:
         self.saved_result: object | None = None
         self.failed_message: str | None = None
         self.updated_snapshots: list[dict] = []
+        self.updated_parameters: list[dict] = []
 
     def create_run(self, db: object, **kwargs: object) -> SimpleNamespace:
         self.create_kwargs = kwargs
@@ -99,6 +101,16 @@ class FakeBacktestRepository:
 
     def save_result(self, db: object, *, run: object, result: object) -> None:
         self.saved_result = result
+
+    def update_run_parameters(
+        self,
+        db: object,
+        *,
+        run: SimpleNamespace,
+        extra: dict,
+    ) -> None:
+        run.parameters = {**run.parameters, **extra}
+        self.updated_parameters.append(extra)
 
     def fail_run(self, db: object, *, run: object, error_message: str) -> None:
         self.failed_message = error_message
@@ -252,6 +264,216 @@ def test_backtest_service_persists_research_contract() -> None:
         backtest_repository.create_kwargs["parameters"]["factor_specs"][0]["factor_name"]
         == "foo"
     )
+
+
+def test_backtest_service_loads_quantile_symbols_independently() -> None:
+    class MultiSymbolDailyBarRepository(FakeDailyBarRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.symbol_requests: list[list[str]] = []
+
+        def list_for_factor_calculation(
+            self,
+            db: object,
+            **kwargs: object,
+        ) -> list[SimpleNamespace]:
+            symbols = list(kwargs["symbols"])
+            self.symbol_requests.append(symbols)
+            self.kwargs = kwargs
+            return [
+                SimpleNamespace(
+                    symbol=symbol,
+                    security_type="stock",
+                    trade_date=trade_date,
+                    open=Decimal("10"),
+                    close=Decimal("10"),
+                )
+                for trade_date in (date(2026, 7, 1), date(2026, 7, 2))
+                for symbol in symbols
+            ]
+
+    daily_bar_repository = MultiSymbolDailyBarRepository()
+    backtest_repository = FakeBacktestRepository()
+    service = DailyBacktestService(
+        daily_bar_repository=daily_bar_repository,
+        backtest_repository=backtest_repository,
+        corporate_action_repository=FakeCorporateActionRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+    )
+
+    persisted = service.run(
+        SimpleNamespace(commit=lambda: None),
+        name="quantile-symbol-scope",
+        strategy_name="factor_selection",
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        adjust_type="qfq",
+        initial_cash=Decimal("10000"),
+        commission_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260702",
+        quantile_layer_signals=[
+            [TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+            [TargetWeightSignal(date(2026, 7, 1), "BBB.SH", Decimal("1"))],
+        ],
+        quantile_meta=QuantileBacktestMeta(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+            max_assets_per_layer=None,
+            layer_bounds=((Decimal("1"), Decimal("1")), (Decimal("2"), Decimal("2"))),
+        ),
+    )
+
+    assert persisted.quantile is not None
+    assert persisted.quantile.declarations["position_target_policy"] == (
+        "explicit_zero_exit_v2"
+    )
+    assert backtest_repository.create_kwargs is not None
+    assert backtest_repository.create_kwargs["parameters"]["symbols"] == ["AAA.SH"]
+    assert daily_bar_repository.symbol_requests == [
+        ["AAA.SH"],
+        ["AAA.SH"],
+        ["AAA.SH", "BBB.SH"],
+        ["AAA.SH", "BBB.SH"],
+    ]
+    assert backtest_repository.updated_parameters[-1]["quantile_data_snapshot"][
+        "verification_status"
+    ] == "verified"
+    assert backtest_repository.updated_parameters[-1]["quantile_data_snapshot"][
+        "symbols"
+    ] == ["AAA.SH", "BBB.SH"]
+
+
+def test_quantile_corporate_action_failure_does_not_fail_main_run() -> None:
+    class QuantileOnlyCorporateActionRepository(FakeCorporateActionRepository):
+        def list_for_symbols_date_range(
+            self,
+            db: object,
+            **kwargs: object,
+        ) -> list[SimpleNamespace]:
+            symbols = set(kwargs["symbols"])
+            if "BBB.SH" in symbols:
+                return [SimpleNamespace(symbol="BBB.SH", ex_date=date(2026, 7, 2))]
+            return []
+
+    backtest_repository = FakeBacktestRepository()
+    service = DailyBacktestService(
+        daily_bar_repository=FakeDailyBarRepository(),
+        backtest_repository=backtest_repository,
+        corporate_action_repository=QuantileOnlyCorporateActionRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+    )
+
+    persisted = service.run(
+        SimpleNamespace(commit=lambda: None),
+        name="quantile-corporate-action",
+        strategy_name="factor_selection",
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        adjust_type="qfq",
+        initial_cash=Decimal("10000"),
+        commission_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260702",
+        quantile_layer_signals=[
+            [TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+            [TargetWeightSignal(date(2026, 7, 1), "BBB.SH", Decimal("1"))],
+        ],
+        quantile_meta=QuantileBacktestMeta(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+            max_assets_per_layer=None,
+            layer_bounds=((Decimal("1"), Decimal("1")), (Decimal("2"), Decimal("2"))),
+        ),
+    )
+
+    assert persisted.quantile is None
+    assert backtest_repository.saved_result is persisted.result
+    assert backtest_repository.failed_message is None
+    assert "quantile backtest interval contains corporate actions" in (
+        backtest_repository.updated_parameters[-1]["quantile_backtest_error"]
+    )
+
+
+def test_quantile_market_change_is_fail_closed_without_failing_main_run() -> None:
+    class ChangingQuantileDailyBarRepository(FakeDailyBarRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def list_for_factor_calculation(
+            self,
+            db: object,
+            **kwargs: object,
+        ) -> list[SimpleNamespace]:
+            self.calls += 1
+            rows = [
+                SimpleNamespace(
+                    symbol=symbol,
+                    security_type="stock",
+                    trade_date=trade_date,
+                    open=Decimal("10"),
+                    close=Decimal("10"),
+                )
+                for trade_date in (date(2026, 7, 1), date(2026, 7, 2))
+                for symbol in list(kwargs["symbols"])
+            ]
+            if self.calls == 4:
+                rows[-1].close = Decimal("11")
+            return rows
+
+    backtest_repository = FakeBacktestRepository()
+    service = DailyBacktestService(
+        daily_bar_repository=ChangingQuantileDailyBarRepository(),
+        backtest_repository=backtest_repository,
+        corporate_action_repository=FakeCorporateActionRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+    )
+
+    persisted = service.run(
+        SimpleNamespace(commit=lambda: None),
+        name="quantile-market-drift",
+        strategy_name="factor_selection",
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 2),
+        adjust_type="qfq",
+        initial_cash=Decimal("10000"),
+        commission_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        lot_size=100,
+        code_version="abc123",
+        data_version="market-qfq-20260702",
+        quantile_layer_signals=[
+            [TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+            [TargetWeightSignal(date(2026, 7, 1), "BBB.SH", Decimal("1"))],
+        ],
+        quantile_meta=QuantileBacktestMeta(
+            split_factor_name="momentum_20",
+            split_factor_version="v1-qfq",
+            n_layers=2,
+            max_assets_per_layer=None,
+            layer_bounds=((Decimal("1"), Decimal("1")), (Decimal("2"), Decimal("2"))),
+        ),
+    )
+
+    assert persisted.quantile is None
+    assert backtest_repository.saved_result is persisted.result
+    assert backtest_repository.failed_message is None
+    assert "quantile_backtest_data_changed" in (
+        backtest_repository.updated_parameters[-1]["quantile_backtest_error"]
+    )
+    assert backtest_repository.updated_parameters[-1]["quantile_data_snapshot"][
+        "verification_status"
+    ] == "changed"
 
 
 def test_backtest_service_rejects_unhandled_corporate_actions() -> None:

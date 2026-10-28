@@ -129,13 +129,13 @@ FACTOR_SQL: dict[str, str] = {
 
 #: Point-in-time status of each factor, carried into ``factor_definition``.
 #:
-#: ``value_earnings_yield`` is built from ``PE_TTM``, which switches on the
-#: disclosure date, so its value was knowable on the trade date itself.
+#: The historical sweep was collected after the fact. Even when a vendor field
+#: appears to switch on a disclosure date, it lacks a snapshot/revision chain.
 #: ``value_pb_mrq`` is built from ``PB_MRQ``, which switches on the *report
 #: period end* and therefore leaks up to 120 days of undisclosed balance
 #: sheet.  The pool classifier freezes the latter.
 PIT_STATUS: dict[str, str] = {
-    "value_earnings_yield": "point_in_time",
+    "value_earnings_yield": "unknown",
     "value_pb_mrq": "look_ahead",
 }
 
@@ -608,6 +608,10 @@ def _persist(
             long_short_forward_return_20d=_spread(row, "20d"),
             quantile_monotonicity_1d=_quantize(row.get("monotonicity_1d")),
             top_quantile_turnover=_quantize(row.get("top_quantile_turnover")),
+            evidence_eligibility="research_only",
+            evidence_eligibility_reason=(
+                "late valuation history lacks point-in-time snapshot and revision provenance"
+            ),
             code_version=code_version,
         )
         written += 1

@@ -18,7 +18,7 @@ wheels = [
 
 [[package]]
 name = "akshare"
-version = "1.18.64"
+version = "1.20.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "akracer", marker = "sys_platform == 'linux'" },
@@ -38,9 +38,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "xlrd" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/18/bc/9f9f9fc7e681d729f6ab1609ec614299829e2fe7bde36bbc85cb9b293c33/akshare-1.18.64.tar.gz", hash = "sha256:6ea525cc278204d5957e7bc1b68c93185ccecf004f7df81d9865982825fd94b9", size = 882455, upload-time = "2026-05-27T10:10:44.518Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/cf/fdc5acc86ab97d1e26f6da0ae0ab39b7db45eff7ae419be88bcdf3a1b426/akshare-1.20.1.tar.gz", hash = "sha256:c977bfc6134e51432ef21454d2a1d7f7e6f375b59c863454211bdfe020e5aad6", size = 990109, upload-time = "2026-10-27T16:15:41.437Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/eb/47ada0a3b7b7300f8e0d576a5b6a67e4bf88d05904f54d7f8b89dd109e8c/akshare-1.18.64-py3-none-any.whl", hash = "sha256:27792ca5b3dd4bee47fe83f212da7d3a9d0f43f327eef3beee5f2399e58eb390", size = 1105664, upload-time = "2026-05-27T10:10:42.805Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/5c/f2c66dcb68490260973ff10556f2d20876ca4f7002d95d2dcc4c17dae3b0/akshare-1.20.1-py3-none-any.whl", hash = "sha256:7c212a06fe033f63bff266f67631875df958ddbf435e51ec79a552a938af3067", size = 1204507, upload-time = "2026-10-27T16:15:39.457Z" },
 ]
 
 [[package]]
@@ -1062,8 +1062,8 @@ viz = [
 
 [package.metadata]
 requires-dist = [
-    { name = "akshare", marker = "extra == 'all'", specifier = ">=1.16.0" },
-    { name = "akshare", marker = "extra == 'data'", specifier = ">=1.16.0" },
+    { name = "akshare", marker = "extra == 'all'", specifier = ">=1.20.1" },
+    { name = "akshare", marker = "extra == 'data'", specifier = ">=1.20.1" },
     { name = "apscheduler", specifier = ">=3.11.0" },
     { name = "backtrader", marker = "extra == 'all'", specifier = ">=1.9.78.123" },
     { name = "backtrader", marker = "extra == 'backtest'", specifier = ">=1.9.78.123" },

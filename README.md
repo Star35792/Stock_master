@@ -153,7 +153,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 
 - `POST /api/v1/strategy-research/rolling-windows`
 - `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。可选 `quantile_backtest` 在每个测试窗内做分层回测。返回 `RollingBacktestResult`：各窗 `windows` + 跨窗拼接的 `combined` 组合净收益曲线（重叠窗 fail-closed 拒绝拼接、各窗仍独立可用）+ 非可交易声明）
-- `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源。可选 `quantile_backtest`：`split_factor_name/version` + `n_layers`(2–20) + `max_assets_per_layer` 按 split 因子在决策日横截面分桶，逐桶等权多头跑净收益曲线与 top–bottom 统计收益差，结果内嵌主运行 `parameters.quantile_backtest` 并随响应返回 `quantile`）
+- `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源。可选 `quantile_backtest`：`split_factor_name/version` + `n_layers`(2–20) + `max_assets_per_layer` 按 split 因子在决策日横截面分桶；当前仅接受 `weighting_mode=equal_weight_fully_invested`，其他模式 fail-fast，逐桶等权多头跑净收益曲线与 top–bottom 统计收益差；换层以 `explicit_zero_exit_v2` 显式退出旧成员，分层分支独立读取并双快照校验全量证券行情，结果内嵌主运行 `parameters.quantile_backtest` / `quantile_data_snapshot` 并随响应返回 `quantile`）
 - `POST /api/v1/strategy-research/factor-selection/backtests/batch`
 - 价格价值研究：`POST /api/v1/strategy-research/price-value/evaluate`
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`
@@ -243,8 +243,11 @@ A：自动同步任务记录警告并跳过，失败写入作业日志（作业�
 **Q：自动同步多久跑一次？**
 A：默认每小时检查一次（`AUTO_DATA_SYNC_INTERVAL_SECONDS=3600`，最小 60 秒）。首次用供应商历史全量包建立基线，之后只扫描近期包补缺失或修订；停机超过近期包覆盖范围会自动回补历史。上海时间 18:00 前不发布当天日线。
 
+**Q：如何采集 AKShare/Tushare 的分红日期？**
+A：在 `backend/.env` 设置 `CORPORATE_ACTION_EVIDENCE_SYNC_ENABLED=true`；AKShare 需安装 `backend` 的 `data` 可选依赖，Tushare 另需 `TUSHARE_TOKEN`。自动任务每轮独立采集缺日期证券，即使当轮日线同步失败仍可继续；默认每轮 AKShare 10 只、Tushare 至多 1 只，后者还受接口频次限制。手工补采可在 `backend/` 运行 `python -m scripts.ingest.collect_corporate_action_evidence --source akshare --symbol 600519.SH`。结果仅进入 `raw` 供核对，尚不发布可信公司行为或用于回测。
+
 **Q：自动同步会重建因子或前复权吗？**
-A：不会。自动任务只更新未复权日线，不自动重建前复权、因子、回测或交易，相关动作需显式运行 `backend/scripts/` 下对应脚本。
+A：会更新生产闭环内的前复权价格和日级价量因子，但只有当最新交易日的股票横截面覆盖率达到 95%、QFQ/curated 构建成功且核心因子通过发布闸门时才原子发布。自动链不触发研究回测、组合、风控或交易推演；历史回填和非生产因子仍需显式运行 `backend/scripts/` 下对应脚本。
 
 **Q：端口被占用 / DuckDB 写冲突？**
 A：DuckDB 服务应使用单个 worker；同一时间不要并行运行其他写库调度脚本。正常关闭会等待进行中的同步完成，避免中断写库。

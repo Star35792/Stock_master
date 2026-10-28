@@ -79,6 +79,8 @@ def stitch_equity_curves(
         raise ValueError("window_curves must not be empty")
     if len(window_curves) != len(window_costs):
         raise ValueError("window_curves and window_costs length mismatch")
+    if initial_cash <= 0:
+        raise ValueError("initial_cash must be positive")
 
     ordered_pairs = sorted(
         zip(window_curves, window_costs, strict=True),
@@ -92,10 +94,16 @@ def stitch_equity_curves(
     for curve, _ in ordered_pairs:
         if not curve:
             raise ValueError("each window curve must be non-empty")
+        previous_date: date | None = None
+        for trade_date, equity in curve:
+            if equity <= 0:
+                raise ValueError("window curve equity values must be positive")
+            if previous_date is not None and trade_date <= previous_date:
+                raise ValueError(
+                    "window curve trade dates must be strictly increasing"
+                )
+            previous_date = trade_date
         window_start = curve[0][0]
-        window_end = curve[-1][0]
-        if window_start > window_end:
-            raise ValueError("window curve is not chronologically ordered")
         if combined_dates:
             if window_start <= combined_dates[-1]:
                 raise ValueError(
@@ -104,11 +112,7 @@ def stitch_equity_curves(
                 )
         # Scale this window so it continues from the previous window's equity.
         opening_equity = curve[0][1]
-        scale = (
-            prev_equity / opening_equity
-            if opening_equity != 0
-            else Decimal(1)
-        )
+        scale = prev_equity / opening_equity
         for trade_date, equity in curve:
             combined_dates.append(trade_date)
             combined_equity.append(equity * scale)

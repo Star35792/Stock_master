@@ -50,12 +50,12 @@ def test_every_evidence_factor_is_inactive() -> None:
         assert spec.is_active is False, spec.name
 
 
-def test_value_factors_carry_the_audited_pit_status() -> None:
-    """``PB_MRQ`` leaks the balance sheet; ``PE_TTM`` does not."""
+def test_value_factors_keep_late_history_out_of_the_core_pool() -> None:
+    """Late history is unverified even when an individual field looks safe."""
     status = {
         (spec.name, spec.version): spec.pit_status for spec in all_evidence_factor_specs()
     }
-    assert status[("value_earnings_yield", "v2-valhist")] == PIT_POINT_IN_TIME
+    assert status[("value_earnings_yield", "v2-valhist")] == "unknown"
     assert status[("value_pb_mrq", "v2-valhist")] == PIT_LOOK_AHEAD
 
 
@@ -106,7 +106,7 @@ def test_registration_writes_pit_status_and_status() -> None:
         )
     )
     assert earnings is not None and pb is not None
-    assert earnings.pit_status == PIT_POINT_IN_TIME
+    assert earnings.pit_status == "unknown"
     assert pb.pit_status == PIT_LOOK_AHEAD
     assert earnings.is_active is False
     assert earnings.status == "active"

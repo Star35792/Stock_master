@@ -1,0 +1,58 @@
+{
+  "as_of_date": "2026-10-26",
+  "generated_at_utc": "2026-10-28T06:57:08.430591+00:00",
+  "status": "research_observation_only",
+  "factor": "volume_stability_20@v1-qfq",
+  "factor_run_ids": [
+    1293
+  ],
+  "direction": "higher",
+  "counts": {
+    "quality_and_status_eligible": 5311,
+    "risk_eligible": 4271,
+    "shortlist": 100,
+    "selected": 20
+  },
+  "filters": {
+    "list_date_on_or_before": "2026-06-26",
+    "special_treatment_status": "normal",
+    "liquidity_20_min_cny": "30000000",
+    "volatility_20_max": "0.0446184584",
+    "industry_current_max_names": 4
+  },
+  "research_weights": {
+    "invested": "0.8",
+    "cash": "0.2",
+    "per_symbol": "0.04"
+  },
+  "candidate_sha256": "139976c6b3734cf5c22898c0ef53fc5bb7a0b7f1d69e1d05e2d2a2bca98befa7",
+  "same_symbols_as_previous": true,
+  "symbols": [
+    "003006.SZ",
+    "300070.SZ",
+    "000800.SZ",
+    "002506.SZ",
+    "002697.SZ",
+    "601998.SH",
+    "600248.SH",
+    "688416.SH",
+    "000959.SZ",
+    "002247.SZ",
+    "002678.SZ",
+    "601225.SH",
+    "688599.SH",
+    "301333.SZ",
+    "000705.SZ",
+    "000652.SZ",
+    "002495.SZ",
+    "600859.SH",
+    "688720.SH",
+    "600073.SH"
+  ],
+  "limitations": [
+    "current ST and industry labels only",
+    "factor v1-qfq is frozen/research_only; no qualified core factor",
+    "historical corporate action and delisting gaps remain",
+    "research weights are illustrative, not execution orders"
+  ]
+}

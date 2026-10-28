@@ -1,7 +1,7 @@
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import Sequence, create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -131,6 +131,9 @@ def apply_schema_compatibility(bind: Engine) -> None:
             (
                 "long_short_forward_return_5d DECIMAL(24, 10)",
                 "long_short_forward_return_20d DECIMAL(24, 10)",
+                "evidence_eligibility VARCHAR(32) DEFAULT 'research_only'",
+                "evidence_eligibility_reason VARCHAR(500) "
+                "DEFAULT 'unverified_evidence_eligibility'",
             ),
         ),
         (
@@ -180,6 +183,23 @@ def apply_schema_compatibility(bind: Engine) -> None:
                         "SET status = 'active' WHERE status IS NULL"
                     )
                 )
+        if table == "factor.factor_profile" and "evidence_eligibility" in existing_columns:
+            with bind.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE factor.factor_profile SET evidence_eligibility = 'research_only' "
+                        "WHERE evidence_eligibility IS NULL"
+                    )
+                )
+        if table == "factor.factor_profile" and "evidence_eligibility_reason" in existing_columns:
+            with bind.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE factor.factor_profile "
+                        "SET evidence_eligibility_reason = 'unverified_evidence_eligibility' "
+                        "WHERE evidence_eligibility_reason IS NULL"
+                    )
+                )
 
     # Existing pre-artifact databases need an additive upgrade: create_all does
     # not add columns or indexes to tables that are already present. Keep the
@@ -222,6 +242,60 @@ def apply_schema_compatibility(bind: Engine) -> None:
             ))
 
 
+def ensure_duckdb_sequences(bind: Engine) -> None:
+    """Restore model id sequences/defaults after a CTAS-based control-plane slim.
+
+    DuckDB ``CREATE TABLE AS SELECT`` does not preserve primary-key sequences or
+    column defaults.  Every sequence is restarted strictly above the retained
+    table maximum, so a rebuilt control plane cannot reuse historical ids.
+    """
+    if bind.dialect.name != "duckdb":
+        return
+
+    from app.database.base import Base
+
+    bindings: list[tuple[str, str, str, str]] = []
+    for table in Base.metadata.sorted_tables:
+        for column in table.columns:
+            sequence = column.default if isinstance(column.default, Sequence) else None
+            if sequence is not None:
+                bindings.append(
+                    (table.schema or "main", table.name, column.name, sequence.name)
+                )
+
+    with bind.begin() as conn:
+        existing = set(
+            conn.execute(text("SELECT sequence_name FROM duckdb_sequences()"))
+            .scalars()
+            .all()
+        )
+        for schema, table, column, sequence_name in bindings:
+            table_exists = conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_schema=:schema AND table_name=:table"
+                ),
+                {"schema": schema, "table": table},
+            ).scalar_one()
+            if not table_exists:
+                continue
+            if sequence_name not in existing:
+                maximum = conn.execute(
+                    text(f'SELECT coalesce(max("{column}"), 0) FROM "{schema}"."{table}"')
+                ).scalar_one()
+                start = int(maximum or 0) + 1
+                conn.execute(
+                    text(f'CREATE SEQUENCE "{sequence_name}" START {start}')
+                )
+                existing.add(sequence_name)
+            conn.execute(
+                text(
+                    f'ALTER TABLE "{schema}"."{table}" '
+                    f'ALTER COLUMN "{column}" SET DEFAULT nextval(\'{sequence_name}\')'
+                )
+            )
+
+
 def initialize_database(bind: Engine | None = None) -> None:
     """Create missing schemas/tables and upgrade supported legacy layouts."""
     resolved_bind = bind or engine
@@ -233,6 +307,7 @@ def initialize_database(bind: Engine | None = None) -> None:
     from app.database.base import Base
 
     Base.metadata.create_all(bind=resolved_bind)
+    ensure_duckdb_sequences(resolved_bind)
     apply_schema_compatibility(resolved_bind)
 
 

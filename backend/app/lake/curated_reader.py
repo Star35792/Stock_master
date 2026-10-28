@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import duckdb
 
@@ -41,11 +42,17 @@ class CuratedBar:
 class CuratedDailyBarReader:
     """Reads forward-adjusted bars from the curated lake for factor runs."""
 
-    def __init__(self, lake: DataLake | None = None) -> None:
+    def __init__(
+        self,
+        lake: DataLake | None = None,
+        *,
+        dataset_path: str | Path | None = None,
+    ) -> None:
         self.lake = lake or DataLake()
+        self.dataset_path = Path(dataset_path) if dataset_path is not None else None
 
     def _glob(self) -> str:
-        target = self.lake.root / "curated" / "prices_qfq"
+        target = self.dataset_path or self.lake.root / "curated" / "prices_qfq"
         if not target.exists():
             raise LookupError(
                 "curated prices_qfq not built; run build_curated_layer prices_qfq"

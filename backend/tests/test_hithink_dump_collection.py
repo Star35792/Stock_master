@@ -6,7 +6,12 @@ import pytest
 
 from app.data_sources.hithink_dump import HithinkDump, HithinkDumpKind
 from app.repositories.raw import RawDailyBarImportRepository
-from app.services.hithink_dump_collection import HithinkDumpCollectionService
+from app.services.hithink_dump_collection import (
+    HithinkDumpCollectionService,
+    _bulk_import_adjustments_duckdb,
+    _to_market_action,
+    _valid_market_action,
+)
 
 
 class FakeBatch:
@@ -229,3 +234,56 @@ def test_bulk_dump_import_rejects_conflicting_rows_in_one_release(tmp_path: Path
             path=path,
         )
     assert connection.execute("SELECT count(*) FROM raw.daily_bar").fetchone()[0] == 0
+
+
+def test_zero_adjustment_is_kept_raw_but_not_published_as_rights_issue(
+    tmp_path: Path,
+) -> None:
+    connection = duckdb.connect()
+    connection.execute("CREATE SCHEMA raw")
+    connection.execute("CREATE SCHEMA market")
+    connection.execute(
+        "CREATE TABLE raw.corporate_action (batch_id BIGINT, source_name VARCHAR, "
+        "symbol VARCHAR, ex_date DATE, dividend_per_share DECIMAL(18,6), "
+        "per_share_bonus DECIMAL(18,8), allotment_ratio DECIMAL(18,8), "
+        "allotment_price DECIMAL(18,6), raw_payload JSON, row_hash VARCHAR)"
+    )
+    connection.execute(
+        "CREATE TABLE market.corporate_action (symbol VARCHAR, ex_date DATE, "
+        "action_type VARCHAR, cash_dividend DECIMAL(18,6), "
+        "bonus_share_ratio DECIMAL(18,8), rights_issue_ratio DECIMAL(18,8), "
+        "rights_issue_price DECIMAL(18,6), source_name VARCHAR, raw_payload JSON, "
+        "UNIQUE(symbol, ex_date, action_type, source_name))"
+    )
+    source = tmp_path / "adjustments.parquet"
+    connection.execute(
+        "COPY (SELECT * FROM (VALUES "
+        "('600000.SH', '600000', 1784217600000::BIGINT, 0.0, 0.0, 0.0, 0.0, 'CNY'), "
+        "('600001.SH', '600001', 1784217600000::BIGINT, 0.5, 0.0, 0.0, 0.0, 'CNY')"
+        ") AS t(thscode, ticker, ex_date_ms, dividend_per_share, "
+        "per_share_bonus, allotment_ratio, allotment_price, currency)) "
+        "TO ? (FORMAT PARQUET)",
+        [str(source)],
+    )
+    _bulk_import_adjustments_duckdb(
+        connection, batch_id=1, source_name="hithink", path=source
+    )
+    assert connection.execute("SELECT count(*) FROM raw.corporate_action").fetchone()[0] == 2
+    assert connection.execute(
+        "SELECT symbol, action_type FROM market.corporate_action"
+    ).fetchall() == [("600001.SH", "cash_dividend")]
+
+
+def test_zero_adjustment_is_invalid_in_row_import_path() -> None:
+    empty = _to_market_action(
+        "hithink",
+        {"thscode": "600000.SH", "ex_date_ms": 1784217600000,
+         "dividend_per_share": 0, "per_share_bonus": 0,
+         "allotment_ratio": 0, "allotment_price": 0},
+    )
+    assert _valid_market_action(empty) is False
+    cash = _to_market_action(
+        "hithink",
+        {**empty["raw_payload"], "dividend_per_share": 0.5},
+    )
+    assert _valid_market_action(cash) is True

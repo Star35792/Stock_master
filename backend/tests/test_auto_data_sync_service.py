@@ -102,10 +102,31 @@ class FakeCollection:
         return 2
 
 
-def make_service(source=None):
+class CoverageRepository(AutoDataSyncRepository):
+    def __init__(self, rate: float = 1.0):
+        self.rate = rate
+
+    def market_coverage_on_date(self, db, *, trade_date):
+        eligible = 100
+        covered = int(eligible * self.rate)
+        return {
+            "trade_date": trade_date.isoformat(),
+            "eligible_stocks": eligible,
+            "covered_stocks": covered,
+            "stock_coverage_rate": self.rate,
+            "by_exchange": {"SH": {"eligible": eligible, "covered": covered}},
+            "index_rows": 0,
+        }
+
+
+def make_service(source=None, *, coverage_rate: float = 1.0):
     collection = FakeCollection(source)
     reference = FakeReference()
-    service = AutoDataSyncService(collection=collection, reference=reference)
+    service = AutoDataSyncService(
+        collection=collection,
+        reference=reference,
+        repository=CoverageRepository(coverage_rate),
+    )
     return service, collection, reference
 
 
@@ -135,7 +156,7 @@ def seed_success(db, through):
 
 def test_first_sync_imports_full_then_recent_with_auditable_watermark(db):
     service, collection, reference = make_service()
-    service.sync(db, cutoff=date(2026, 9, 21))
+    result = service.sync(db, cutoff=date(2026, 9, 21))
 
     assert collection.collected == [HithinkDumpKind.FULL_DAILY, HithinkDumpKind.RECENT_DAILY]
     assert reference.calls == 1
@@ -148,6 +169,45 @@ def test_first_sync_imports_full_then_recent_with_auditable_watermark(db):
     assert job.metadata_["skipped_rows"] == 14
     assert job.metadata_["market_rows"] == 4
     assert AutoDataSyncRepository().completed_through(db) == date(2026, 9, 21)
+    assert result.advanced is True
+    assert result.coverage["stock_coverage_rate"] == 1.0
+
+
+def test_incomplete_latest_cross_section_does_not_advance_watermark(db):
+    seed_success(db, date(2026, 9, 21))
+    service, _, _ = make_service(coverage_rate=0.90)
+
+    with pytest.raises(ValueError, match="cross-section is incomplete"):
+        service.sync(db, cutoff=date(2026, 9, 22))
+
+    assert jobs(db)[-1].status == "failed"
+    assert AutoDataSyncRepository().completed_through(db) == date(2026, 9, 21)
+
+
+def test_completed_through_uses_started_at_not_rebuilt_sequence_id(db):
+    db.add_all(
+        [
+            JobLog(
+                id=900,
+                job_name=AUTO_DATA_SYNC_JOB,
+                job_type="import",
+                status="success",
+                started_at=datetime(2026, 9, 21, tzinfo=UTC),
+                metadata_={"end_date": "2026-09-21"},
+            ),
+            JobLog(
+                id=5,
+                job_name=AUTO_DATA_SYNC_JOB,
+                job_type="import",
+                status="success",
+                started_at=datetime(2026, 9, 22, tzinfo=UTC),
+                metadata_={"end_date": "2026-09-22"},
+            ),
+        ]
+    )
+    db.commit()
+
+    assert AutoDataSyncRepository().completed_through(db) == date(2026, 9, 22)
 
 
 def test_success_watermark_uses_recent_only_and_does_not_regress(db):

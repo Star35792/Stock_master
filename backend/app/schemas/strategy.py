@@ -173,6 +173,15 @@ class QuantileBacktestRequest(BaseModel):
     max_assets_per_layer: int | None = Field(default=None, ge=1)
     weighting_mode: WeightingMode = WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
 
+    @model_validator(mode="after")
+    def validate_weighting_mode(self) -> QuantileBacktestRequest:
+        if self.weighting_mode is not WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED:
+            raise ValueError(
+                "quantile backtest only supports "
+                "weighting_mode=equal_weight_fully_invested"
+            )
+        return self
+
 
 class FactorSelectionBacktestRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)

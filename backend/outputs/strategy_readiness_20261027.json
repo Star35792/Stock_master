@@ -1,0 +1,60 @@
+{
+  "holdout_window": [
+    "2026-05-06",
+    "2026-10-19"
+  ],
+  "factor_qualifications": [
+    {
+      "factor_version": "v1-qfq",
+      "pool": "frozen",
+      "reasons": [
+        "trade_date_count=119 < 200",
+        "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+        "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+      ],
+      "trade_date_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only"
+    },
+    {
+      "factor_version": "v2-qfq-2y",
+      "pool": "observation",
+      "reasons": [
+        "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+      ],
+      "trade_date_count": 483,
+      "pit_status": "point_in_time",
+      "evidence_eligibility": "research_only"
+    }
+  ],
+  "corporate_actions": {
+    "count": 4197,
+    "zero_value_events_in_database": 50,
+    "by_type": {
+      "bonus_share": 40,
+      "cash_dividend": 3806,
+      "mixed": 350,
+      "rights_issue": 1
+    },
+    "missing_record_date": 4197,
+    "missing_payment_date": 4197,
+    "missing_source_event_id": 4197
+  },
+  "historical_status_event_count": 0,
+  "industry_history_sources": {
+    "current_label_backfill_20261024": 5579
+  },
+  "security_count": 7729,
+  "securities_with_delist_date": 0,
+  "independent_backtest_status": "blocked",
+  "blockers": [
+    "research_factor_version_v1_not_core",
+    "selection_and_backtest_screens_not_identical",
+    "corporate_action_event_accounting_not_implemented",
+    "delisted_price_coverage_not_certified",
+    "historical_security_status_missing",
+    "historical_industry_labels_not_point_in_time",
+    "corporate_action_entitlement_or_payment_date_missing",
+    "existing_zero_value_corporate_actions_require_audit"
+  ]
+}

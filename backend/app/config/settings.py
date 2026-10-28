@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     research_db_path: str = "data/research.duckdb"
 
     akshare_timeout_seconds: int = 30
+    tushare_token: str | None = Field(default=None, repr=False)
+    corporate_action_evidence_sync_enabled: bool = False
+    corporate_action_akshare_symbols_per_run: int = Field(default=10, ge=0, le=100)
+    corporate_action_tushare_symbols_per_run: int = Field(default=1, ge=0, le=1)
+    delist_evidence_sync_enabled: bool = False
+    turnover_evidence_sync_enabled: bool = False
+    turnover_evidence_symbols_per_run: int = Field(default=20, ge=0, le=100)
 
     hithink_finance_api_key: str | None = Field(default=None, repr=False)
     hithink_finance_base_url: str = "https://fuyao.aicubes.cn"

@@ -15,6 +15,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy.orm import Session
@@ -35,6 +36,7 @@ from app.services import (
     SentimentFactorService,
     ValuationFactorService,
 )
+from app.services.basic_price_volume_factors import BASIC_FACTOR_SPECS
 from app.services.job_logging import logged_job
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,11 @@ class FactorBatchResult:
     def failed(self) -> list[str]:
         return [name for name, svc in self.services.items() if svc.get("status") == "failed"]
 
+    @property
+    def empty(self) -> list[str]:
+        """Services that completed normally but produced no observations."""
+        return [name for name, svc in self.services.items() if svc.get("status") == "empty"]
+
 
 # (service_class, takes_factor_names)
 _FACTOR_SERVICES: list[tuple[type, bool]] = [
@@ -70,6 +77,15 @@ _FACTOR_SERVICES: list[tuple[type, bool]] = [
     (CrowdingFactorService, False),
 ]
 
+# Daily collection computes every price/volume factor supported by the trusted
+# curated bars. Turnover history is currently absent from that dataset.
+DAILY_PRICE_VOLUME_FACTORS = tuple(
+    spec.name
+    for spec in BASIC_FACTOR_SPECS
+    if spec.name not in {"turnover_rate", "turnover_percentile_120"}
+)
+DAILY_FACTOR_SET_VERSION = "price-volume-16-v1"
+
 
 def run_all_factors(
     *,
@@ -79,6 +95,7 @@ def run_all_factors(
     adjust_type: str = "qfq",
     code_version: str = "local",
     release_id: str | None = None,
+    curated_path: str | Path | None = None,
     session_factory: Callable[[], Session] = SessionLocal,
     job_log_repository: JobLogRepository | None = None,
 ) -> FactorBatchResult:
@@ -103,13 +120,14 @@ def run_all_factors(
                 "symbols_count": len(symbols) if symbols is not None else None,
                 "code_version": code_version,
                 "release_id": release_id,
+                "curated_path": str(curated_path) if curated_path is not None else None,
             },
             repository=job_log_repository,
         ) as job:
             # Serve qfq bars from the curated Parquet layer when enabled. Only
             # qfq is materialized; any other adjust_type keeps the ORM path.
             curated_reader = (
-                CuratedDailyBarReader()
+                CuratedDailyBarReader(dataset_path=curated_path)
                 if settings.factor_reads_curated and adjust_type == "qfq"
                 else None
             )
@@ -126,7 +144,11 @@ def run_all_factors(
                             "release_id": release_id,
                         }
                         if takes_factor_names:
-                            kwargs["factor_names"] = None
+                            kwargs["factor_names"] = (
+                                list(DAILY_PRICE_VOLUME_FACTORS)
+                                if service_cls is BasicPriceVolumeFactorService
+                                else None
+                            )
                         service_kwargs = (
                             {"daily_bar_repository": curated_reader}
                             if curated_reader is not None
@@ -134,9 +156,12 @@ def run_all_factors(
                         )
                         service_result = service_cls(**service_kwargs).run(db2, **kwargs)
                         db2.commit()
+                        total_rows = getattr(service_result, "total_rows", 0)
                         result.services[name] = {
-                            "status": "success",
-                            "total_rows": getattr(service_result, "total_rows", 0),
+                            # Zero rows is not a failed transaction, but it is
+                            # not evidence that a factor family is available.
+                            "status": "success" if total_rows > 0 else "empty",
+                            "total_rows": total_rows,
                             "input_rows": getattr(service_result, "input_rows", 0),
                             "run_ids": list(getattr(service_result, "run_ids", {}).values()),
                         }
@@ -153,11 +178,12 @@ def run_all_factors(
                         }
             job.rows_inserted = result.total_rows
             job.rows_failed = len(result.failed)
-            if result.failed:
+            if result.failed or result.empty:
                 job.status = "partial"
             job.metadata_ = {
                 **(job.metadata_ or {}),
                 "failed_services": result.failed,
+                "empty_services": result.empty,
                 "services": {
                     name: svc.get("total_rows", 0) for name, svc in result.services.items()
                 },

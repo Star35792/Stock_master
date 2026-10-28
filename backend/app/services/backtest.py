@@ -550,10 +550,11 @@ class DailyBacktestService:
                 )
             self.backtest_repository.save_result(artifacts_db, run=run, result=result)
             quantile_result = self._maybe_run_quantile_layers(
+                db=db,
                 artifacts_db=artifacts_db,
                 run=run,
-                execution_bars=execution_bars,
-                execution_calendar=execution_calendar,
+                start_date=start_date,
+                end_date=end_date,
                 fee_model=fee_model,
                 portfolio_constraints=portfolio_constraints,
                 security_profiles=security_profiles,
@@ -609,10 +610,11 @@ class DailyBacktestService:
     def _maybe_run_quantile_layers(
         self,
         *,
+        db: Session,
         artifacts_db: Session,
         run: Any,
-        execution_bars: list[Any],
-        execution_calendar: dict[str, list[date]],
+        start_date: date,
+        end_date: date,
         fee_model: Any,
         portfolio_constraints: PortfolioConstraints | None,
         security_profiles: dict[str, tuple[str, str]] | None,
@@ -623,7 +625,65 @@ class DailyBacktestService:
     ) -> "QuantileBacktestResult | None":
         if layer_signals is None or quantile_meta is None:
             return None
+        quantile_data_snapshot: dict[str, Any] | None = None
         try:
+            normalized_layer_signals = [
+                [
+                    TargetWeightSignal(
+                        signal_date=signal.signal_date,
+                        symbol=signal.symbol.upper(),
+                        target_weight=signal.target_weight,
+                    )
+                    for signal in signals
+                ]
+                for signals in layer_signals
+            ]
+            quantile_symbols = sorted(
+                {
+                    signal.symbol
+                    for signals in normalized_layer_signals
+                    for signal in signals
+                }
+            )
+            if not quantile_symbols:
+                raise ValueError("quantile backtest produced no target symbols")
+            with self._research_read(
+                db, start_date=start_date, end_date=end_date
+            ) as (reader, _read_scope):
+                corporate_actions = reader.list_corporate_actions(
+                    symbols=quantile_symbols,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                if corporate_actions:
+                    raise ValueError(
+                        "quantile backtest interval contains corporate actions; "
+                        "event accounting is not implemented"
+                    )
+                execution_bars = reader.list_daily_bars(
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust_type=_EXECUTION_ADJUST_TYPE,
+                    symbols=quantile_symbols,
+                    quality_status="trusted",
+                )
+                execution_calendar = reader.load_execution_calendar(
+                    symbols=quantile_symbols,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            snapshot_before = _build_market_snapshot(
+                bars=execution_bars,
+                corporate_actions=corporate_actions,
+                execution_calendar=execution_calendar,
+                start_date=start_date,
+                end_date=end_date,
+                symbols=quantile_symbols,
+            )
+            quantile_data_snapshot = {
+                **snapshot_before,
+                "verification_status": "pending",
+            }
             result = self._run_quantile_layers(
                 execution_bars=execution_bars,
                 execution_calendar=execution_calendar,
@@ -632,21 +692,76 @@ class DailyBacktestService:
                 security_profiles=security_profiles,
                 initial_cash=initial_cash,
                 lot_size=lot_size,
-                layer_signals=layer_signals,
+                layer_signals=normalized_layer_signals,
                 quantile_meta=quantile_meta,
             )
+            with self._research_verify_read(
+                db, start_date=start_date, end_date=end_date
+            ) as (verification_reader, verification_scope):
+                corporate_actions_after = verification_reader.list_corporate_actions(
+                    symbols=quantile_symbols,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                execution_bars_after = verification_reader.list_daily_bars(
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust_type=_EXECUTION_ADJUST_TYPE,
+                    symbols=quantile_symbols,
+                    quality_status="trusted",
+                )
+                execution_calendar_after = verification_reader.load_execution_calendar(
+                    symbols=quantile_symbols,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            snapshot_after = _build_market_snapshot(
+                bars=execution_bars_after,
+                corporate_actions=corporate_actions_after,
+                execution_calendar=execution_calendar_after,
+                start_date=start_date,
+                end_date=end_date,
+                symbols=quantile_symbols,
+            )
+            verification_status = (
+                "verified"
+                if snapshot_after["sha256"] == snapshot_before["sha256"]
+                else "changed"
+            )
+            quantile_data_snapshot = {
+                **snapshot_before,
+                "verification_status": verification_status,
+                "verification_scope": verification_scope,
+                "post_run_sha256": snapshot_after["sha256"],
+            }
+            if verification_status == "changed":
+                raise BacktestDataChangedError(
+                    "quantile_backtest_data_changed: trusted market data changed "
+                    "while the quantile layers were running"
+                )
             self.backtest_repository.update_run_parameters(
                 artifacts_db,
                 run=run,
-                extra={"quantile_backtest": quantile_result_to_json(result)},
+                extra={
+                    "quantile_backtest": quantile_result_to_json(result),
+                    "quantile_data_snapshot": quantile_data_snapshot,
+                },
             )
             artifacts_db.commit()
             return result
         except Exception as exc:  # layer run is additive; never fail the main run
+            extra: dict[str, Any] = {"quantile_backtest_error": str(exc)}
+            if quantile_data_snapshot is not None:
+                if quantile_data_snapshot["verification_status"] == "pending":
+                    quantile_data_snapshot = {
+                        **quantile_data_snapshot,
+                        "verification_status": "not_verified",
+                    }
+                extra["quantile_data_snapshot"] = quantile_data_snapshot
             self.backtest_repository.update_run_parameters(
                 artifacts_db,
                 run=run,
-                extra={"quantile_backtest_error": str(exc)},
+                extra=extra,
             )
             artifacts_db.commit()
             return None
@@ -692,7 +807,8 @@ class DailyBacktestService:
             bounds = quantile_meta.layer_bounds[layer_index]
             date_symbols: dict[date, set[str]] = {}
             for sig in signals:
-                date_symbols.setdefault(sig.signal_date, set()).add(sig.symbol)
+                if sig.target_weight > 0:
+                    date_symbols.setdefault(sig.signal_date, set()).add(sig.symbol)
             universe_size = max(
                 (len(group) for group in date_symbols.values()), default=0
             )
@@ -704,7 +820,7 @@ class DailyBacktestService:
                     universe_size=universe_size,
                     asset_count=sum(len(group) for group in date_symbols.values()),
                     top_asset_symbols=tuple(
-                        sorted({sig.symbol for sig in signals})[:10]
+                        sorted({sig.symbol for sig in signals if sig.target_weight > 0})[:10]
                     ),
                     equity_curve=tuple(engine_result.equity_curve),
                     total_return=performance.total_return,

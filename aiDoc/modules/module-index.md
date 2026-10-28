@@ -5,7 +5,7 @@
 | 模块 | 当前职责 |
 | --- | --- |
 | `api` | HTTP 语义、参数校验、响应模型 |
-| `services` | 导入、构建、因子、批量因子截面诊断、回测、组合、风控、模拟盘等业务流程 |
+| `services` | 导入、构建、因子、批量因子截面诊断（含证据资格汇总）、回测、组合、风控、模拟盘等业务流程 |
 | `factors` | 因子分类常量与因子定义目录预注册（registry） |
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |
 | `models` | ORM 表结构 |
@@ -35,7 +35,7 @@
 - `raw`：导入批次、原始行情、原始财务、原始公司行为、vendor snapshot。
 - `market`：证券、交易日历、可信日线、复权因子、公司行为、另类数据、估值快照。证券名称做包含匹配，旧 DuckDB 名称索引由启动兼容升级移除；研究估值观察值通过批次标记与通用估值因子隔离。
 - `fundamental`：财务报表和指标。
-- `factor`：因子定义、运行、值、profile。
+- `factor`：因子定义、运行、值、profile；profile 的证据资格独立于定义 PIT 状态，默认仅研究用途，核心池还要求明确的 `strategy_eligible` 资格。
 - `strategy`：回测运行、成交、净值、持仓、绩效，以及训练产物关联；被回测引用的训练产物由外键阻止删除，不静默置空血缘。
 - `research`：目前只存在于温层 Parquet，**不在控制面**。`research.valuation_history` 是东财估值历史序列，全部行 `pit_verified=false`，`pb_mrq` 按报告期末切换、最多前视 120 天因而不可作为可交易证据。判定标准与现有表清单见 `aiDoc/modules/schema-plan.md` §17。
 - `portfolio`：组合计划和目标。

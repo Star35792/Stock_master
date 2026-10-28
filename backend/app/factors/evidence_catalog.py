@@ -124,11 +124,11 @@ _VALUE_SPECS: tuple[EvidenceFactorSpec, ...] = (
         display_name="Earnings yield (1/PE_TTM)",
         description=(
             "正 PE 股票的盈利收益率 1/PE_TTM。价值家族的标准定义：数值越大"
-            "越便宜。PE_TTM 按披露日切换，输入在交易日当天已知。"
+            "越便宜。历史回填为事后观测，当前仅限研究证据。"
         ),
         category="valuation",
         inputs=["research.valuation_history.pe_ttm"],
-        pit_status=PIT_POINT_IN_TIME,
+        pit_status="unknown",
         is_active=False,
     ),
     EvidenceFactorSpec(

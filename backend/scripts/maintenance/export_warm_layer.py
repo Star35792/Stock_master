@@ -95,7 +95,11 @@ def export_table(
 ) -> ExportResult:
     """把一张表按年月分区导出为 Parquet，并写 manifest。"""
     output_dir = warm_root / release_tag / schema / table
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir.exists():
+        raise FileExistsError(
+            f"release table already exists; use a new release tag: {output_dir}"
+        )
+    output_dir.mkdir(parents=True, exist_ok=False)
 
     fingerprint = _table_fingerprint(con, schema, table, date_column)
     logger.info(
@@ -211,6 +215,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="本次导出 release tag",
     )
     parser.add_argument(
+        "--base-release-tag",
+        help="可选父 release；用于把控制面热窗口发布为可继承历史的 partial release",
+    )
+    parser.add_argument(
+        "--snapshot-table",
+        action="append",
+        default=[],
+        metavar="SCHEMA.TABLE",
+        help=(
+            "父 release 存在时，显式声明本次完整覆盖父层的表；"
+            "未声明的已导出表按 delta 与父层合并。可重复传入。"
+        ),
+    )
+    parser.add_argument(
         "--skip-verify",
         action="store_true",
         help="跳过 Parquet 行数校验",
@@ -223,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     db_path = Path(args.db_path)
     warm_root = Path(args.warm_root)
     release_tag = args.release_tag
+    snapshot_tables = set(args.snapshot_table)
 
     if not db_path.exists():
         logger.error("数据库不存在: %s", db_path)
@@ -254,12 +273,20 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = {
         "release_tag": release_tag,
+        "base_release_tag": args.base_release_tag,
+        "partial_release": bool(args.base_release_tag),
         "db_path": str(db_path.resolve()),
         "warm_root": str(warm_root.resolve()),
         "tables": [
             {
                 "schema": r.schema,
                 "table": r.table,
+                "mode": (
+                    "snapshot"
+                    if not args.base_release_tag
+                    or f"{r.schema}.{r.table}" in snapshot_tables
+                    else "delta"
+                ),
                 "row_count": r.row_count,
                 "min_date": str(r.min_date) if r.min_date else None,
                 "max_date": str(r.max_date) if r.max_date else None,

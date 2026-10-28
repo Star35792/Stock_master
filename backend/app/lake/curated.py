@@ -139,6 +139,7 @@ class CuratedLayer:
         factor_source_name: str = "hithink_finance_dump",
         factor_version: str | None = "v1",
         connection: duckdb.DuckDBPyConnection | None = None,
+        publish: bool = True,
     ) -> CuratedDatasetResult:
         """Materialize forward-adjusted OHLCV from live DuckDB tables.
 
@@ -152,8 +153,10 @@ class CuratedLayer:
         unless ``connection`` is supplied (e.g. a ``WarmLayerStore`` connection that
         merges parquet history with the control-plane hot window).
 
-        The write is idempotent: it writes to a temporary directory and atomically
-        replaces ``curated/prices_qfq`` on success.
+        The write is idempotent: it writes to a temporary directory. By default
+        that directory atomically replaces ``curated/prices_qfq`` on success.
+        Daily orchestration can pass ``publish=False`` to certify the staged
+        dataset before making it visible to readers.
         """
         target = self.root / "prices_qfq"
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
@@ -246,8 +249,35 @@ class CuratedLayer:
         # read_parquet handles the per-thread output files fine.
         if own_connection:
             _compact_partitions(temp_target)
-        _replace_directory(temp_target, target)
-        return _result("prices_qfq", target, stats)
+        if publish:
+            _replace_directory(temp_target, target)
+            result_path = target
+        else:
+            result_path = temp_target
+        return _result("prices_qfq", result_path, stats)
+
+    def publish_prices_qfq(
+        self, staged: CuratedDatasetResult
+    ) -> CuratedDatasetResult:
+        """Atomically publish a previously certified ``prices_qfq`` staging tree."""
+        source = Path(staged.path).resolve()
+        root = self.root.resolve()
+        if source.parent != root or not source.name.startswith(".prices_qfq.tmp-"):
+            raise ValueError(f"invalid prices_qfq staging path: {source}")
+        if not source.exists():
+            raise FileNotFoundError(f"prices_qfq staging path does not exist: {source}")
+        target = self.root / "prices_qfq"
+        _replace_directory(source, target)
+        return CuratedDatasetResult(
+            dataset=staged.dataset,
+            path=str(target.resolve()),
+            row_count=staged.row_count,
+            min_date=staged.min_date,
+            max_date=staged.max_date,
+            created_at=staged.created_at,
+            release_id=staged.release_id,
+            checksum=staged.checksum,
+        )
 
     def build_fundamentals_pit(self, source: str | Path) -> CuratedDatasetResult:
         """Flatten financial statements into typed, point-in-time columns.

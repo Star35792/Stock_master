@@ -28,6 +28,9 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from sqlalchemy import create_engine
+
+from app.database.session import ensure_duckdb_sequences
 
 logging.basicConfig(
     level=logging.INFO,
@@ -128,6 +131,25 @@ def _copy_sequences(
         target.execute(sql)
         created.append(name)
     return created
+
+
+def _restore_all_defaults(
+    source: duckdb.DuckDBPyConnection,
+    target: duckdb.DuckDBPyConnection,
+) -> None:
+    """Retry defaults after sequences exist in the target database."""
+    rows = source.execute(
+        """
+        SELECT table_schema, table_name
+        FROM information_schema.tables
+        WHERE table_catalog = current_database()
+          AND table_type = 'BASE TABLE'
+        ORDER BY table_schema, table_name
+        """
+    ).fetchall()
+    for schema, table in rows:
+        if _table_exists(target, schema, table):
+            _copy_defaults(source, target, schema, table)
 
 
 def _copy_defaults(
@@ -395,6 +417,7 @@ def main(argv: list[str] | None = None) -> int:
             sequences = _copy_sequences(source_con, target_con)
             if sequences:
                 logger.info("Copied %s sequence(s)", len(sequences))
+            _restore_all_defaults(source_con, target_con)
             hot_window_stats = _copy_hot_window(source_con, target_con, cutoff_date)
         finally:
             target_con.close()
@@ -405,6 +428,15 @@ def main(argv: list[str] | None = None) -> int:
         db_path.rename(swapped)
         slim_path.rename(db_path)
         swapped.unlink()
+
+        # CTAS drops model id sequences/defaults. Recreate them above each
+        # retained table maximum before the slimmed database is handed back to
+        # the application.
+        repaired_engine = create_engine(f"duckdb:///{db_path.as_posix()}")
+        try:
+            ensure_duckdb_sequences(repaired_engine)
+        finally:
+            repaired_engine.dispose(close=True)
 
         summary = {
             "original_db": str(db_path),

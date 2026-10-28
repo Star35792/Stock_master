@@ -453,6 +453,12 @@ def _persist(session, daily: list[dict[str, object]], version: str, code_version
             long_short_forward_return_20d=_spread(row, "20d"),
             quantile_monotonicity_1d=_quantize(row.get("monotonicity_1d")),
             top_quantile_turnover=_quantize(row.get("top_quantile_turnover")),
+            # This flag certifies the input provenance, not the strategy's
+            # out-of-sample performance or the backtest universe.
+            evidence_eligibility="strategy_eligible",
+            evidence_eligibility_reason=(
+                "warm price-volume inputs use only trusted historical market observations"
+            ),
             code_version=code_version,
         )
         written += 1

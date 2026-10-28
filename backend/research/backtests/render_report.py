@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import json
-from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[3]
-OUT = ROOT / "outputs" / "backtest"
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ROOT = BACKEND_DIR.parent
+OUT = BACKEND_DIR / "outputs" / "backtest"
 DOC = ROOT / "aiDoc" / "data"
-STAMP = "2024-10-14_2026-10-14_20d_top20"
+STAMP = "2024-10-14_2026-10-14_20d_top20_intent"
+INTENT_MANIFEST = (
+    ROOT
+    / "deliverables"
+    / "research"
+    / "backtests"
+    / "20261020-low-price-rebound-intent-manifest.json"
+)
 
 
 def load():
@@ -19,7 +26,10 @@ def load():
     equity = equity.set_index("trade_date")
     picks = pd.read_csv(OUT / f"picks_{STAMP}.csv", encoding="utf-8-sig", parse_dates=["trade_date"])
     summary = json.loads((OUT / f"summary_{STAMP}.json").read_text(encoding="utf-8"))
-    period = pd.read_csv(OUT / "period_returns_20d_top20.csv", encoding="utf-8-sig")
+    period_path = OUT / "period_returns_20d_top20.csv"
+    period = (
+        pd.read_csv(period_path, encoding="utf-8-sig") if period_path.exists() else None
+    )
     return equity, picks, summary, period
 
 
@@ -124,7 +134,7 @@ def svg_monthly(equity: pd.DataFrame) -> str:
 
     bar_w = inner_w / len(vals) * 0.66
     parts = []
-    for i, (lab, v) in enumerate(zip(labels, vals)):
+    for i, (lab, v) in enumerate(zip(labels, vals, strict=True)):
         cx = pad_l + inner_w * (i + 0.5) / len(vals)
         top = y(max(v, 0))
         bottom = y(min(v, 0))
@@ -151,15 +161,6 @@ def svg_monthly(equity: pd.DataFrame) -> str:
 </svg>"""
 
 
-SENS = [
-    ("10 日 / Top20", 0.6328, 0.2906, -0.2043),
-    ("20 日 / Top20（基准配置）", 0.2475, 0.1220, -0.1955),
-    ("40 日 / Top20", 0.1234, 0.0624, -0.1583),
-    ("20 日 / Top10", 0.2020, 0.1005, -0.2687),
-    ("20 日 / Top30", 0.2629, 0.1291, -0.1920),
-]
-
-
 def main() -> None:
     equity, picks, summary, period = load()
     met = summary["metrics"]
@@ -175,7 +176,7 @@ def main() -> None:
     md.append("")
     md.append("**回测区间**：2024-10-14 ~ 2026-10-14（464 个交易日，24 个调仓期）  ")
     md.append("**生成时间**：2026-10-19  ")
-    md.append("**数据源**：`backend/data/stock_master.duckdb`（`market.daily_bar` 前复权 + `market.security`）  ")
+    md.append("**数据源**：本地温层 `market.prices_qfq` / `market.daily_bar` 与 `market.security`。")
     md.append("**回测引擎**：`app.backtest.DailyEventBacktestEngine`（信号日次日开盘成交、整手交易、A 股费用模型）")
     md.append("")
     md.append("## 一、回测设置")
@@ -205,10 +206,16 @@ def main() -> None:
     md.append(f"| 年换手 | {met['annual_turnover']:.1f} 倍 | — |")
     md.append(f"| 交易笔数 | {summary['trade_count']} 笔 | — |")
     md.append("")
-    md.append("**期度统计（24 个调仓期）**：期胜率 "
-              f"{(period['strategy']>0).mean():.1%}（{(period['strategy']>0).sum()}/{len(period)}），"
-              f"跑赢基准 {(period['excess']>0).mean():.1%}（{(period['excess']>0).sum()}/{len(period)}），"
-              f"平均期收益 {period['strategy'].mean():+.2%}，最好 {period['strategy'].max():+.2%}，最差 {period['strategy'].min():+.2%}。")
+    if period is None:
+        md.append(
+            "> 未找到与本次运行绑定的分期收益产物；为避免把不可核验的旧数字当作证据，"
+            "不展示期度统计。"
+        )
+    else:
+        md.append("**期度统计**：期胜率 "
+                  f"{(period['strategy']>0).mean():.1%}（{(period['strategy']>0).sum()}/{len(period)}），"
+                  f"跑赢基准 {(period['excess']>0).mean():.1%}（{(period['excess']>0).sum()}/{len(period)}），"
+                  f"平均期收益 {period['strategy'].mean():+.2%}，最好 {period['strategy'].max():+.2%}，最差 {period['strategy'].min():+.2%}。")
     md.append("")
     md.append("## 三、分年度表现")
     md.append("")
@@ -228,10 +235,10 @@ def main() -> None:
     md.append("")
     md.append("## 五、参数敏感性")
     md.append("")
-    md.append("| 配置 | 累计收益 | 年化 | 最大回撤 |")
-    md.append("|---|---:|---:|---:|")
-    for name, total, ann, dd in SENS:
-        md.append(f"| {name} | {total:+.2%} | {ann:+.2%} | {dd:.2%} |")
+    md.append(
+        "> 当前输出目录没有与该数据快照绑定的参数敏感性结果，因此本报告不展示历史硬编码的"
+        " 10/20/40 日或 Top-N 比较。补齐每组 summary JSON 后才可恢复此节。"
+    )
     md.append("")
     md.append("## 六、最新一期持仓（信号日 2026-10-09，10-14 为回测终点）")
     md.append("")
@@ -245,11 +252,22 @@ def main() -> None:
     md.append("")
     md.append("## 七、关键结论")
     md.append("")
-    md.append("1. **策略长期有效但收益高度集中**：2 年累计 +24.75%、年化 12.20%，跑赢沪深 300 约 22.7 个百分点；但 2025 年单年 +44.73% 贡献了几乎全部收益，2024Q4 与 2026 年基本走平或小亏。样本外稳健性尚不能确认。")
-    md.append("2. **信号衰减极快**：10 日调仓年化 29.1%，20 日降到 12.2%，40 日只剩 6.2%。策略本质是短期反转，持仓周期越长、alpha 流失越多。")
-    md.append("3. **逆向属性明显，可作分散化工具**：2026Q2 沪深 300 涨 11.9% 时策略跌 10.1%，2026Q3 沪深 300 跌 12.5% 时策略涨 15.8%，与大盘相关性低甚至为负。")
-    md.append("4. **回撤不小**：最大回撤 -19.55%，单期最差 -14.32%（2024-12~2025-01），需要能承受接近 20% 的净值回撤。")
-    md.append("5. **成本敏感**：年换手约 10 倍，佣金、印花税、滑点合计对年化收益的拖累约 1 个百分点量级；若按更高滑点或冲击成本，收益会进一步下降。")
+    md.append(
+        f"1. **唯一可审计的基准运行表现有限**：累计 {met['total_return']:+.2%}、"
+        f"年化 {met['annualized_return']:+.2%}，相对基准超额 {met['excess_return']:+.2%}。"
+        "这不是样本外或可交易收益声明。"
+    )
+    md.append(
+        f"2. **回撤与风险调整后收益不支持乐观表述**：最大回撤 {met['max_drawdown']:.2%}，"
+        f"夏普 {met['sharpe']:.3f}，Calmar {met['calmar']:.3f}。"
+    )
+    md.append(
+        f"3. **换手偏高**：年换手 {met['annual_turnover']:.1f} 倍；"
+        "涨跌停、停牌、幸存者和历史 ST 时点缺口仍可能高估结果。"
+    )
+    md.append(
+        "4. **不对调仓频率、Top-N 或分散化属性作结论**：对应敏感性和相关性产物未随本数据快照保存。"
+    )
     md.append("")
     md.append("## 八、数据局限（结论需打折看待）")
     md.append("")
@@ -261,7 +279,10 @@ def main() -> None:
     md.append("| 历史 ST 状态缺失 | 262 万条历史 bar 中 `special_treatment_status` 非空仅 197 条（0.01%） | 只能用“当前名称含 ST”过滤，历史上曾 ST、现已摘帽的股票会被误纳入 |")
     md.append("| 前复权价格用于阈值 | 15 元价格线用 qfq 价判断 | 历史日期的最低价判断与真实价格有偏差，近年偏差小、越早越大 |")
     md.append("")
-    md.append("综合看，**真实可实现的收益大概率低于回测值**，主要漏损来自涨停不可买与幸存者偏差。建议把 +24.75% / 年化 12.2% 视为乐观上限。")
+    md.append(
+        "综合看，**该运行只能作为带明显数据缺口的研究证据**；不得把此前未留档的 "
+        "+24.75% / 年化 12.2% 当作策略结论或乐观上限。"
+    )
     md.append("")
     md.append("## 九、复现方式")
     md.append("")
@@ -271,7 +292,19 @@ def main() -> None:
     md.append("    --rebalance-days 20 --top-n 20")
     md.append("```")
     md.append("")
-    md.append("输出目录：`outputs/backtest/`（equity / picks / trades / summary 四类文件）")
+    md.append(
+        "输出目录：`backend/outputs/backtest/`（equity / picks / trades / summary 四类文件）。"
+    )
+    if INTENT_MANIFEST.exists():
+        md.append(
+            "本报告对应的 intent 运行已由 "
+            f"`{INTENT_MANIFEST.relative_to(ROOT).as_posix()}` 锁定四件套路径、大小与 SHA-256；"
+            "该清单仅证明受限研究运行的一致性，不构成样本外、可交易或投资收益结论。"
+        )
+    else:
+        md.append(
+            "未找到本报告对应的可版本化 intent 产物清单；不得把被忽略的本地输出当作证据留存。"
+        )
     md.append("")
     md.append("---")
     md.append("")
@@ -351,16 +384,13 @@ def main() -> None:
   </table>
 
   <div class="section">参数敏感性</div>
-  <table>
-    <thead><tr><th>配置</th><th>累计收益</th><th>年化</th><th>最大回撤</th></tr></thead>
-    <tbody>
-    {''.join(f'<tr><td>{n}</td><td class="{"up" if t>0 else "down"}">{t:+.2%}</td><td>{a:+.2%}</td><td class="down">{d:.2%}</td></tr>' for n,t,a,d in SENS)}
-    </tbody>
-  </table>
+  <div class="note">
+    未找到与当前数据快照绑定的参数敏感性产物；本报告拒绝展示旧的硬编码比较结果。
+  </div>
 
   <div class="note">
     <strong>重要局限：</strong>涨跌停与停牌字段全空、候选池无退市股（幸存者偏差）、历史 ST 状态覆盖仅 0.01%。
-    因此真实可实现收益大概率低于回测值，建议把年化 12.2% 视为乐观上限。
+    因此本次结果只可作为受限研究证据，不得以历史未留档数字作为收益结论。
   </div>
 
   <div class="section">最新一期持仓（信号日 2026-10-09）</div>
@@ -373,7 +403,7 @@ def main() -> None:
 
   <footer>
     回测引擎：DailyEventBacktestEngine（信号日次日开盘成交、整手、A 股费用模型）<br/>
-    数据源：backend/data/stock_master.duckdb · 生成时间 2026-10-19<br/>
+    数据源：本地温层 market.prices_qfq / market.daily_bar 与 market.security · 生成时间 2026-10-19<br/>
     本页面由历史数据回测生成，不构成投资建议。
   </footer>
 </div>

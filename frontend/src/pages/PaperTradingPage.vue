@@ -108,7 +108,7 @@ watch(accountId, () => void loadPaperAnalysis());
 
 function pnlTone(value: string | null): string {
   if (value === null) return "";
-  return Number(value) > 0 ? "tone-loss" : Number(value) < 0 ? "tone-gain" : "";
+  return Number(value) > 0 ? "tone-gain" : Number(value) < 0 ? "tone-loss" : "";
 }
 </script>
 

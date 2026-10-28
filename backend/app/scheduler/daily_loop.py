@@ -25,14 +25,32 @@ from app.lake.curated import CuratedDatasetResult
 from app.repositories.lake import ReleaseRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.repositories.system import JobLogRepository
+from app.repositories.system.auto_data_sync import AutoDataSyncRepository
 from app.repositories.warm_layer import WarmLayerStore
 from app.scheduler.daily_sync import run_hithink_daily_sync
-from app.scheduler.factor_pipeline import FactorBatchResult, run_all_factors
+from app.scheduler.factor_pipeline import (
+    DAILY_FACTOR_SET_VERSION,
+    DAILY_PRICE_VOLUME_FACTORS,
+    FactorBatchResult,
+    run_all_factors,
+)
 from app.services import HithinkDailySyncResult
 from app.services.adjustment_build import AdjustmentBuildService
+from app.services.auto_data_sync import MIN_STOCK_COVERAGE_RATE, completed_daily_cutoff
 from app.services.release import ReleaseService
+from app.utils.discard import discard_directory
 
 logger = logging.getLogger(__name__)
+
+CORE_PRICE_FACTORS = (
+    "momentum_20",
+    "momentum_60",
+    "volatility_20",
+    "downside_volatility_20",
+    "max_drawdown_20",
+    "liquidity_20",
+    "volume_stability_20",
+)
 
 
 @dataclass
@@ -85,6 +103,9 @@ def run_daily_loop(
     factor_adjust_type: str = "qfq",
     refresh_reference_data: bool = False,
     code_version: str = "local",
+    adjustment_version: str = "v1",
+    target_date: date | None = None,
+    skip_sync: bool = False,
     session_factory: Callable[[], Session] = SessionLocal,
     security_repository: SecurityRepository | None = None,
     job_log_repository: JobLogRepository | None = None,
@@ -102,7 +123,7 @@ def run_daily_loop(
         # ---- Trading calendar gate ----
         # If every exchange says "closed" we skip silently. If the calendar is
         # missing we fail closed so the operator investigates.
-        today = date.today()
+        today = target_date or completed_daily_cutoff()
         cal_repo = trading_calendar_repository or TradingCalendarRepository()
         cal_entries = cal_repo.get_many_on_date(
             db, exchanges={"SH", "SZ", "BJ"}, trade_date=today,
@@ -173,39 +194,65 @@ def run_daily_loop(
                 "factor_adjust_type": factor_adjust_type,
                 "refresh_reference_data": refresh_reference_data,
                 "code_version": code_version,
+                "adjustment_version": adjustment_version,
+                "target_trade_date": today.isoformat(),
+                "sync_skipped": skip_sync,
             },
         )
         db.commit()
 
-        try:
-            sync_result = run_hithink_daily_sync(
-                symbols=resolved_symbols,
-                days=sync_days,
-                adjust_type=sync_adjust_type,
-                refresh_reference_data=refresh_reference_data,
-                session_factory=session_factory,
-                job_log_repository=repo,
+        if skip_sync:
+            coverage = AutoDataSyncRepository().market_coverage_on_date(
+                db, trade_date=today
             )
-            result.sync_result = sync_result
-            job.metadata_ = {
-                **(job.metadata_ or {}),
-                "sync_batch_no": sync_result.collection.batch_no,
-                "sync_status": sync_result.collection.status,
-            }
-        except Exception as exc:  # noqa: BLE001 - log and surface
-            error_message = f"sync failed: {type(exc).__name__}: {exc}"
-            result.sync_error = error_message
-            result.failed = True
-            repo.finish(
-                db,
-                job_log=job,
-                status="failed",
-                error_message=error_message,
-                metadata=job.metadata_,
-            )
-            db.commit()
-            logger.exception("Daily loop failed at sync stage")
-            return result
+            job.metadata_ = {**(job.metadata_ or {}), "market_coverage": coverage}
+            if coverage["stock_coverage_rate"] < MIN_STOCK_COVERAGE_RATE:
+                error_message = (
+                    "pre-synced market data failed coverage gate: "
+                    f"{coverage['covered_stocks']}/{coverage['eligible_stocks']} "
+                    f"on {today}"
+                )
+                result.sync_error = error_message
+                result.failed = True
+                repo.finish(
+                    db,
+                    job_log=job,
+                    status="failed",
+                    error_message=error_message,
+                    metadata=job.metadata_,
+                )
+                db.commit()
+                return result
+        else:
+            try:
+                sync_result = run_hithink_daily_sync(
+                    symbols=resolved_symbols,
+                    days=sync_days,
+                    adjust_type=sync_adjust_type,
+                    refresh_reference_data=refresh_reference_data,
+                    session_factory=session_factory,
+                    job_log_repository=repo,
+                )
+                result.sync_result = sync_result
+                job.metadata_ = {
+                    **(job.metadata_ or {}),
+                    "sync_batch_no": sync_result.collection.batch_no,
+                    "sync_status": sync_result.collection.status,
+                }
+            except Exception as exc:  # noqa: BLE001 - log and surface
+                error_message = f"sync failed: {type(exc).__name__}: {exc}"
+                result.sync_error = error_message
+                result.failed = True
+                repo.finish(
+                    db,
+                    job_log=job,
+                    status="failed",
+                    error_message=error_message,
+                    metadata=job.metadata_,
+                )
+                db.commit()
+                logger.exception("Daily loop failed at sync stage")
+                return result
 
         if settings.factor_reads_curated and factor_adjust_type == "qfq":
             try:
@@ -217,7 +264,7 @@ def run_daily_loop(
                 adjustment = AdjustmentBuildService().rebuild_qfq(
                     db,
                     source_name="hithink_finance_dump",
-                    version=code_version,
+                    version=adjustment_version,
                 )
                 db.commit()
             except Exception as exc:  # noqa: BLE001 - log and surface
@@ -253,8 +300,9 @@ def run_daily_loop(
                 curated_result = CuratedLayer(DataLake()).build_prices_qfq_from_db(
                     db_path,
                     factor_source_name="hithink_finance_dump",
-                    factor_version=code_version,
+                    factor_version=adjustment_version,
                     connection=warm_con,
+                    publish=False,
                 )
             finally:
                 warm_con.close()
@@ -310,7 +358,11 @@ def run_daily_loop(
             }
             release_service = ReleaseService()
             release_repository = ReleaseRepository()
-            market_checksum = _compute_market_qfq_checksum(db)
+            market_checksum = _compute_market_qfq_checksum(
+                db,
+                source_name="hithink_finance_dump",
+                version=adjustment_version,
+            )
             market_result = _market_qfq_result(db)
             market_release = release_service.build_release(
                 db,
@@ -339,10 +391,13 @@ def run_daily_loop(
                     UPDATE market.adjustment_factor
                     SET release_id = :release_id
                     WHERE adjust_type = 'qfq'
-                      AND source_name = 'daily_loop'
+                      AND source_name = 'hithink_finance_dump'
                       AND version = :version
                 """),
-                {"release_id": market_release.release_id, "version": code_version},
+                {
+                    "release_id": market_release.release_id,
+                    "version": adjustment_version,
+                },
             )
             adjustment = replace(adjustment, release_id=market_release.release_id)
             result.curated_result = replace(
@@ -357,7 +412,6 @@ def run_daily_loop(
             db.commit()
 
         try:
-            today = date.today()
             factor_result = run_all_factors(
                 start_date=today - timedelta(days=factor_lookback_days),
                 end_date=today,
@@ -365,6 +419,11 @@ def run_daily_loop(
                 adjust_type=factor_adjust_type,
                 code_version=code_version,
                 release_id=factor_release_id,
+                curated_path=(
+                    result.curated_result.path
+                    if result.curated_result is not None
+                    else None
+                ),
                 session_factory=session_factory,
                 job_log_repository=repo,
             )
@@ -376,14 +435,19 @@ def run_daily_loop(
                 job.error_message = (
                     f"factor pipeline failed services: {factor_result.failed}"
                 )
+            elif factor_result.empty:
+                job.status = "partial"
             else:
                 job.status = "success"
             job.metadata_ = {
                 **(job.metadata_ or {}),
                 "failed_services": factor_result.failed,
+                "empty_services": factor_result.empty,
                 "services": {
                     name: svc.get("total_rows", 0) for name, svc in factor_result.services.items()
                 },
+                "daily_factor_set_version": DAILY_FACTOR_SET_VERSION,
+                "daily_price_volume_factors": list(DAILY_PRICE_VOLUME_FACTORS),
             }
 
             # ---- Certification metadata & publish gate ----
@@ -392,6 +456,8 @@ def run_daily_loop(
                     db,
                     today,
                     code_version=code_version,
+                    qfq_source_name="hithink_finance_dump",
+                    qfq_version=adjustment_version,
                 )
                 job.metadata_ = {
                     **(job.metadata_ or {}),
@@ -400,6 +466,7 @@ def run_daily_loop(
                 has_gate_failure = bool(factor_result.failed) or any(
                     cert_meta.get(key) for key in [
                         "gate_market_date_missing",
+                        "gate_market_coverage_incomplete",
                         "gate_duplicate_keys",
                         "gate_qfq_coverage_anomaly",
                         "gate_core_factor_partial",
@@ -423,6 +490,14 @@ def run_daily_loop(
                         result.market_release_id is not None
                         and result.curated_release_id is not None
                     ):
+                        published = CuratedLayer(DataLake()).publish_prices_qfq(
+                            result.curated_result
+                        )
+                        result.curated_result = replace(
+                            published,
+                            release_id=result.curated_release_id,
+                        )
+                        job.metadata_["curated_path"] = result.curated_result.path
                         release_repository = ReleaseRepository()
                         release_repository.activate(
                             db, release_id=result.market_release_id
@@ -466,6 +541,11 @@ def run_daily_loop(
             metadata=job.metadata_,
         )
         db.commit()
+
+    if result.failed and result.curated_result is not None:
+        staged_path = Path(result.curated_result.path)
+        if staged_path.name.startswith(".prices_qfq.tmp-"):
+            discard_directory(staged_path)
 
     logger.info(
         "Daily loop completed: failed=%s sync_trusted=%s factor_rows=%s",
@@ -527,12 +607,17 @@ def create_daily_loop_scheduler(
     return scheduler
 
 
-def _compute_market_qfq_checksum(db: Session) -> str:
+def _compute_market_qfq_checksum(
+    db: Session,
+    *,
+    source_name: str = "hithink_finance_dump",
+    version: str = "v1",
+) -> str:
     """Hash canonical forward-adjusted rows in deterministic key order.
 
     QFQ prices are no longer materialized in ``market.daily_bar``; they are
-    derived on demand from ``adjust_type='none'`` rows multiplied by the latest
-    ``daily_loop`` QFQ factor. The checksum therefore hashes the computed series
+    derived on demand from ``adjust_type='none'`` rows multiplied by the selected
+    vendor-dump QFQ factor. The checksum therefore hashes the computed series
     rather than stored qfq rows so that the release fingerprint remains stable.
     """
     rows = db.execute(
@@ -548,13 +633,15 @@ def _compute_market_qfq_checksum(db: Session) -> str:
                 WHERE af.symbol = d.symbol
                   AND af.trade_date = d.trade_date
                   AND af.adjust_type = 'qfq'
-                  AND af.source_name = 'daily_loop'
+                  AND af.source_name = :source_name
+                  AND af.version = :version
                 ORDER BY af.updated_at DESC, af.id DESC
                 LIMIT 1
             ) f ON true
             WHERE d.adjust_type = 'none'
             ORDER BY d.symbol, d.trade_date
-        """)
+        """),
+        {"source_name": source_name, "version": version},
     )
     hasher = hashlib.sha256()
     for row in rows:
@@ -591,6 +678,8 @@ def _gather_certification_metadata(
     target_date: date,
     *,
     code_version: str,
+    qfq_source_name: str = "hithink_finance_dump",
+    qfq_version: str = "v1",
 ) -> dict:
     """Collect data certification metadata and run publish gate checks.
 
@@ -604,6 +693,7 @@ def _gather_certification_metadata(
         "publish_eligible": False,
         "reason_codes": [],
         "gate_market_date_missing": False,
+        "gate_market_coverage_incomplete": False,
         "gate_duplicate_keys": False,
         "gate_qfq_coverage_anomaly": False,
         "gate_core_factor_partial": False,
@@ -619,6 +709,14 @@ def _gather_certification_metadata(
             meta["gate_market_date_missing"] = True
             meta["reason_codes"].append("DATA_STALE")
         meta["market_max_date"] = str(row) if row else None
+
+        coverage = AutoDataSyncRepository().market_coverage_on_date(
+            db, trade_date=target_date
+        )
+        meta["market_coverage"] = coverage
+        if coverage["stock_coverage_rate"] < MIN_STOCK_COVERAGE_RATE:
+            meta["gate_market_coverage_incomplete"] = True
+            meta["reason_codes"].append("MARKET_CROSS_SECTION_INCOMPLETE")
 
         # market.daily_bar (none) row count
         row = db.execute(
@@ -647,8 +745,6 @@ def _gather_certification_metadata(
         # QFQ rows are no longer materialized in market.daily_bar; they live as
         # factors in market.adjustment_factor and as computed prices in the
         # curated prices_qfq parquet. Gate the coverage via adjustment_factor.
-        qfq_source_name = "daily_loop"
-        qfq_version = code_version
         row = db.execute(
             text("""
                 SELECT COUNT(*)
@@ -688,7 +784,10 @@ def _gather_certification_metadata(
                  AND af.source_name = :source_name
                  AND af.version = :version
                 WHERE base.adjust_type = 'none'
-                  AND af.id IS NULL
+                  -- Historical bulk imports may legitimately leave the
+                  -- surrogate id NULL. Presence must be tested on the joined
+                  -- business key, not on that nullable implementation detail.
+                  AND af.symbol IS NULL
             """),
             {"source_name": qfq_source_name, "version": qfq_version},
         ).scalar()
@@ -697,19 +796,45 @@ def _gather_certification_metadata(
             meta["gate_qfq_coverage_anomaly"] = True
             meta["reason_codes"].append("QFQ_COVERAGE_GAP")
 
-        # core factor check (at least one factor run succeeded)
-        row = db.execute(
-            text("""
-                SELECT COUNT(*) FROM factor.factor_run
-                WHERE status = 'success'
-                  AND input_end_date >= :d
-            """),
-            {"d": target_date},
-        ).scalar()
-        meta["core_factor_run_count"] = int(row or 0)
-        if int(row or 0) == 0:
+        # All production price factors must cover the target-day stock universe.
+        expected = int(coverage["covered_stocks"])
+        factor_coverage: dict[str, dict[str, int | float]] = {}
+        incomplete_factors: list[str] = []
+        for factor_name in DAILY_PRICE_VOLUME_FACTORS:
+            count = int(
+                db.execute(
+                    text("""
+                        SELECT COUNT(DISTINCT fv.symbol)
+                        FROM factor.factor_value fv
+                        JOIN market.security s ON s.symbol = fv.symbol
+                        WHERE fv.factor_name = :factor_name
+                          AND fv.factor_version = 'v1-qfq'
+                          AND fv.trade_date = :trade_date
+                          AND s.security_type = 'stock'
+                          AND s.is_active = true
+                          AND (s.list_date IS NULL OR s.list_date <= :trade_date)
+                          AND (s.delist_date IS NULL OR s.delist_date >= :trade_date)
+                    """),
+                    {"factor_name": factor_name, "trade_date": target_date},
+                ).scalar()
+                or 0
+            )
+            rate = count / expected if expected else 0.0
+            factor_coverage[factor_name] = {"rows": count, "coverage_rate": rate}
+            if factor_name in CORE_PRICE_FACTORS and rate < MIN_STOCK_COVERAGE_RATE:
+                incomplete_factors.append(factor_name)
+        meta["daily_factor_coverage"] = factor_coverage
+        meta["daily_factor_incomplete"] = [
+            name for name, row in factor_coverage.items()
+            if row["coverage_rate"] < MIN_STOCK_COVERAGE_RATE
+        ]
+        meta["core_factor_coverage"] = {
+            name: factor_coverage[name] for name in CORE_PRICE_FACTORS
+        }
+        meta["core_factor_incomplete"] = incomplete_factors
+        if incomplete_factors:
             meta["gate_core_factor_partial"] = True
-            meta["reason_codes"].append("NO_FACTOR_RUNS")
+            meta["reason_codes"].append("CORE_FACTOR_COVERAGE_INCOMPLETE")
 
     except Exception as exc:  # noqa: BLE001 - never crash the loop over gate checks
         logging.getLogger(__name__).warning("Certification gate query error: %s", exc)

@@ -169,3 +169,22 @@ def test_build_prices_qfq_from_db_is_idempotent(tmp_path) -> None:
     rows = _read(str(lake.root / "curated" / "prices_qfq" / "**" / "*.parquet"))
     assert len(rows) == 4
     assert rows[-1]["trade_date"] == date(2026, 1, 8)
+
+
+def test_staged_prices_are_not_visible_until_publish(tmp_path) -> None:
+    lake = DataLake(tmp_path / "lake")
+    db_path = tmp_path / "stock_master.duckdb"
+    _seed_db_tables(db_path)
+    layer = CuratedLayer(lake)
+
+    staged = layer.build_prices_qfq_from_db(str(db_path), publish=False)
+
+    published_path = lake.root / "curated" / "prices_qfq"
+    assert not published_path.exists()
+    assert Path(staged.path).name.startswith(".prices_qfq.tmp-")
+
+    published = layer.publish_prices_qfq(staged)
+
+    assert Path(published.path) == published_path.resolve()
+    assert published_path.exists()
+    assert len(_read(str(published_path / "**" / "*.parquet"))) == 3

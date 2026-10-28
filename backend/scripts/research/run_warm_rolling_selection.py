@@ -64,7 +64,7 @@ from app.services.strategy_research import StrategyResearchService  # noqa: E402
 from app.services.training_factor_selector import (  # noqa: E402
     build_training_selection_policy,
 )
-from app.strategies import FactorScoreSpec  # noqa: E402
+from app.strategies import FactorScoreSpec, WeightingMode  # noqa: E402
 from app.utils.duckdb_write_lock import duckdb_write_lock  # noqa: E402
 
 
@@ -81,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spec-set", choices=sorted(SPEC_SETS), default="ic_aligned")
     parser.add_argument("--release-tag", default="20261022-181648")
     parser.add_argument("--initial-cash", default="1000000")
+    parser.add_argument("--invested-weight", default="1")
     parser.add_argument("--exchange", default="SH")
     parser.add_argument("--training-days", type=int, default=40)
     parser.add_argument("--test-days", type=int, default=40)
@@ -183,6 +184,12 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             name=args.name,
             factor_specs=specs,
             top_n=args.top_n,
+            weighting_mode=(
+                WeightingMode.EQUAL_WEIGHT_PARTIAL
+                if Decimal(args.invested_weight) < 1
+                else WeightingMode.EQUAL_WEIGHT_FULLY_INVESTED
+            ),
+            invested_weight=Decimal(args.invested_weight),
             rebalance_rule=args.rebalance_rule,
             rebalance_interval=args.rebalance_interval,
             portfolio_constraints=portfolio_constraints,
@@ -216,7 +223,7 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
         returns: list[Decimal] = []
         sharpes: list[Decimal | None] = []
         drawdowns: list[Decimal] = []
-        for window_result in results:
+        for window_result in results.windows:
             window = window_result.window
             persisted = window_result.persisted
             report = performance_service.analyze(
@@ -282,7 +289,10 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             print(f"  {key}: {value}")
 
         selection_enabled = args.selection_policy != "none"
-        limitations = list(FACTOR_LIMITATIONS)
+        limitations = [
+            item for item in FACTOR_LIMITATIONS
+            if item != "single_window_no_out_of_sample_validation"
+        ]
         if selection_enabled:
             limitations += [
                 "direction_selected_from_short_training_window",
@@ -292,6 +302,15 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             ]
         else:
             limitations += ["training_window_does_not_select_parameters"]
+        if args.spec_set == "evidence_gated":
+            limitations += [
+                (
+                    "factor_admission_profile_overlaps_test_period"
+                    if date.fromisoformat(args.end_date) >= date(2024, 5, 1)
+                    else "factor_admission_profile_is_later_than_test_period"
+                ),
+                "snapshot_screen_filters_not_in_backtest_contract",
+            ]
         limitations += ["every_n_anchor_restarts_per_window"]
         payload = {
             **{
@@ -307,6 +326,7 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
                     "step_days",
                     "rebalance_rule",
                     "rebalance_interval",
+                    "invested_weight",
                     "selection_policy",
                 )
             },
@@ -315,8 +335,22 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             ),
             "factor_version": args.factor_version,
             "research_read_source": settings.research_read_source,
-            "interpretation": ("link_validation_only" if selection_enabled else None),
+            "interpretation": (
+                "link_validation_only" if selection_enabled
+                else "fixed_rule_window_sensitivity_only"
+            ),
             "limitations": limitations,
+            "combined_curve": (
+                None
+                if results.combined is None
+                else {
+                    "total_return": str(results.combined.total_return),
+                    "maximum_drawdown": str(results.combined.maximum_drawdown),
+                    "total_commission": str(results.combined.total_commission),
+                    "turnover_rate": str(results.combined.turnover_rate),
+                }
+            ),
+            "combined_declarations": results.declarations,
             "windows": windows_payload,
             "summary": summary,
         }

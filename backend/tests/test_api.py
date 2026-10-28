@@ -1480,6 +1480,8 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
                     mean_long_short_forward_return_1d=Decimal("0.002"),
                     endpoint_observation_count=250,
                     pit_status="point_in_time",
+                    evidence_eligibility="strategy_eligible",
+                    evidence_eligibility_reason="verified PIT evidence",
                 )
             ],
             1,

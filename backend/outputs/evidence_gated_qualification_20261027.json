@@ -1,0 +1,22 @@
+{
+  "spec_set": "evidence_gated",
+  "research_factor_version": "v1-qfq",
+  "research_release_tag": "20261022-181648",
+  "factor_qualifications": [
+    {
+      "factor_name": "volume_stability_20",
+      "factor_version": "v1-qfq",
+      "pool": "frozen",
+      "reasons": [
+        "trade_date_count=119 < 200",
+        "pit_status=unknown: 未完成时点性审计，禁止进入核心池",
+        "evidence_eligibility=research_only: unverified_evidence_eligibility; 不得进入核心池"
+      ],
+      "trade_date_count": 119,
+      "pit_status": "unknown",
+      "evidence_eligibility": "research_only"
+    }
+  ],
+  "all_factors_core": false,
+  "strategy_validation_status": "research_only"
+}
