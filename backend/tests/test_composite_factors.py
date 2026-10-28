@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import CompositeFactorService
+from app.services.composite_factors import FACTOR_VERSION, _percentile_ranks
 from app.strategies import FactorScoreSpec
 
 
@@ -117,6 +118,7 @@ def test_composite_factor_service_persists_weighted_complete_scores() -> None:
     assert result.input_rows == 6
     assert result.rows_written == 3
     assert result.run_id == 1
+    assert result.factor_version == FACTOR_VERSION
     assert definition_repository.definitions[0].name == "decision_score"
     assert definition_repository.definitions[0].inputs == [
         "factor.momentum:v1",
@@ -125,6 +127,9 @@ def test_composite_factor_service_persists_weighted_complete_scores() -> None:
     assert run_repository.finished == [
         {"run_id": 1, "status": "success", "rows_written": 3}
     ]
+    assert run_repository.runs[0].parameters["scoring_policy"] == (
+        "weighted_average_rank_percentile"
+    )
     values = {
         item["symbol"]: item["value"]
         for item in value_repository.values
@@ -134,6 +139,39 @@ def test_composite_factor_service_persists_weighted_complete_scores() -> None:
         "B": Decimal("0.5000000000"),
         "C": Decimal("1.0000000000"),
     }
+
+
+def test_composite_factor_average_ranks_do_not_create_symbol_order_alpha() -> None:
+    values = {
+        "AAA": Decimal("1"),
+        "BBB": Decimal("1"),
+        "CCC": Decimal("2"),
+    }
+
+    higher = _percentile_ranks(values, higher_is_better=True)
+    lower = _percentile_ranks(values, higher_is_better=False)
+
+    assert higher == {
+        "AAA": Decimal("0.25"),
+        "BBB": Decimal("0.25"),
+        "CCC": Decimal("1"),
+    }
+    assert lower == {
+        "AAA": Decimal("0.75"),
+        "BBB": Decimal("0.75"),
+        "CCC": Decimal("0"),
+    }
+
+
+def test_composite_factor_ranks_are_neutral_without_cross_section_dispersion() -> None:
+    assert _percentile_ranks(
+        {"AAA": Decimal("1"), "BBB": Decimal("1")},
+        higher_is_better=True,
+    ) == {"AAA": Decimal("0.5"), "BBB": Decimal("0.5")}
+    assert _percentile_ranks(
+        {"AAA": Decimal("1")},
+        higher_is_better=False,
+    ) == {"AAA": Decimal("0.5")}
 
 
 def test_composite_factor_service_requires_complete_coverage_and_filters_types() -> None:
@@ -210,6 +248,14 @@ def test_composite_factor_service_validates_inputs() -> None:
                 FactorScoreSpec("momentum", "v1"),
                 FactorScoreSpec("momentum", "v1"),
             ],
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 1),
+        )
+    with pytest.raises(ValueError, match="decision_score:v1 is frozen"):
+        service.run(
+            object(),
+            factor_specs=[FactorScoreSpec("momentum", "v1")],
+            factor_version="v1",
             start_date=date(2026, 7, 1),
             end_date=date(2026, 7, 1),
         )

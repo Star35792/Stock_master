@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from app.database.session import SessionLocal
 from app.services import CompositeFactorService
+from app.services.composite_factors import FACTOR_VERSION
 from app.strategies import FactorScoreSpec
 
 
@@ -61,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--factor-name", default="decision_score")
-    parser.add_argument("--factor-version", default="v1")
+    parser.add_argument("--factor-version", default=FACTOR_VERSION)
     parser.add_argument("--symbols", help="Optional comma-separated symbols.")
     parser.add_argument(
         "--security-types",

@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.factors.categories import FactorCategory
+from app.factors.rank_ic import rank_values
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -16,7 +17,8 @@ from app.repositories.market import SecurityRepository
 from app.strategies import FactorScoreSpec
 
 FACTOR_NAME = "decision_score"
-FACTOR_VERSION = "v1"
+FACTOR_VERSION = "v2-average-rank"
+LEGACY_FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
 DEFAULT_SECURITY_TYPES = ("stock", "etf", "index")
 
@@ -55,7 +57,7 @@ class CompositeFactorService:
         factor_name: str = FACTOR_NAME,
         factor_version: str = FACTOR_VERSION,
         display_name: str = "Decision score",
-        description: str = "weighted percentile-rank composite decision score",
+        description: str = "weighted average-rank percentile composite decision score",
         symbols: list[str] | None = None,
         allowed_security_types: set[str] | None = None,
         code_version: str = "local",
@@ -66,6 +68,11 @@ class CompositeFactorService:
             start_date=start_date,
             end_date=end_date,
         )
+        if factor_name == FACTOR_NAME and factor_version == LEGACY_FACTOR_VERSION:
+            raise ValueError(
+                f"{FACTOR_NAME}:{LEGACY_FACTOR_VERSION} is frozen because it uses "
+                "legacy symbol-order tie breaking; choose a new factor version"
+            )
         normalized_symbols = (
             sorted({symbol.strip().upper() for symbol in symbols if symbol.strip()})
             if symbols
@@ -130,7 +137,7 @@ class CompositeFactorService:
                 "target_end_date": end_date.isoformat(),
                 "symbols": normalized_symbols,
                 "allowed_security_types": security_types_allowed,
-                "scoring_policy": "weighted_percentile_rank",
+                "scoring_policy": "weighted_average_rank_percentile",
                 "coverage_policy": "complete_components",
             },
             code_version=code_version,
@@ -147,7 +154,7 @@ class CompositeFactorService:
                     }
                     for spec in factor_specs
                 ],
-                "score_policy": "weighted_component_percentiles",
+                "score_policy": "weighted_average_rank_component_percentiles",
             },
         )
         rows_written = self._write_values(
@@ -258,14 +265,7 @@ def _percentile_ranks(
     *,
     higher_is_better: bool,
 ) -> dict[str, Decimal]:
-    ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
-    if len(ordered) == 1:
-        return {ordered[0][0]: Decimal(1)}
-    return {
-        symbol: (
-            Decimal(index) / Decimal(len(ordered) - 1)
-            if higher_is_better
-            else Decimal(len(ordered) - index - 1) / Decimal(len(ordered) - 1)
-        )
-        for index, (symbol, _) in enumerate(ordered)
-    }
+    ranks = rank_values(values)
+    if higher_is_better:
+        return ranks
+    return {symbol: Decimal(1) - rank for symbol, rank in ranks.items()}
