@@ -40,8 +40,13 @@ class QualityValueDataRepository:
 
     def bars(self, *, trade_date: date) -> list[dict]:
         return self._rows("""
-            SELECT symbol, close, source_name, special_treatment_status, is_suspended,
-                   quality_status, is_suspect, updated_at
+            SELECT symbol, close, source_name,
+                   CASE
+                       WHEN upper(trim(special_treatment_status))
+                            IN ('ST', '*ST', 'S*ST', 'SST', 'STAR_ST') THEN 'st'
+                       ELSE lower(trim(special_treatment_status))
+                   END AS special_treatment_status,
+                   is_suspended, quality_status, is_suspect, updated_at
             FROM market.daily_bar WHERE trade_date = ? AND adjust_type = 'none'
               AND security_type = 'stock'
         """, [trade_date])
