@@ -24,6 +24,7 @@ def check_steps(scope: str) -> list[tuple[Path, list[str]]]:
                         "check",
                         "app",
                         "tests",
+                        "scripts",
                         "../scripts/ci_check.py",
                     ],
                 ),

@@ -87,7 +87,7 @@ npm run dev
 ### 校验与 CI
 
 - 检查命令唯一维护在 `scripts/ci_check.py`，本地和 `.github/workflows/ci.yml` 共用。
-- 后端执行 Ruff 和一次完整 pytest，自动包含 `tests/` 下的全部测试。前端执行 package.json 中已配置的 `test` 脚本（未配置则跳过），再执行类型检查/构建；任一步失败立即返回非零状态。
+- 后端对 `app/`、`tests/`、`backend/scripts/` 和统一检查脚本执行 Ruff，再运行一次完整 pytest，自动包含 `tests/` 下的全部测试。前端执行 package.json 中已配置的 `test` 脚本（未配置则跳过），再执行类型检查/构建；任一步失败立即返回非零状态。
 - 从仓库根目录执行（Windows、Linux、macOS 通用）：
 
   ```powershell

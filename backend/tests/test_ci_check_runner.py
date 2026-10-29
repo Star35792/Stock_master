@@ -17,7 +17,18 @@ def runner():
 def test_backend_checks_run_the_full_suite_once(runner):
     steps = runner["check_steps"]("backend")
     assert [command for _, command in steps] == [
-        ["uv", "run", "--extra", "dev", "ruff", "check", "app", "tests", "../scripts/ci_check.py"],
+        [
+            "uv",
+            "run",
+            "--extra",
+            "dev",
+            "ruff",
+            "check",
+            "app",
+            "tests",
+            "scripts",
+            "../scripts/ci_check.py",
+        ],
         ["uv", "run", "--extra", "dev", "pytest", "-q"],
     ]
     assert all(directory == RUNNER.parents[1] / "backend" for directory, _ in steps)
