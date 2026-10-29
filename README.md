@@ -1,6 +1,6 @@
 # Stock Master
 
-> 说明：本文档为按当前仓库扫描生成的版本。安装命令、运行命令、访问地址、部署路径等**尚未最终确定**，相关位置统一用 `【待补】` 占位，请自行填写后再对外使用。文档中引用的目录、模块、脚本、配置项均为仓库中**当前真实存在**的内容，未做虚构。
+> 本文提供单机开发环境的安装、启动和检查入口。命令从仓库根目录执行；后端运行目录固定为 `backend/`，使 `.env` 与相对数据路径保持一致。
 
 ## 1. 项目用途
 
@@ -31,55 +31,45 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 
 ## 2. 安装步骤
 
-<!-- 命令与路径待定，以下为占位；确认后请替换 -->
+准备 Python 3.13、uv 和 Node.js（版本见 `frontend/.nvmrc`），然后执行：
 
-1. 准备 Python 环境（项目在 `backend/pyproject.toml` 中要求 `>=3.13,<3.14`）：
-   ```bash
-   # 【待补：后端环境准备命令】
-   ```
-2. 安装后端依赖（仓库使用 `uv`，并提供 `backend/uv.lock`）：
-   ```bash
-   # 【待补：后端依赖安装命令，可参考 uv sync --extra dev --extra data 等可选依赖组】
-   ```
-3. 准备环境变量文件（`backend/.env.example` 为模板，需复制为 `backend/.env`）：
-   ```bash
-   # 【待补：环境变量初始化命令】
-   ```
-4. 准备前端依赖（`frontend/package.json`，Node 版本锁定见 `frontend/.nvmrc`）：
-   ```bash
-   # 【待补：前端依赖安装命令】
-   ```
+```powershell
+uv sync --project backend --extra dev --extra data
+# 仅首次创建；保留已有配置
+if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+cd frontend
+npm ci
+cd ..
+```
 
-可选依赖组（在 `backend/pyproject.toml` 中真实存在）：`data`、`backtest`、`viz`、`dev`、`all`。
+Linux/macOS 创建配置可用 `test -f backend/.env || cp backend/.env.example backend/.env`。
+在 `backend/.env` 中配置所需数据源凭据。可选依赖组见 `backend/pyproject.toml`：`data`、`backtest`、`viz`、`dev`、`all`；相关版本由 `backend/uv.lock` 记录。
 
 ## 3. 运行方式
 
 ### 后端服务
 
-- 应用入口：`backend/app/main.py`（FastAPI 应用工厂 + lifespan，启动时初始化数据库并拉起后台 worker）。
-- 启动时会启动三个后台任务组件：`AutoDataSyncWorker`、`PriceValueInputPrepWorker`、`PriceValueScreenWorker`（可在 `app.state` 中访问）。
-- 数据库连接由 `backend/app/database/session.py` 的 `initialize_database()` 负责，首次启动创建表结构。
-- 启动命令：
-  ```bash
-  # 【待补：后端启动命令】
-  ```
-- 服务地址：
-  ```
-  # 【待补：后端监听地址与端口】
-  ```
-- 健康检查接口（真实存在）：`GET /health`，路由文件 `backend/app/api/routes/health.py`。
+在一个终端中执行：
+
+```powershell
+cd backend
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+服务地址为 `http://127.0.0.1:8000`，健康检查为 `GET /health`，接口文档为 `/docs`。
+入口 `backend/app/main.py` 启动时初始化主 DuckDB、研究 DuckDB 和 SQLite 持仓账本，并启动行情同步、估值输入准备和初筛三个后台 worker。数据源凭据与开关由 `backend/.env` 控制。
 
 ### 前端工作台
 
-- 开发服务器脚本：`frontend/package.json` 中的 `dev` / `build` / `preview`。
-- 开发端口与后端代理在 `frontend/vite.config.ts` 中配置（`server.port` 与 `/api`、`/health` 代理目标，可用环境变量 `STOCK_MASTER_API_URL` 覆盖后端地址）。
-  ```bash
-  # 【待补：前端启动命令】
-  ```
-- 前端访问地址：
-  ```
-  # 【待补：前端访问地址】
-  ```
+在另一个终端中，从仓库根目录执行：
+
+```powershell
+cd frontend
+npm run dev
+```
+
+默认地址为 `http://127.0.0.1:5173`；若端口被占用，以 Vite 输出为准。
+`frontend/vite.config.ts` 将 `/api` 和 `/health` 代理至 `http://127.0.0.1:8000`，可通过 `STOCK_MASTER_API_URL` 覆盖。生产构建执行 `npm run build`。
 
 ### 日常与离线任务
 
@@ -96,12 +86,18 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 
 ### 校验与 CI
 
-- 仓库根目录存在 `scripts/ci-check.sh`（Bash，Git Bash / Linux / macOS 可用），流程为：后端 ruff → 后端核心测试 → 后端全量测试 → `alembic check`（非阻断）→ 前端 `npm run build`。
-- GitHub Actions 配置：`.github/workflows/ci.yml`。
-- 执行命令：
-  ```bash
-  # 【待补：本地/远程校验命令】
+- 检查命令唯一维护在 `scripts/ci_check.py`，本地和 `.github/workflows/ci.yml` 共用。
+- 后端执行 Ruff 和一次完整 pytest，自动包含 `tests/` 下的全部测试。前端执行 package.json 中已配置的 `test` 脚本（未配置则跳过），再执行类型检查/构建；任一步失败立即返回非零状态。
+- 从仓库根目录执行（Windows、Linux、macOS 通用）：
+
+  ```powershell
+  uv run --project backend --extra dev python scripts/ci_check.py
+  # 按范围运行；--list 仅展示命令
+  uv run --project backend --extra dev python scripts/ci_check.py --scope backend
+  uv run --project backend --extra dev python scripts/ci_check.py --scope frontend
   ```
+
+- Bash 兼容入口 `bash scripts/ci-check.sh` 转发到同一脚本，也接受 `--scope` 和 `--list`。
 
 ## 4. 使用示例
 
@@ -110,7 +106,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 ### 健康检查
 
 ```bash
-# 【待补：健康检查调用示例】
+curl http://127.0.0.1:8000/health
 ```
 
 ### 行情与参考数据
@@ -256,10 +252,10 @@ A：DuckDB 服务应使用单个 worker；同一时间不要并行运行其他�
 A：名单依赖行业与 ST 状态等人工核实项，未核实或覆盖不足时会返回空/缺口，页面会给出逐股缺失原因；不要把空名单或缺失利润理解为零收益。
 
 **Q：本地全量 pytest 被终止？**
-A：全量测试在资源密集场景下可能被系统 SIGTERM；`scripts/ci-check.sh` 中的核心测试分组（API、回测、组合、风控、模拟执行、策略模板）可独立稳定运行。
+A：先在 `backend/` 中用 `uv run --extra dev pytest tests/<目标文件>.py -q` 定位问题；局部通过不能代替完整检查。统一入口的 `--scope backend` 可单独运行后端检查。
 
-**Q：`alembic check` 失败要立刻修吗？**
-A：`scripts/ci-check.sh` 中该步骤为非阻断（`|| true`），但仍应视为 schema 与模型不一致的信号，按项目规则用 Alembic 补迁移。
+**Q：当前如何检查 schema 初始化？**
+A：数据库初始化入口位于 `backend/app/database/`，随 API 启动执行；统一检查入口运行完整 pytest。仓库当前没有 Alembic 迁移目录，既有 schema 升级由显式兼容桥处理，不能将初始化视为完整版本化迁移或回退能力。
 
 ## 7. 已知限制
 
@@ -273,7 +269,7 @@ A：`scripts/ci-check.sh` 中该步骤为非阻断（`|| true`），但仍应视
 - **模拟盘回撤口径**为“自监控开始以来”，不是完整历史回撤。
 - **风格代理因子为显式研究假设**（size=ln 市值、value=-PB、momentum/volatility/liquidity=factor_value 的横截面 z-score），基准成分股缺失因子时会主动回退为组合暴露。
 - **数据源不稳定**：单一数据源可能缺新 ETF、指数或特殊品种，需依赖补充源与人工修复闭环。
-- **本地全量测试在低配机器上可能因资源累积被终止**，CI 分组策略见 `scripts/ci-check.sh`。
+- **全量测试可能受机器资源限制**，排查方式见上方 FAQ；检查入口为 `scripts/ci_check.py`。
 
 ---
 
@@ -282,7 +278,6 @@ A：`scripts/ci-check.sh` 中该步骤为非阻断（`|| true`），但仍应视
 ```text
 backend/
 ├── app/            # FastAPI 应用代码（api / services / repositories / models / database / scheduler / factors / strategies / backtest / portfolio / risk / lake）
-├── alembic/        # 数据库迁移
 ├── data/           # 本地数据与数据湖文件
 ├── scripts/        # 导入、因子、维护、调度入口
 ├── sql/            # SQL 资源

@@ -35,18 +35,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run ruff
-        run: uv run --extra dev ruff check app tests
-
-      - name: Run core tests
-        run: uv run --extra dev pytest tests/test_api.py tests/test_backtest_engine.py tests/test_backtest_fees.py tests/test_backtest_service.py tests/test_portfolio_builder.py tests/test_paper_execution.py tests/test_risk_service.py tests/test_strategy_templates.py -q
-
-      - name: Run full test suite
-        run: uv run --extra dev pytest -q
-
-      - name: Alembic offline check
-        run: uv run --extra dev alembic check
-        continue-on-error: true
+      - name: Backend checks
+        run: python ../scripts/ci_check.py --scope backend
 
   frontend:
     name: Frontend (type-check + build)
@@ -68,8 +58,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check
-        run: npm run build
+      - name: Set up Python for shared check runner
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: backend/.python-version
 
-      - name: Build
-        run: npm run build
+      - name: Frontend checks
+        run: python ../scripts/ci_check.py --scope frontend

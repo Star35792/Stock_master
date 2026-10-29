@@ -1,0 +1,63 @@
+"""The shared check runner must preserve coverage and stop on failures."""
+
+import runpy
+import subprocess
+from pathlib import Path
+
+import pytest
+
+RUNNER = Path(__file__).resolve().parents[2] / "scripts" / "ci_check.py"
+
+
+@pytest.fixture
+def runner():
+    return runpy.run_path(str(RUNNER))
+
+
+def test_backend_checks_run_the_full_suite_once(runner):
+    steps = runner["check_steps"]("backend")
+    assert [command for _, command in steps] == [
+        ["uv", "run", "--extra", "dev", "ruff", "check", "app", "tests", "../scripts/ci_check.py"],
+        ["uv", "run", "--extra", "dev", "pytest", "-q"],
+    ]
+    assert all(directory == RUNNER.parents[1] / "backend" for directory, _ in steps)
+
+
+def test_frontend_checks_keep_workflow_tests_and_build(runner):
+    steps = runner["check_steps"]("frontend")
+    assert [command for _, command in steps] == [
+        ["npm", "run", "--if-present", "test"],
+        ["npm", "run", "build"],
+    ]
+    assert all(directory == RUNNER.parents[1] / "frontend" for directory, _ in steps)
+    assert runner["check_steps"]("all") == (runner["check_steps"]("backend") + steps)
+
+
+def test_list_does_not_require_installed_tools(runner, monkeypatch):
+    def unexpected_lookup(*args):
+        pytest.fail("listing commands must not look up or run executables")
+
+    monkeypatch.setattr(runner["shutil"], "which", unexpected_lookup)
+    assert runner["main"](["--list"]) == 0
+
+
+def test_failure_stops_remaining_checks_and_preserves_exit_code(runner, monkeypatch):
+    calls = []
+    monkeypatch.setattr(runner["shutil"], "which", lambda name: f"/tools/{name}")
+
+    def fail(command, *, cwd, check):
+        calls.append((command, cwd, check))
+        raise subprocess.CalledProcessError(7, command)
+
+    monkeypatch.setattr(runner["subprocess"], "run", fail)
+    assert runner["main"]([]) == 7
+    assert len(calls) == 1
+    assert calls[0][0][0] == "/tools/uv"
+    assert calls[0][1] == RUNNER.parents[1] / "backend"
+    assert calls[0][2] is True
+
+
+def test_missing_executable_fails_clearly(runner, monkeypatch, capsys):
+    monkeypatch.setattr(runner["shutil"], "which", lambda name: None)
+    assert runner["main"](["--scope", "frontend"]) == 127
+    assert "Missing executable on PATH: npm" in capsys.readouterr().out

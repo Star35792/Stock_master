@@ -13,6 +13,7 @@
 | `scheduler` | 工作日同步、近期补齐、因子批量计算日级调度，以及 `daily_loop` 数据→因子闭环编排；所有调度入口写入 `system.job_log` |
 | `lake` | Parquet/DuckDB 离线数据湖 |
 | `backtest` | 日频事件回测内核 |
+| `services.backtest` / `services.backtest_query` / `services.backtest_snapshot` | 回测执行编排、结果查询与比较、确定性输入快照分别维护；`services.backtest.BacktestQueryService` 保留兼容导入，快照字段、版本及哈希序列化口径不变 |
 | `strategies` | 策略研究模板 |
 | `strategies.quality_value_attention` / `services.quality_value_data` / `repositories.strategy.quality_value_data` | 双低一高只读研究筛选：显式证据、硬门槛、归因/催化剂、六维评分；证据包CLI和数据库只读CLI，后者保留全股票池及数据缺口，无收益回测、仓位或交易信号 |
 | `strategies.price_value` / `services.price_value_research` | 纯 Decimal FCFE 情景计算及只读研究编排；消费可信行情与显式用户假设，不认证历史财务、不生成交易信号 |

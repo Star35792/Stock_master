@@ -394,6 +394,13 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     security_repo = FakeSecurityRepository(["600519.SH"])
     rebuild_calls: list[dict] = []
     curated_calls: list[str] = []
+    closed_connections: list[bool] = []
+    warm_connection = SimpleNamespace(close=lambda: closed_connections.append(True))
+    # This orchestration test must not read a developer's local Parquet releases.
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.WarmLayerStore.connect",
+        lambda self, **kwargs: warm_connection,
+    )
 
     def fake_rebuild(self: object, db: object, **kwargs: object):
         rebuild_calls.append(kwargs)
@@ -490,6 +497,8 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     assert curated_calls[0][1].get("factor_source_name") == "hithink_finance_dump"
     assert curated_calls[0][1].get("factor_version") == "v1"
     assert curated_calls[0][1].get("publish") is False
+    assert curated_calls[0][1].get("connection") is warm_connection
+    assert closed_connections == [True]
     assert job_log_repo.jobs[0].metadata_["curated_rebuilt"] is True
     assert job_log_repo.jobs[0].metadata_["adjustment_factor_rows"] == 10
 
