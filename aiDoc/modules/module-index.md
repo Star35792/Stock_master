@@ -45,7 +45,7 @@
 - `trade`：本地模拟推演账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
 - `positions`（独立 SQLite `data/positions.db`）：手工记账的真实持仓账本（`position_book`/`position_trade`）；持仓与盈亏由流水重放推导，估值价格取 DuckDB `market` 可信层。
 - `lake`：内容寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
-- `system`：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline`、`factor_batch_profiler` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
+- `system`（业务模块名，物理 schema 为 `metadata`）：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline`、`factor_batch_profiler` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录。
 
 ## 同步规则
 

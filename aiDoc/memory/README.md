@@ -7,9 +7,9 @@
 - 用户希望 vibe coding 时由 AI 主动维护产品、架构、代码规则、计划和记忆文档，不要让用户手动追文档。
 - 项目文档采用 `AGENT.MD` 作为 AI 协作规则唯一真源，`aiDoc/` 作为唯一项目文档目录，同时承载正式设计和轻量 reference。
 - 当前项目已经进入较大体量阶段，默认应通过 reference 精确读取相关文档，避免每次全量读取。
-- 日级数据→因子闭环由 `app/scheduler/daily_loop.py` 编排：`daily_sync` 构建 `market` 后，若 `factor_reads_curated=true` 且 `factor_adjust_type='qfq'`，则从 `market.daily_bar` 和 `raw.corporate_action` 重建 `curated/prices_qfq` 温层，再运行 `factor_pipeline` 滚动重算因子；`system.job_log` 记录每次运行状态，sync 或 curated 重建失败时都不继续执行因子计算。
-- **存储约定：不要长期堆放全量数据库副本。** `backend/data/stock_master.duckdb` 是唯一事实库，2026-10-13 已清理 6 个历史全量副本（累计 31.6 GiB，`backend/data` 从 40G 降至 8.3G）。需要灾备时按需临时导出或建立滚动保留策略，不要在仓库目录内保留多个完整 `.duckdb`。诊断与方案见 `aiDoc/relations/20261013-2207-storage-diagnosis-and-plan.md`。
-- `market.daily_bar` 的 `qfq` 行是 `none × adjustment_factor` 的确定性产物（1036 万行中 99.99% 可精确复现），属于可派生的存储冗余；但 `app/lake/curated.py` 与 `app/services/adjustment_build.py` 直接读这些行，移除前必须同步改造读取路径。
+- 日级数据→因子闭环由 `app/scheduler/daily_loop.py` 编排：行情同步完成后，按开关暂存构建 `curated/prices_qfq`，因子绑定暂存输入计算，经认证后发布并激活 market/curated release；失败不发布，任务留痕于物理 `metadata.job_log`（业务域称 system）。存储细节见 [系统关系](../relations/system-map.md)。
+- **存储约定：不要长期堆放全量数据库副本。** `backend/data/stock_master.duckdb` 是主事实库；独立研究库与手工 SQLite 账本按各自职责保存事实，2026-10-13 已清理 6 个历史全量副本（累计 31.6 GiB，`backend/data` 从 40G 降至 8.3G）。需要灾备时按需临时导出或建立滚动保留策略，不要在仓库目录内保留多个完整 `.duckdb`。诊断与方案见 `aiDoc/relations/20261013-2207-storage-diagnosis-and-plan.md`。
+- 2026-10-13 存储诊断中的 `market.daily_bar.qfq` 行是 `none × adjustment_factor` 的确定性产物（1036 万行中 99.99% 可精确复现），属于可派生的存储冗余；但 `app/lake/curated.py` 与 `app/services/adjustment_build.py` 直接读这些行，移除前必须同步改造读取路径。
 
 ## 工作偏好
 
@@ -21,14 +21,14 @@
 
 - 文档容易低估代码进度，尤其是 V4 研究入口、V6 工作台、上层代理因子、schema 扩展和数据工具边界。
 - 行业/政策类因子目前仍可能依赖当前行业标签；生产评分前需要历史行业映射。
-- 财务因子仍需从报告期/报告日期进一步升级到公告日或首次可得时间口径。
-- 估值因子点在时：valuation_snapshot 是收盘后市值（close×股本），属于 end-of-day 行情数据，因子查找用 <=（同日可用，策略次日开盘执行无前视）；financial_statement 仍用严格 <（公告次日才用）。两者口径不同是有意为之。
-- 估值数据：Eastmoney clist 接口可免 cookie 批量取当前总市值/流通市值/PE/PB（f20/f21/f9/f23），但不支持指定历史日期；东方财富估值分析日期接口可返回指定交易日的 PE_TTM/PB_MRQ 等供应商记录，现仅采集到独立 raw 批次。历史接口不提供可认证的首次可得时间或修订版本，故回填尚不能用于历史全市场收益回测。Xueqiu kline 带历史 pe/pb/market_capital 但需 cookie，当前未配置。
+- 财务因子已有公告日次日生效及报表修订留痕；供应商历史首次可得时间与完整修订证据仍须单独认证，不能把消费日期守卫当作全历史 PIT 证明。
+- 估值/财务消费时间边界不同：估值按交易日 `<=` 读取供次日信号使用，财报公告日严格 `<` 才生效；这是消费守卫，不是供应商历史首次可得性认证。补采的 `research.valuation_history` 仍为 `pit_verified=false`，不能仅凭日期过滤认定无前视。
+- 估值数据：Eastmoney clist 接口可免 cookie 批量取当前总市值/流通市值/PE/PB（f20/f21/f9/f23），但不支持指定历史日期；东方财富估值分析日期接口可返回指定交易日的 PE_TTM/PB_MRQ 等供应商记录，按入口分别采集到 raw 留痕或温层 `research.valuation_history` 研究表；不能把 raw-only 补采脚本与温层发布混为一谈。历史接口不提供可认证的首次可得时间或修订版本，故回填尚不能用于历史全市场收益回测。Xueqiu kline 入口需要 cookie，是否配置以运行环境为准。
 - **2026-10-21 拆分第二阶段完成**：`market.daily_bar`、`raw.daily_bar`、`market.adjustment_factor`、`factor.factor_value` 四张大表已完成控制面瘦身（`stock_master.duckdb` 从 4,397 MiB 降至 535 MiB，-87.8%），历史数据由 `data/warm/exported/` 中的 Parquet 温层承接。新增 `WarmLayerStore` 在内存 DuckDB 中合并 Parquet 历史与控制面热窗口，reader 无需改动 SQL 即可读到完整时间序列。`daily_loop`、因子计算、低价超跌反弹回测均已验证通过。
 - `market.daily_bar` 的 `UniqueConstraint` 已修正为 `(symbol, trade_date, adjust_type)`，`AdjustmentBuildService.rebuild_qfq` 已改为 `INSERT ... ON CONFLICT DO UPDATE` 以规避 DuckDB 同事务 DELETE 不可见问题。
-- **研究读路径默认走温层**（2026-10-22）：控制面 `market.daily_bar` 只有约 59 个交易日热窗口，任何跨年回测/IC 都必须读 `data/warm/exported/` 的 Parquet。改回测或研究读路径时，ORM 仓库与 `repositories/research_read.py` 这对孪生实现要同步改。
+- **研究读路径默认走温层**（2026-10-22）：当时诊断的控制面 `market.daily_bar` 只有约 59 个交易日热窗口（不是实时容量声明），任何跨年回测/IC 都必须读 `data/warm/exported/` 的 Parquet。改回测或研究读路径时，ORM 仓库与 `repositories/research_read.py` 这对孪生实现要同步改。
 - 温层连接不要 ATTACH 控制面 DuckDB：DuckDB 禁止同一文件被两个句柄打开（其一为读写）时报 `Unique file handle conflict`。用 `attach_control=False` 建纯 Parquet 连接，控制面读取继续走已打开的 ORM session。
-- **DuckDB 跨进程写互斥的工程约定**（2026-10-24）：引擎无服务器模式、文件级写锁不可配置。两层缓解已落地：①维护/研究脚本统一走 `app/utils/duckdb_write_lock.py`（锁文件 `data/duckdb_write.lock` / 研究 `data/research_write.lock`，O_EXCL 原子获取、崩溃 stale 抢占、超时报持有者 PID）；②strategy 回测产物拆独立 `data/research.duckdb`（ADR：`aiDoc/relations/20261024-1427-research-database-split.md`），研究脚本与 API/维护分域并行，不再互堵。FastAPI 进程不持锁（长驻单写者）。
+- **DuckDB 跨进程写互斥**：当前采用 `app/utils/duckdb_write_lock.py` 的 OS 互斥锁，常驻 `.guard` 文件维持稳定锁对象，PID 文件仅作诊断；不得按年龄抢占活跃锁或删除 `.guard`。主库与研究库分域协调；API 研究库初始化及请求同样使用研究锁。早期 `O_EXCL`/stale 抢占描述已被取代，当前边界见 [系统关系](../relations/system-map.md)。
 - **拆库迁移的两个坑**（2026-10-24，`migrate_strategy_to_research.py`）：①旧表经兼容桥 ALTER 追加的列在物理尾部，列序与 ORM 目标表不一致，`INSERT SELECT *` 会把 artifact_hash 塞进时间戳列报 Conversion Error——必须按目标列名显式 SELECT（`information_schema.columns`，注意 catalog 名是 `current_database()` 不是 'main'）；②ORM 的 sequence 建在库默认 schema（`nextval` 不带前缀），迁移后要在 research 库默认 schema `DROP+CREATE SEQUENCE START max(id)+1`（DuckDB 无 ALTER SEQUENCE RESTART），否则新插入从 1 开始撞主键。
 - **P2 偏差源回填的两个近似假设**（2026-10-24，影响一切消费这些表的数字解读）：①涨跌停回填（控制面 97% 覆盖）对历史期 ST 用 name 前缀近似当前期——主板 ST 的 5% 带宽在历史上被高估为 10%（偏宽松方向）；②行业时点表是「当前标签回填」（source=`current_label_backfill_20261024`，5,579 只、effective_from=上市日），假设行业从未变更。真实历史数据接入后用 `record_interval` 追加区间即可，无需重建。
 - DuckDB `corr()` 对退化分组返回 **NaN 而不是 NULL**，写进 `DECIMAL` 列会抛 `Conversion Error: Could not cast value nan`。任何 SQL 聚合结果写入定点列之前都要先过滤 NaN/inf。
@@ -49,12 +49,12 @@
 - **DuckDB WAL 被强杀后无法回放**（2026-10-26）：采集进程被 `timeout`/SIGTERM 强杀会留下 `.duckdb.wal`，之后**任何**连接（包括只读）报 `INTERNAL Error: Failure while replaying WAL file: Calling DatabaseManager::GetDefaultDatabase with no default database set`。DB 本体完好，但必须把 WAL 移走才能恢复；移之前先备份 DB + WAL 两份。DuckDB 不会自动收缩文件，删掉大 payload 后要显式 CHECKPOINT 才能回收空间。
 - **`special_treatment_status` 曾无任何数据源写入**（2026-10-26）：字段存在于 `raw` 与 `market` 两层模型，却恒为 NULL；因初筛把"未知"当"受限"，连续 83 次运行 0 个可复核候选。状态由证券简称派生（`ST`/`*ST`/`S*ST`/`SST` 前缀 → ST，`退` 后缀 → delisting），**只对 `security_type='stock'` 生效**——证券主表同时持有概念/行业指数，`ST板块` 是板块指数而非个股 ST，误判会把指数当受限标的。
 - **覆盖率闸门的分母口径要按数据源对齐**（2026-10-26）：可信日线含 569 个指数 bar（`security_type='index'`），而供应商估值表只提供个股；用全量 bar 做分母会让覆盖率天然少约 9 个百分点，恒低于 0.95 门槛。分母必须按 `security_type='stock'` 过滤。
-- **秩 IC 不等于可交易，端点价差才是**（2026-10-26）：`value_earnings_yield` 的 1/5/20 日 RankIC 全为正（+0.019/+0.025/+0.020），但多空端点价差全为负（−0.000122/−0.000836/**−0.006855**，20 日 t=−2.70），分位单调性 −0.037（倒 U 形）。因子池分级器因此新增**端点闸门**：进核心池要求 1 日多空价差**严格为正**。只看 IC 会把不可交易的因子放进核心池。
+- **正端点价差是入池必要证据之一，不足以证明可交易性**（2026-10-26）：`value_earnings_yield` 的 1/5/20 日 RankIC 全为正（+0.019/+0.025/+0.020），但多空端点价差全为负（−0.000122/−0.000836/**−0.006855**，20 日 t=−2.70），分位单调性 −0.037（倒 U 形）。因子池分级器因此新增**端点闸门**：进核心池要求 1 日多空价差**严格为正**。只看 IC 会把不可交易的因子放进核心池。
 - **`session.merge` 在 ORM 对象不带主键时退化为 INSERT**（2026-10-26）：`session.merge(FactorProfile(...))` 不带 `id` 时 SQLAlchemy 无法定位既有行，会走 INSERT 分支，重跑直接撞 `(factor_name, factor_version, trade_date)` 唯一约束——**修正后的证据写不进去**。因子画像的落库必须走 `FactorProfileRepository.upsert()`（`ON CONFLICT DO UPDATE`）。
 - **`coverage_rate` 的分母不能取因子自身非空集**（2026-10-26）：分子分母同集会让该指标恒等于 1（或 0.99+），把"因子只覆盖 71.7% 的市场"这种事实藏起来。分母必须取**当日价格宇宙**（有可信收盘价的证券数）。修正后 `value_earnings_yield` 的真实覆盖率是 0.6957（原显示 0.9984）。
 - **温层 release 链的列集可能不一致，且 `table_globs` 的顺序会决定 schema**（2026-10-26）：`factor.factor_value` 的旧 release 导出带代理列 `id`，新 release 不带。`WarmLayerStore.connect()` 原先用 `globs[0]` 的列集去 SELECT 所有 glob，于是报 `Binder Error: Referenced column "id" not found`。两处已修：①`table_globs` 里显式 `base_release_tag` 不再插到 lineage 队首（lineage 是新→旧，新 release 定义 view 的形状）；②列集按**并集**对齐、缺失列补 `NULL AS col`。
 - **`factor_definition` 的注册版本号必须与 profile 逐字一致**（2026-10-26）：批量画像的分类查表键是 `(name, version)`，`get_by_name_version` 查不到时 `category` 与 `pit_status` 双双退化为 `unknown`，因子因此进不了核心池。IC 证据由专用脚本产出的定义还必须 `is_active=False`——否则批量画像会按定义里的版本号去取（并不存在的）因子值，得到空截面并用 `observation_count=0` 覆盖既有证据。
 - **空截面必须 fail-closed，不能写入**（2026-10-26）：`FactorCrossSectionService._write_profiles` 原先会为「有宇宙无因子值」的交易日写 `observation_count=0` 的行，`upsert` 会把它**覆盖**到既有的有效证据行上。零观测的行不携带任何信息，一律跳过。
-- **因子池分级现在是四道闸门**（2026-10-26）：IC 闸门、覆盖率闸门、**端点闸门**（1 日多空价差严格为正）、**PIT 闸门**（`factor_definition.pit_status`：`look_ahead` 硬冻结、`unknown` 不得进核心池）、**生命周期闸门**（`factor_definition.status`：`retired` 硬冻结）。启用后核心池从 4 个收敛到 1 个（`volume_stability_20@v2-qfq-2y`）。`pit_status` / `status` 与 `is_active` 语义不同：前者是"是否可用"，后者是"是否参与批量画像"。
+- **因子池分级需联合检查**：IC、覆盖率、端点收益、定义 PIT、生命周期和画像证据资格共同约束核心池。`pit_status` / `status` 不等于 `is_active`，后者仅控制批量画像。2026-10-26 的“4→1”是旧口径历史结果；[2026-10-27 资格审计](../research/20261027-2122-strategy-readiness-audit.md)记录 `core=0`，不能沿用“唯一核心”结论；数值仅代表该日审计快照。
 - **`value_pe_ttm` 已退役，方向性错误**（2026-10-26）：`PE_TTM` 在亏损股为负（样本 26.51%），`-PE_TTM` 把深度亏损公司映射成大正数，最便宜五分位 100% 是亏损股（645,112 行）；限定 `PE_TTM>0` 后它与 `1/PE_TTM` 是同一单调变换（595/595 天 Spearman = 1.000）。退役证据留在 `v1-valhist` 供审计，修正后发布到 `v2-valhist`。**价值因子的方向必须先看端点价差符号再定**。
 - **通用价值因子必须排除金融行业**（2026-10-26）：银行/保险/券商（实测 122 只个股）的 PB/PE 口径与制造业不可跨行业横截面比较，且天然便宜会主导"最便宜"分位。统一用 `app/services/financial_sector.py::is_financial_industry` 过滤，IC 脚本提供 `--keep-financial-industry` 开关以便做对照实验。注意行业标签是**当前**行业（供应商不提供时点行业历史），属已知偏差。

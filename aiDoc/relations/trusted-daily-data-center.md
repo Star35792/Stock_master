@@ -162,8 +162,8 @@ AKShare / CSV / QMT  →  raw.daily_bar  →  校验/对账  →  market.daily_b
 `raw` 中可能包含错误、重复、冲突和未标准化数据。策略和回测只能读取：
 
 - `market.daily_bar`
-- 后续的 `factor.*`
-- 后续的 `strategy.*`
+- 已有的 `factor.*`
+- 已有的 `strategy.*`（产物位于独立研究库）
 
 ### 6.3 market 数据必须可追溯
 
@@ -255,17 +255,17 @@ V1 稳定后已经扩展出的能力：
 
 存储已从 PostgreSQL 单库切换到 DuckDB 分层湖（clean cut，不搬运历史分析数据）。当前实际形态：
 
-- 后端 DuckDB 单库（`data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor -> strategy -> portfolio/risk -> trade` 的可信链路与控制面（`system.job_log` 等）。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
+- 主 DuckDB（`data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor`、`portfolio/risk -> trade` 与控制面（物理表如 `metadata.job_log`，历史逻辑域称 `system`）。`strategy` 回测与训练产物存独立 `data/research.duckdb`，手工真实持仓账本存 SQLite `data/positions.db`；估值仍消费主库可信行情。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
 - `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release）。`curated/prices_qfq` 已接入 `daily_loop`：置真 `factor_reads_curated` 且 `adjust_type='qfq'` 时，先从 warm history + control hot window 构建临时数据集，因子通过绑定该临时路径的 `CuratedDailyBarReader` 计算，发布闸门通过后才原子切换正式目录并激活 release；关闭开关时仍走 ORM。其余 curated 数据集仍由离线脚本驱动。
 - `libs/hithink_sdk/marketdb` 是独立 DuckDB SDK/toolkit，适合 notebook、离线研究和 HiThink dump 使用，不直接等同于后端 `market` 可信层。
 
-分层存储架构（DuckDB 单库承载控制面+事务+温层查询、本地 Parquet 温层、本地 FS 冷存；不引入 PostgreSQL/SQLite/MinIO/Redis）见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`。`curated/prices_qfq` 已接入 `daily_loop`（`factor_reads_curated` 开关），`fundamentals_pit`、factor release 与完整 Parquet release 发布/校验仍属后续切片。
+分层存储最初决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`；当前还包含 [SQLite 账本例外](20261023-1925-position-ledger-sqlite.md) 与 [独立研究库](20261024-1427-research-database-split.md)，不再以早期“纯单库、无 SQLite”描述全部存储。`curated/prices_qfq` 已接入 `daily_loop`（`factor_reads_curated` 开关），`fundamentals_pit`、factor release 与完整 Parquet release 发布/校验仍属后续切片。
 
 ### 10.1 研究读路径（2026-10-22 新增）
 
 回测与因子研究的**读**路径已经可以直接读温层 Parquet，**写路径仍然只走 ORM**，控制面不因研究读而变大。
 
-- `app/repositories/research_read.py` 的 `WarmResearchReadRepository` 是 ORM 仓库的只读孪生实现，暴露 `list_daily_bars` / `list_factor_values` / `load_execution_calendar` / `coverage` / `total_trading_days` / `max_exported_date` / `tradability_coverage`。日线读取时会用 `app/market/price_limit.py` 补齐 `limit_up` / `limit_down`（控制面这两列全为 NULL）。
+- `app/repositories/research_read.py` 的 `WarmResearchReadRepository` 是 ORM 仓库的只读孪生实现，暴露 `list_daily_bars` / `list_factor_values` / `load_execution_calendar` / `coverage` / `total_trading_days` / `max_exported_date` / `tradability_coverage`。日线读取时会用 `app/market/price_limit.py` 补齐 `limit_up` / `limit_down`（对缺少供应商限价的记录推导，不据此声称历史状态证据完整）。
 - `app/services/backtest.py` 与 `app/services/strategy_research.py` 通过 `_research_read()` / `_factor_read()` 上下文管理器切换数据源，`research_read_source=warm|control`。**单元测试固定用 `control`**（`tests/conftest.py` 设置 `RESEARCH_READ_SOURCE=control`），否则临时测试库无法自己 ATTACH 自己。
 - 两道 fail-closed 闸门：`research_min_trading_days`（默认 200，release 被截断时直接失败）与「窗口末日不得超过 `max_exported_date`」。不要为了让回测跑起来而调低它们。
 - 温层连接默认 `attach_control=False`，即纯 Parquet 连接，不 ATTACH 控制面文件——DuckDB 不允许同一文件被两个句柄打开（其中一个为读写）时报 `Unique file handle conflict`。`market.corporate_action` 与 `market.trading_calendar` 因此仍走 ORM（这两张表未被瘦身，持有完整历史）。

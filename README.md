@@ -185,20 +185,23 @@ curl http://127.0.0.1:8000/health
 
 前端路由定义在 `frontend/src/router.ts`，已挂载页面路径：
 
-`/overview`、`/market`、`/factors`、`/price-value`、`/backtests`、`/portfolio`、`/paper`、`/quality`、`/operations`、`/alerts`、`/failures`（`/` 重定向到 `/overview`，未匹配路径同样重定向）。
+`/overview`、`/market`、`/factors`、`/price-value`、`/backtests`、`/positions`、`/portfolio`、`/paper`、`/quality`、`/operations`、`/alerts`、`/failures`（`/` 重定向到 `/overview`，未匹配路径同样重定向）。
 
-页面实现在 `frontend/src/pages/`：`MarketPage.vue`、`FactorPage.vue`、`PriceValuePage.vue`、`PaperTradingPage.vue`、`WorkspaceRoutePage.vue` 及其 `components/` 子目录；API 封装在 `frontend/src/api.ts`、`priceValueApi.ts`、`priceValueBacktestApi.ts`、`priceValueScreenApi.ts`。
+页面实现在 `frontend/src/pages/`：`MarketPage.vue`、`FactorPage.vue`、`PriceValuePage.vue`、`PositionsPage.vue`、`PaperTradingPage.vue`、`WorkspaceRoutePage.vue` 及其 `components/` 子目录；API 封装在 `frontend/src/api.ts`、`priceValueApi.ts`、`priceValueBacktestApi.ts`、`priceValueScreenApi.ts`。
 
 ## 5. 关键配置说明
 
 配置通过 `pydantic-settings` 加载，环境变量文件为 `backend/.env`（模板 `backend/.env.example`），定义在 `backend/app/config/settings.py`。
 
-| 配置项 | 说明 | 默认值 |
+| 配置项 | 说明 | 代码默认值 |
 | --- | --- | --- |
 | `APP_NAME` | 应用名（FastAPI title） | `stock-master` |
 | `APP_ENV` | 运行环境标识 | `dev` |
 | `APP_DEBUG` | 调试开关 | `true` |
-| `METADATA_DB_PATH` | DuckDB 单文件路径，派生 `database_url`（`duckdb:///...`） | `data/stock_master.duckdb` |
+| `METADATA_DB_PATH` | 主 DuckDB 路径，派生 `database_url`（`duckdb:///...`） | `data/stock_master.duckdb` |
+| `RESEARCH_DB_PATH` | 独立研究 DuckDB 路径 | `data/research.duckdb` |
+| `POSITIONS_DB_PATH` | 手工持仓账本 SQLite 路径 | `data/positions.db` |
+| `RESEARCH_READ_SOURCE` | 研究输入读取路径（`warm` / `control`） | `warm` |
 | `AKSHARE_TIMEOUT_SECONDS` | AkShare 超时 | `30` |
 | `HITHINK_FINANCE_API_KEY` | 同花顺金融数据服务密钥（缺失时自动同步记录警告并跳过） | 空 |
 | `HITHINK_FINANCE_BASE_URL` | 同花顺服务地址 | `https://fuyao.aicubes.cn` |
@@ -208,7 +211,7 @@ curl http://127.0.0.1:8000/health
 | `AUTO_DATA_SYNC_INTERVAL_SECONDS` | 自动同步检查间隔（最小 60 秒） | `3600` |
 | `DATA_LAKE_ROOT` | Parquet 温层根目录 | `data/warm` |
 | `RAW_LANDING_ROOT` | 原始落地根目录 | `data/raw_landing` |
-| `FACTOR_READS_CURATED` | 价格类因子是否改读 `curated/prices_qfq` Parquet（仅 qfq 生效） | `false` |
+| `FACTOR_READS_CURATED` | 价格类因子是否改读 `curated/prices_qfq` Parquet（仅 qfq 生效） | `true`；`.env.example` 显式设为 `false` |
 | `PRICE_VALUE_SCREEN_ENABLED` | 估值初筛晚间任务开关 | `true` |
 | `PRICE_VALUE_SCREEN_DIR` | 初筛结果输出目录 | `data/price_value_screens` |
 | `PRICE_VALUE_INPUT_PREP_ENABLED` | 估值输入准备任务开关 | `true` |
@@ -223,10 +226,7 @@ curl http://127.0.0.1:8000/health
 - 核心价格 / 金额 / 比率使用精确定点类型（DuckDB `DECIMAL`、Parquet `DECIMAL`），不使用浮点保存核心金融数据。
 - 应用代码版本号由 `settings.source_code_version()` 对 `app/**/*.py` 内容做 SHA-256 生成（形如 `source-<20位十六进制>`），无需手工配置。
 - 前端后端地址通过环境变量 `STOCK_MASTER_API_URL` 覆盖（见 `frontend/vite.config.ts`）。
-- 部署地址、域名、端口等：
-  ```
-  # 【待补：部署地址/域名/端口配置】
-  ```
+- 上文地址适用于本机开发；其他监听地址和端口由启动参数指定，前端代理目标由 `STOCK_MASTER_API_URL` 指定。
 
 ## 6. 常见问题
 
@@ -261,11 +261,11 @@ A：数据库初始化入口位于 `backend/app/database/`，随 API 启动执�
 
 - **单机单用户**：定位为个人平台，未做多租户、权限与并发写入设计。
 - **不连接实盘**：本项目只用于选股研究与持仓管理，不接入券商、不做自动化交易、不发送真实订单；真实账户只读同步、券商回报对账与受控交易均不在项目范围内。所有写操作只落在本地模拟推演账户。
-- **模拟执行使用固定 full-fill paper 模型**，不模拟滑点、冲击成本与真实撮合。
+- **模拟执行采用确定性 full-fill paper 模型**：使用固定 `a_share_cost_v1` 费率与 2 bps 滑点，并检查执行日可信行情的涨跌停/停牌等约束；不模拟市场冲击、撮合队列或部分成交，也不还原逐日历史真实费率。
 - **价值初筛不构成历史时点认证**：东方财富接口不提供可证明的供应商 as-of 时点，报告固定 `pit_verified=false`，不能用于历史全市场回测收益或自动交易。
-- **滚动回测不是全自动 walk-forward**：训练与选参仍由调用方完成，训练产物验证开关默认未验证；重叠窗口禁止直接复利。
+- **滚动回测尚非完整自动研究验证**：支持专用滚动入口逐测试窗执行，并可用 `selection_policy=training_ic_v1` 在训练窗自动选择因子与方向，保存不可变训练产物并绑定运行；合同仍为 `training_artifact_verified=false`。参数敏感性与 champion/challenger 晋级尚未形成自动闭环，不能据此宣称完整策略验证或全自动 walk-forward。重叠测试窗拒绝拼接，跨窗不结转持仓，拼接曲线仅为研究统计量。
 - **公司行为跨区间在事件会计落地前会被明确拒绝**；遇到公司行为、历史 ST/状态未知或缺失可信行情/涨跌停数据时，价格价值回测会拒绝运行。
-- **Parquet 温层尚未全链路接入**：`backend/app/lake` 已就绪但主要由离线脚本驱动，与 `daily_loop`、Parquet release 的接入是后续切片；`FACTOR_READS_CURATED` 默认关闭。
+- **温层已接入指定生产链路**：研究默认走温层读取；`curated/prices_qfq` 按开关接入 `daily_loop` 暂存构建、因子认证与 release 发布。其余 curated 数据集未因此自动接入；代码默认与 `.env.example` 的开关值不同，以运行配置为准。
 - **模拟盘回撤口径**为“自监控开始以来”，不是完整历史回撤。
 - **风格代理因子为显式研究假设**（size=ln 市值、value=-PB、momentum/volatility/liquidity=factor_value 的横截面 z-score），基准成分股缺失因子时会主动回退为组合暴露。
 - **数据源不稳定**：单一数据源可能缺新 ETF、指数或特殊品种，需依赖补充源与人工修复闭环。

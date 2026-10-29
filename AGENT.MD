@@ -57,7 +57,7 @@
 
 ## 当前项目定位
 
-Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，面向单机单用户采用极简分层存储：DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载控制面、事务事实与 `raw -> market -> factor -> ... -> trade` 全链路，大体量列式温层落本地 Parquet（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。两个已决策的例外：手工录入的真实持仓账本（`positions` 域，`position_book`/`position_trade`）存独立 SQLite 文件 `data/positions.db`（决策见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`），估值价格仍取 DuckDB `market` 可信层；strategy 回测产物 6 张表存独立 `data/research.duckdb`，研究脚本与 API/维护进程分域并行写（`aiDoc/relations/20261024-1427-research-database-split.md`）。除此之外经评估不引入 PostgreSQL/SQLite/MinIO/Redis。`backend/app/lake` 温层 Parquet 工具已就绪但主要由离线脚本驱动，接入 `daily_loop` 与 Parquet release 为后续切片。
+Stock Master 是 Python 3.13 + FastAPI 的个人量化平台，面向单机单用户采用极简分层存储：DuckDB 单库（`data/stock_master.duckdb`）经 ORM 承载控制面、事务事实与 `raw -> market -> factor -> ... -> trade` 全链路，大体量列式温层落本地 Parquet（见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`）。两个已决策的例外：手工录入的真实持仓账本（`positions` 域，`position_book`/`position_trade`）存独立 SQLite 文件 `data/positions.db`（决策见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`），估值价格仍取 DuckDB `market` 可信层；strategy 回测产物 6 张表存独立 `data/research.duckdb`，研究脚本与 API/维护进程分域并行写（`aiDoc/relations/20261024-1427-research-database-split.md`）。除此之外经评估不引入 PostgreSQL/SQLite/MinIO/Redis。`curated/prices_qfq` 已按 `factor_reads_curated` 开关接入 `daily_loop`：暂存构建、因子认证、质量闸门通过后发布并激活 release；其余 curated 数据集按各模块现状逐步接入。
 
 **项目边界（重要）**：本项目**只用于选股研究与持仓管理**，不连接券商，不做实盘自动化交易，不发送任何真实订单。系统产出止于「研究结论 + 选股名单 + 组合持仓方案 + 风险预算与持仓推演」，由人工在外部终端自行下单。`trade` 域在此语义下仅指本地模拟推演账户，不是通向真实账户的跳板；不引入真实账户只读适配器、外部订单幂等状态机、券商回报对账或 kill switch。
 
@@ -94,7 +94,7 @@ models / database
 - Service 层负责业务流程，不处理 HTTP 请求对象。
 - Repository 层负责数据库读写和查询，不承载业务决策。
 - Model 层只定义 ORM 表结构和关系。
-- Alembic 负责 schema 变更。
+- 当前 schema 由各库 ORM 初始化、主库显式兼容桥及专项维护脚本维护；尚无完整版本化迁移与回退体系。schema 变更仍须经过既定评审、幂等升级与验证，不得将启动初始化视为任意改库授权。
 - 外部数据源适配器只负责获取和初步解析数据，不直接写 `market`。
 
 ### 数据中心规则

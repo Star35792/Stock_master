@@ -15,16 +15,16 @@
 
 ## 事实源边界
 
-- DuckDB 是当前唯一业务事实存储，本地 Parquet 保存 curated 温层数据集。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
+- 主 DuckDB（`data/stock_master.duckdb`）保存市场、因子、组合、风控、模拟推演与控制面事实；独立研究 DuckDB 保存策略产物，SQLite 保存手工持仓账本，本地 Parquet 保存温层历史及 curated 数据集。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
 - 温层 Parquet 除 curated 数据集外还承载**研究层表**：只存在于 Parquet、无 ORM 模型、无 Alembic 迁移、不出现在控制面 `information_schema`。当前有一张：`research.valuation_history`（东财估值历史序列，全部行 `pit_verified=false`，只用于研究口径）。判定标准见 `aiDoc/modules/schema-plan.md` §17，字段级 PIT 判定与偏差登记见 `aiDoc/data/20261026-valuation-history-backfill.md`。研究层表不得被 `market` 层的通用读取器拾取。
-- 唯一例外：手工记账的真实持仓账本存独立 SQLite `data/positions.db`（`positions` 域，2026-10-23 决策，见 [ADR](20261023-1925-position-ledger-sqlite.md)）；账本持仓的估值价格仍取 DuckDB `market` 可信层，持仓与盈亏由流水重放推导、不落库。
+- 手工记账的真实持仓账本存独立 SQLite `data/positions.db`（`positions` 域，2026-10-23 决策，见 [ADR](20261023-1925-position-ledger-sqlite.md)）；账本持仓的估值价格仍取 DuckDB `market` 可信层，持仓与盈亏由流水重放推导、不落库。
 - strategy 回测产物（`backtest_*`、`training_artifact`）自 2026-10-24 起存独立 `data/research.duckdb`：研究脚本持 `data/research_write.lock` 写产物，API/维护进程写主库，两域不再竞争同一把文件级写锁（见 [ADR](20261024-1427-research-database-split.md)）；行情/因子/日历读路径不变。维护/研究脚本写任一库前走 `app/utils/duckdb_write_lock.py` 对应域锁。
 - `raw` 保存来源、批次、原始 payload 和异常数据。
 - `market` 是可信消费层。
 - `factor` 保存可复现的因子定义、运行和值。
 - `strategy` 保存回测运行、成交、净值、持仓和绩效。
 - `portfolio` 保存不可执行草案，`risk` 保存绑定服务端事实的评估，`trade` 保存短时确认和 approval 唯一绑定的 paper 执行批次。公共执行必须按 `plan -> equity/readiness -> risk evaluation -> approval -> execution batch` 单向消费，不能绕过确认直接调用旧纸盘内核。`trade` 在确认与执行两阶段都按 `market.daily_bar`（`adjust_type=none`）执行 `AShareTradabilityPolicy`；执行批次哈希显式包含 `execution_day_bar_hash`，把批次绑定到预演时的执行日行情快照
-- `system` 保存任务、质量问题和审计。
+- `system` 是任务、质量与审计的业务模块名，相关 ORM 表实际位于 `metadata` schema（如 `metadata.job_log`）；文档中的 `system.*` 为历史逻辑域称呼，编写 SQL 时应使用物理表名。
 
 ## 工具边界
 

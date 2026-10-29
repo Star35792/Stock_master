@@ -1,5 +1,7 @@
 # 分层存储架构
 
+> 历史决策与后续覆盖：本文的“纯 DuckDB 单库、无 SQLite”是最初决策；当前增加了 [SQLite 持仓账本](20261023-1925-position-ledger-sqlite.md) 与 [独立研究 DuckDB](20261024-1427-research-database-split.md)。当前存储及温层发布状态以 [系统关系](system-map.md) 为准，以下原始取舍保留供追溯。
+
 ## 1. 决策
 
 Stock Master 不再以 PostgreSQL 承载全部数据。面向**单机单用户**的个人量化场景，生产存储按职责分层，但只引入实际用得上的组件：

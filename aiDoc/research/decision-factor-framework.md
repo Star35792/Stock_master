@@ -44,7 +44,7 @@
 | `capital_flow` | 资金结构与拥挤度 | 主力资金、北向、融资、ETF 流、机构拥挤、拥挤度 |
 | `composite` | 复合决策 | 加权百分位排名复合得分 |
 
-分类常量定义在 `backend/app/factors/categories.py`（`FactorCategory` 枚举、`FACTOR_CATEGORY_LABELS`、`FACTOR_CATEGORY_ORDER`）。因子服务注册时通过 `definition_repository.ensure(category=...)` 写入；`factor_cross_section` 生成的派生因子（`xxx__rank`、`xxx__zscore`、`xxx__winsor`、`xxx__industry_neutral`）继承基础因子的 `category`。历史因子定义由 Alembic 迁移 `20260722_0024` 按因子名回填，派生因子按基础因子回填。前端 `FactorPage` 提供分类下拉过滤和卡片分类标签。
+分类常量定义在 `backend/app/factors/categories.py`（`FactorCategory` 枚举、`FACTOR_CATEGORY_LABELS`、`FACTOR_CATEGORY_ORDER`）。因子服务注册时通过 `definition_repository.ensure(category=...)` 写入；`factor_cross_section` 生成的派生因子（`xxx__rank`、`xxx__zscore`、`xxx__winsor`、`xxx__industry_neutral`）继承基础因子的 `category`。历史设计曾引用 Alembic `20260722_0024`，当前仓库无该迁移文件；新注册及派生定义由服务写入/继承分类，既有定义需另行核对，不能凭旧迁移编号认定已回填。前端 `FactorPage` 提供分类下拉过滤和卡片分类标签。
 
 ### 因子目录预注册
 
@@ -119,7 +119,7 @@
 
 **`value_pe_ttm` 已退役（2026-10-26）**。`-PE_TTM` 在亏损股为正，样本 26.51% 为亏损，最便宜五分位 100% 是亏损股；该因子度量的是"亏得有多狠"而非"有多便宜"。修正后的证据发布到 `v2-valhist`，退役证据保留在 `v1-valhist` 供审计，定义标 `status='retired'`。
 
-**因子池分级引入四道闸门（2026-10-26）**。秩 IC 只说明"单调相关"，不说明"极端分位可交易"。分级器现在同时要求：
+**因子池分级约束**（2026-10-26 起逐步加入，含后续证据资格检查）。秩 IC 只说明"单调相关"，不说明"极端分位可交易"。分级器现在同时要求：
 
 | 闸门 | 判据 | 不通过的后果 |
 |---|---|---|
@@ -128,8 +128,9 @@
 | **端点闸门** | 1 日多空（top−bottom 分位）价差**严格为正** | 观察池 / 冻结池 |
 | **PIT 闸门** | `factor_definition.pit_status='point_in_time'` | `look_ahead` → 硬冻结；`unknown` → 不得进核心池 |
 | **生命周期闸门** | `factor_definition.status='active'` | `retired` → 硬冻结 |
+| **证据资格闸门** | 汇总画像均为 `evidence_eligibility='strategy_eligible'` | 研究限定证据不得进入核心池；该字段仍不等于完整策略认证 |
 
-启用后核心池从 4 个收敛到 **1 个**（`volume_stability_20@v2-qfq-2y`）：`max_drawdown_20` 因端点为负、`value_earnings_yield` 因端点为负且覆盖率 0.6957 低于 0.70、`value_pb_mrq` 因 PIT 前视而落榜。通用价值因子另按金融正确性排除银行/保险/券商等金融行业标的（其 PB/PE 口径与工业股不可横截面比较）。完整证据与判定见 `aiDoc/data/20261026-valuation-history-backfill.md` §6.2~§6.5。
+2026-10-26 旧口径历史结果为核心池从 4 个收敛到 **1 个**（`volume_stability_20@v2-qfq-2y`）：`max_drawdown_20` 因端点为负、`value_earnings_yield` 因端点为负且覆盖率 0.6957 低于 0.70、`value_pb_mrq` 因 PIT 前视而落榜。通用价值因子另按金融正确性排除银行/保险/券商等金融行业标的（其 PB/PE 口径与工业股不可横截面比较）。完整证据与判定见 `aiDoc/data/20261026-valuation-history-backfill.md` §6.2~§6.5。新增证据资格闸门后，[2026-10-27 资格审计](20261027-2122-strategy-readiness-audit.md)记录 `core=0`，v1 为 frozen、v2 为 observation；这是带日期的审计结果，不能代替后续实时核对。
 
 ### 3.4 行业景气
 
@@ -406,7 +407,7 @@ A 股行业层面经常受政策定价影响。缺少政策与监管因子时，
 
 2026-10-27 增量：自动采集闭环的日级因子管道显式选取 16 个可信日线可计算的价量因子，包含既有 7 个核心项及 9 个扩展项。服务独立调用时的默认清单仍为 7 个，历史研究结果的默认口径不变；扩展项尚未完成历史回填和 IC/profile 验证，不能据此取得策略资格。换手率历史缺口继续阻断 turnover_percentile_120 和 crowding_score。
 
-2026-10-27 策略研究增量：新增 opt-in 的 evidence_gated 预设，只选用当前唯一通过 IC、端点、覆盖、PIT 与生命周期门槛的 volume_stability_20（v1-qfq 取值，v2-qfq-2y 提供历史画像证据）。以 2025-11-03~2026-04-30 旧温层窗口、20 交易日调仓、组合约束跑一次单窗回测（run_id=63），净收益 +14.94%、最大回撤 -13.75%、总佣金 5993.01 元；窗口剔除公司行为证券、存在幸存者偏差且无样本外验证，不得宣称优于旧策略或可交易收益。2026-10-26 当前可信日线另生成单因子人工复核名单：非 ST、上市至少 4 个月、20 日平均成交额至少 3000 万元、20 日波动低于合格样本第 90 百分位、行业当前标签最多 4 只，先按因子降序取 100 只再取 20 只；快照与名单见 deliverables/research/stock_selection_20261026.json/csv。该名单是研究观察，不是下单建议。
+2026-10-27 策略研究增量：新增 opt-in 的 evidence_gated 预设，按当时旧分级选用 volume_stability_20，曾混用 v1-qfq 取值与 v2-qfq-2y 画像；[同日后续资格审计](20261027-2122-strategy-readiness-audit.md)已否定该资格继承，记录 `core=0`，预设仅保留研究用途。以 2025-11-03~2026-04-30 旧温层窗口、20 交易日调仓、组合约束跑一次单窗回测（run_id=63），净收益 +14.94%、最大回撤 -13.75%、总佣金 5993.01 元；窗口剔除公司行为证券、存在幸存者偏差且无样本外验证，不得宣称优于旧策略或可交易收益。2026-10-26 当前可信日线另生成单因子人工复核名单：非 ST、上市至少 4 个月、20 日平均成交额至少 3000 万元、20 日波动低于合格样本第 90 百分位、行业当前标签最多 4 只，先按因子降序取 100 只再取 20 只；快照与名单见 deliverables/research/stock_selection_20261026.json/csv。该名单是研究观察，不是下单建议。
 
 2026-10-27 资格复核更正：上段“唯一通过”是当时因子池口径，不能授予 v1-qfq 回测。当前含证据来源资格闸门的主库分级 `core=0`：v1-qfq frozen，v2-qfq-2y observation；两者均未取得当前画像的 `strategy_eligible`。预设名称只作历史兼容，输出标注 research_only。复核证据及后续门槛见 [策略资格与后续验证前置审计](20261027-2122-strategy-readiness-audit.md)。
 

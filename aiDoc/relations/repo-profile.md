@@ -15,6 +15,10 @@ Stock Master 是 Python 3.13 + FastAPI + DuckDB + SQLAlchemy 的个人量化平�
 - `libs/hithink_sdk/`：独立 HiThink SDK / DuckDB toolkit。
 - `aiDoc/`：正式项目文档和 AI 协作 reference 层。
 
+## 存储与初始化
+
+主库 DuckDB、独立研究 DuckDB、SQLite 手工账本及 Parquet 温层的职责见 [系统关系](system-map.md)。各库初始化入口位于 `backend/app/database/`；当前没有 Alembic 迁移目录，完整版本化迁移与回退体系仍是缺口。
+
 ## 不要误用
 
 - `libs/hithink_sdk/marketdb` 不是后端的 DuckDB 可信层。

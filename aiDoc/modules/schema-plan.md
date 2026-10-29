@@ -1,6 +1,6 @@
 # 数据库 Schema 规划
 
-本文是 V1 可信日线数据中心的数据库规划，后续 SQLAlchemy 模型和 Alembic migration 应以本文为依据。
+本文记录 V1 数据中心的初始表契约及后续已落地表域。当前模型与各库初始化代码是实现证据：主库 `app/database/session.py`、研究库 `research_session.py`、账本 `positions_session.py`。仓库没有 Alembic 迁移目录；主库以显式兼容桥维护既有 schema，尚无完整版本化迁移与回退体系。
 
 ## 1. 设计原则
 
@@ -19,10 +19,10 @@
 ```text
 raw       原始导入层
 market    可信市场数据层
-system    任务、质量、审计层
+metadata  任务、质量、审计层（业务模块名 system）
 ```
 
-当前 `app/database/base.py` 已包含多个长期 schema，且代码已经从 V1 扩展到因子、策略、组合、模拟盘、财务和另类数据：
+主库创建的 schema 名称定义在 `app/database/session.py::SCHEMAS`，不在 `base.py`。当前清单如下；创建 `strategy` 命名空间不表示主库持有研究产物表：
 
 ```python
 SCHEMAS = (
@@ -32,12 +32,14 @@ SCHEMAS = (
     "factor",
     "strategy",
     "portfolio",
+    "risk",
     "trade",
-    "system",
+    "lake",
+    "metadata",
 )
 ```
 
-V1 首先落地 `raw`、`market`、`system`；当前代码和迁移已经继续落地 `fundamental`、`factor`、`strategy`、`portfolio`、`trade` 等 schema。
+`system` 为历史文档中的业务域名，相关 ORM 表物理上位于 `metadata`；下文物理表清单使用 `metadata.*`。研究库由 `research_session.py` 创建 `strategy` schema，模型挂 `ResearchBase`；SQLite 账本独立初始化，不属于主库 schema。
 
 ## 3. 首批表清单
 
@@ -53,9 +55,9 @@ market.daily_bar
 market.daily_bar_source_compare
 market.manual_correction
 
-system.job_log
-system.data_quality_issue
-system.data_source
+metadata.job_log
+metadata.data_quality_issue
+metadata.data_source
 ```
 
 其中最小可运行闭环至少需要：
@@ -65,8 +67,8 @@ raw.import_batch
 raw.daily_bar
 market.security
 market.daily_bar
-system.data_quality_issue
-system.job_log
+metadata.data_quality_issue
+metadata.job_log
 ```
 
 ## 4. raw.import_batch
@@ -337,7 +339,7 @@ index(is_conflict)
 | `created_at` | `timestamptz` | 是 | 创建时间 |
 | `applied_at` | `timestamptz` | 否 | 应用时间 |
 
-## 11. system.data_quality_issue
+## 11. metadata.data_quality_issue
 
 ### 作用
 
@@ -373,7 +375,7 @@ index(issue_type)
 index(severity)
 ```
 
-## 12. system.job_log
+## 12. metadata.job_log
 
 ### 作用
 
@@ -398,7 +400,7 @@ index(severity)
 | `metadata` | `jsonb` | 否 | 额外信息 |
 | `created_at` | `timestamptz` | 是 | 创建时间 |
 
-## 13. system.data_source
+## 13. metadata.data_source
 
 ### 作用
 
@@ -424,15 +426,17 @@ index(severity)
 unique(source_name)
 ```
 
-## 14. 迁移顺序建议
+## 14. V1 初始建表依赖顺序
 
-1. 创建 schema：`raw`、`market`、`system`。
-2. 创建 `system.data_source`、`raw.import_batch`、`system.job_log`。
+以下保留 V1 初始依赖关系；当前各库初始化与兼容升级以 `app/database/` 代码为准，不是可直接执行的迁移脚本。
+
+1. 创建 schema：`raw`、`market`、`metadata`。
+2. 创建 `metadata.data_source`、`raw.import_batch`、`metadata.job_log`。
 3. 创建 `raw.daily_bar`。
 4. 创建 `market.security`、`market.trading_calendar`。
 5. 创建 `market.daily_bar`。
 6. 创建 `market.daily_bar_source_compare`。
-7. 创建 `system.data_quality_issue`。
+7. 创建 `metadata.data_quality_issue`。
 8. 创建 `market.manual_correction`。
 9. 创建索引和约束。
 
@@ -460,9 +464,9 @@ unique(source_name)
 
 ```text
 raw.import_batch.status: running / success / failed / partial
-system.job_log.status: running / success / failed / partial
-system.data_quality_issue.status: open / ignored / fixed / false_positive
-system.data_quality_issue.severity: info / warning / error / critical
+metadata.job_log.status: running / success / failed / partial
+metadata.data_quality_issue.status: open / ignored / fixed / false_positive
+metadata.data_quality_issue.severity: info / warning / error / critical
 ```
 
 ### 15.3 真实采集索引
@@ -495,8 +499,8 @@ where quality_status in ('trusted', 'manual_fixed')
 质量问题和人工修复会成为后续数据运营界面的主要入口，因此增加：
 
 ```sql
-index system.data_quality_issue(symbol, status, trade_date)
-index system.data_quality_issue(status, severity, created_at)
+index metadata.data_quality_issue(symbol, status, trade_date)
+index metadata.data_quality_issue(status, severity, created_at)
 index market.manual_correction(symbol, trade_date, adjust_type, field_name)
 ```
 
@@ -512,12 +516,12 @@ V1 暂不引入以下设计：
 ## 16. 当前已扩展表域
 
 以下表域已经不再是“暂不创建”，而是当前代码的一部分：
-- `factor.*`：因子定义、运行批次、因子值、横截面 profile。`factor.factor_definition` 新增非空 `category` 字段（11 个决策域分类，见 `aiDoc/research/decision-factor-framework.md`）与 `ix_factor_definition_category` 索引；派生因子（`xxx__transform`）继承基础因子分类，由 Alembic `20260722_0024` 回填。
+- `factor.*`：因子定义、运行批次、因子值、横截面 profile。`factor.factor_definition` 新增非空 `category` 字段（11 个决策域分类，见 `aiDoc/research/decision-factor-framework.md`）与 `ix_factor_definition_category` 索引；派生因子（`xxx__transform`）继承基础因子分类，历史设计曾引用 Alembic `20260722_0024`，当前仓库无该迁移；新注册及派生定义由服务写入/继承分类，既有数据不能仅凭旧迁移编号认定已回填。
   - **2026-10-26 新增两列**：`factor_definition.pit_status`（`point_in_time` / `look_ahead` / `unknown`，默认 `unknown`）与 `factor_definition.status`（`active` / `retired`，默认 `active`）。两者是因子池分级器的硬闸门输入：`look_ahead` 与 `retired` 的定义硬冻结，`unknown` 不得进入核心池。`pit_status` 与 `status` 互不等价于 `is_active`——`is_active` 表示"是否参与批量画像"，`status` 表示"该定义是否还是活的证据"；IC 证据由专用脚本产出的定义因此 `is_active=False` 但 `status='active'`。
-  - **`factor.factor_profile` 新增三个列**：`long_short_forward_return_5d`、`long_short_forward_return_20d`（与既有 `long_short_forward_return_1d` 同义）与 `quantile_monotonicity_1d` / `top_quantile_turnover` 的落库保障。端点价差（top−bottom 分位）是"极端分位是否可交易"的直接证据，分级器以 1 日端点严格为正作为进入核心池的硬闸门。
+  - **`factor.factor_profile` 扩展指标列**：`long_short_forward_return_5d`、`long_short_forward_return_20d`（与既有 `long_short_forward_return_1d` 同义）与 `quantile_monotonicity_1d` / `top_quantile_turnover` 的落库保障。端点价差（top−bottom 分位）是极端分位收益方向的必要研究证据之一，不能单独证明可交易性，分级器以 1 日端点严格为正作为进入核心池的硬闸门。
   - **证据资格（2026-10-26）**：`factor.factor_profile.evidence_eligibility`（`strategy_eligible` / `research_only`，默认 `research_only`）和 `evidence_eligibility_reason` 附着于每日证据，而不是因子定义。汇总时只要任一日不是 `strategy_eligible` 即保持研究限定；核心池同时要求定义 PIT 合格和证据资格合格。这样未来同一定义用真实 PIT 快照重算时能获得资格，而今天补采的历史行不会被误判为可交易。
   - 这些列由启动兼容桥 `app/database/session.py::apply_schema_compatibility` 幂等补齐（`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + 既有行回填默认值），项目当前**没有** Alembic 迁移目录，schema 变更走该兼容桥。
-- `strategy.*`：回测运行、成交、净值、持仓和绩效。**2026-10-24 起这 6 张表物理上位于独立 `data/research.duckdb`**（模型挂 `ResearchBase`，服务层 `research_db=None` 兼容参数贯穿，迁移脚本 `migrate_strategy_to_research.py`；见 `aiDoc/relations/20261024-1427-research-database-split.md`），schema 限定名 `strategy.*` 不变，SQL/ORM 查询写法不变。新库训练产物关联 `backtest_run.training_artifact_id -> training_artifact.id` 使用默认外键删除限制，禁止删除被回测引用的产物，允许空引用；DuckDB 不支持 `ON DELETE SET NULL`，不能依赖它静默断开血缘。启动兼容桥为旧库幂等添加 nullable 的 `training_artifact_id` 和索引，保留已有回测记录；旧表追加列不追补外键，启用训练产物绑定前仍需正式约束迁移。当前滚动执行关闭，训练产物验证尚未完成；实际用户数据库未在本次开发中直接升级。
+- `strategy.*`：回测运行、成交、净值、持仓和绩效。**2026-10-24 起这 6 张表物理上位于独立 `data/research.duckdb`**（模型挂 `ResearchBase`，服务层 `research_db=None` 兼容参数贯穿，迁移脚本 `migrate_strategy_to_research.py`；见 `aiDoc/relations/20261024-1427-research-database-split.md`），schema 限定名 `strategy.*` 不变，SQL/ORM 查询写法不变。新库训练产物关联 `backtest_run.training_artifact_id -> training_artifact.id` 使用默认外键删除限制，禁止删除被回测引用的产物，允许空引用；DuckDB 不支持 `ON DELETE SET NULL`，不能依赖它静默断开血缘。启动兼容桥为旧库幂等添加 nullable 的 `training_artifact_id` 和索引，保留已有回测记录；旧表追加列不追补外键，启用训练产物绑定前仍需正式约束迁移。当前独立滚动入口已支持不可变训练产物绑定与逐测试窗执行，并可启用训练窗自动选参；合同仍标记 `training_artifact_verified=false`，不能将产物绑定等同输入证据或策略资格认证。
   - 价格价值假设回测复用上述表，无新增 schema 或迁移。`backtest_run.parameters` 保存 `price_value_assumption_v1` 合同、显式假设、市场快照、引擎版本、输入哈希及完整 `price_value_report`（含决策日志）；`validation_mode=none`、`pit_verified=false`。标准成交/净值/持仓保持原定点精度，JSON 报告保留 Decimal 字符串精度；写入仅是研究存储，不创建 `trade.*` 事实。
 - `raw.daily_bar / market.daily_bar`：估值研究依赖 `limit_up / limit_down / is_suspended / special_treatment_status`，从选定 raw 记录复制至可信日线。沿用当前 DuckDB 初始化兼容桥幂等补列，旧行限价和特殊处理状态保留 NULL，停牌字段沿用 false 默认值；默认值不证明历史可交易，研究仍要求明确普通状态和有效限价。既有值不覆盖，实际用户数据库未由本次开发直接升级。
 - `market.security_status_event`：记录每只股票在每个交易日的状态（正常、停牌、ST、*ST、退市整理、未上市、已退市等），作为区分“真实停牌”与“数据缺失”的事实源。`market.daily_bar` 只保存可交易日行情，停牌日无 bar；下游应通过本表判断证券可交易性。
