@@ -97,6 +97,7 @@ from sqlalchemy import select
 
 from app.config.settings import settings
 from app.database.session import SessionLocal
+from app.factors.quantile_diagnostics import prepare_tie_aware_quantiles
 from app.models.market import Security
 from app.repositories.factor import FactorProfileRepository
 from app.repositories.warm_layer import WarmLayerStore
@@ -293,91 +294,10 @@ def _load_daily_ic(
         WHERE p.close > 0
         """
     )
-    con.execute(
-        """
-        CREATE OR REPLACE TEMP TABLE scored AS
-        SELECT
-            *,
-            rank() OVER (
-                PARTITION BY factor_name, trade_date ORDER BY value
-            ) AS rk_value,
-            rank() OVER (
-                PARTITION BY factor_name, trade_date ORDER BY fwd1
-            ) AS rk_fwd1,
-            rank() OVER (
-                PARTITION BY factor_name, trade_date ORDER BY fwd5
-            ) AS rk_fwd5,
-            rank() OVER (
-                PARTITION BY factor_name, trade_date ORDER BY fwd20
-            ) AS rk_fwd20,
-            ntile(5) OVER (
-                PARTITION BY factor_name, trade_date ORDER BY value
-            ) AS bucket
-        FROM joined
-        """
-    )
-    # Top-quantile membership per day, so the turnover between consecutive
-    # trading days can be measured the same way ``FactorCrossSectionService``
-    # measures it.
-    con.execute(
-        f"""
-        CREATE OR REPLACE TEMP TABLE top_members AS
-        SELECT factor_name, trade_date, symbol
-        FROM scored
-        WHERE bucket = {QUANTILE_COUNT}
-        """
-    )
-    con.execute(
-        """
-        CREATE OR REPLACE TEMP TABLE top_sets AS
-        SELECT
-            factor_name,
-            trade_date,
-            list(symbol ORDER BY symbol) AS members
-        FROM top_members
-        GROUP BY 1, 2
-        """
-    )
-    con.execute(
-        """
-        CREATE OR REPLACE TEMP TABLE top_turnover AS
-        WITH lagged AS (
-            SELECT
-                factor_name,
-                trade_date,
-                members,
-                LAG(members) OVER (
-                    PARTITION BY factor_name ORDER BY trade_date
-                ) AS prev_members
-            FROM top_sets
-        )
-        SELECT
-            factor_name,
-            trade_date,
-            CASE
-                WHEN prev_members IS NULL THEN NULL
-                ELSE 1.0 - (
-                    len(list_intersect(members, prev_members))
-                    / GREATEST(len(members), 1)
-                )
-            END AS top_quantile_turnover
-        FROM lagged
-        """
-    )
-    # Bucket-level forward returns feed the monotonicity diagnostic: the
-    # correlation between the bucket index and the bucket mean forward return.
-    con.execute(
-        """
-        CREATE OR REPLACE TEMP TABLE bucket_returns AS
-        SELECT
-            factor_name,
-            trade_date,
-            bucket,
-            AVG(fwd1) AS bucket_mean_fwd1
-        FROM scored
-        WHERE fwd1 IS NOT NULL
-        GROUP BY 1, 2, 3
-        """
+    prepare_tie_aware_quantiles(
+        con,
+        quantile_count=QUANTILE_COUNT,
+        endpoint_share=QUANTILE_SHARE,
     )
     rows = con.execute(
         f"""
@@ -387,11 +307,11 @@ def _load_daily_ic(
                 trade_date,
                 count(*) AS observation_count,
                 corr(value, fwd1) AS ic_1d,
-                corr(rk_value, rk_fwd1) AS rank_ic_1d,
+                corr(rk_value_1d, rk_fwd1) AS rank_ic_1d,
                 corr(value, fwd5) AS ic_5d,
-                corr(rk_value, rk_fwd5) AS rank_ic_5d,
+                corr(rk_value_5d, rk_fwd5) AS rank_ic_5d,
                 corr(value, fwd20) AS ic_20d,
-                corr(rk_value, rk_fwd20) AS rank_ic_20d,
+                corr(rk_value_20d, rk_fwd20) AS rank_ic_20d,
                 avg(value) AS mean_value,
                 stddev_pop(value) AS sd_value,
                 min(value) AS min_value,
@@ -401,12 +321,12 @@ def _load_daily_ic(
                 count(*) FILTER (
                     WHERE abs(value) > 10
                 ) AS extreme_count,
-                avg(fwd1) FILTER (WHERE bucket = {QUANTILE_COUNT}) AS top_q_1d,
-                avg(fwd1) FILTER (WHERE bucket = 1) AS bottom_q_1d,
-                avg(fwd5) FILTER (WHERE bucket = {QUANTILE_COUNT}) AS top_q_5d,
-                avg(fwd5) FILTER (WHERE bucket = 1) AS bottom_q_5d,
-                avg(fwd20) FILTER (WHERE bucket = {QUANTILE_COUNT}) AS top_q_20d,
-                avg(fwd20) FILTER (WHERE bucket = 1) AS bottom_q_20d
+                avg(fwd1) FILTER (WHERE value >= top_boundary_1d) AS top_q_1d,
+                avg(fwd1) FILTER (WHERE value <= bottom_boundary_1d) AS bottom_q_1d,
+                avg(fwd5) FILTER (WHERE value >= top_boundary_5d) AS top_q_5d,
+                avg(fwd5) FILTER (WHERE value <= bottom_boundary_5d) AS bottom_q_5d,
+                avg(fwd20) FILTER (WHERE value >= top_boundary_20d) AS top_q_20d,
+                avg(fwd20) FILTER (WHERE value <= bottom_boundary_20d) AS bottom_q_20d
             FROM scored
             WHERE fwd1 IS NOT NULL
             GROUP BY 1, 2
