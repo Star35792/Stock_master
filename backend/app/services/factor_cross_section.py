@@ -277,9 +277,9 @@ class FactorCrossSectionService:
             current_top_symbols = self._top_quantile_symbols(symbol_values)
             top_quantile_turnover = None
             if previous_top_symbols is not None and current_top_symbols:
-                retained = len(previous_top_symbols & current_top_symbols)
-                top_quantile_turnover = Decimal(1) - (
-                    Decimal(retained) / Decimal(len(current_top_symbols))
+                top_quantile_turnover = self._top_quantile_turnover(
+                    previous_top_symbols,
+                    current_top_symbols,
                 )
             forward_returns_1d = forward_returns_by_horizon.get(1, {}).get(trade_date, {})
             quantile_diagnostics_1d = self._quantile_forward_diagnostics(
@@ -598,8 +598,16 @@ class FactorCrossSectionService:
             1,
             int((Decimal(len(ordered)) * Decimal("0.2")).to_integral_value(rounding=ROUND_CEILING)),
         )
-        bottom_return = self._mean([item[2] for item in ordered[:quantile_count]])
-        top_return = self._mean([item[2] for item in ordered[-quantile_count:]])
+        bottom_boundary, top_boundary = self._quantile_boundaries(
+            [item[1] for item in ordered],
+            quantile_count,
+        )
+        bottom_return = self._mean(
+            [forward_return for _, value, forward_return in ordered if value <= bottom_boundary]
+        )
+        top_return = self._mean(
+            [forward_return for _, value, forward_return in ordered if value >= top_boundary]
+        )
         long_short_return = (
             None if top_return is None or bottom_return is None else top_return - bottom_return
         )
@@ -621,15 +629,32 @@ class FactorCrossSectionService:
             return None
         actual_bucket_count = min(bucket_count, count)
         buckets: list[list[Decimal]] = [[] for _ in range(actual_bucket_count)]
-        for index, (_, _, forward_return) in enumerate(ordered_values):
-            bucket_index = index * actual_bucket_count // count
-            buckets[bucket_index].append(forward_return)
-        bucket_returns = [self._mean(bucket) for bucket in buckets if bucket]
-        if len(bucket_returns) < 2 or any(value is None for value in bucket_returns):
+        index = 0
+        while index < count:
+            end = index
+            while end + 1 < count and ordered_values[end + 1][1] == ordered_values[index][1]:
+                end += 1
+            midpoint = Decimal(index + end) / Decimal(2)
+            bucket_index = min(
+                int(midpoint * Decimal(actual_bucket_count) / Decimal(count)),
+                actual_bucket_count - 1,
+            )
+            buckets[bucket_index].extend(
+                ordered_values[position][2] for position in range(index, end + 1)
+            )
+            index = end + 1
+        populated_buckets = [
+            (bucket_index, self._mean(bucket))
+            for bucket_index, bucket in enumerate(buckets)
+            if bucket
+        ]
+        if len(populated_buckets) < 2 or any(
+            value is None for _, value in populated_buckets
+        ):
             return None
         return self._correlation(
-            [Decimal(index) for index in range(len(bucket_returns))],
-            [value for value in bucket_returns if value is not None],
+            [Decimal(bucket_index) for bucket_index, _ in populated_buckets],
+            [value for _, value in populated_buckets if value is not None],
         )
 
     def _correlation(self, left: list[Decimal], right: list[Decimal]) -> Decimal | None:
@@ -650,8 +675,32 @@ class FactorCrossSectionService:
             1,
             int((Decimal(len(values)) * quantile).to_integral_value(rounding=ROUND_CEILING)),
         )
-        ordered = sorted(values.items(), key=lambda item: (-item[1], item[0]))
-        return {symbol for symbol, _ in ordered[:count]}
+        _, top_boundary = FactorCrossSectionService._quantile_boundaries(
+            list(values.values()),
+            count,
+        )
+        return {symbol for symbol, value in values.items() if value >= top_boundary}
+
+    @staticmethod
+    def _quantile_boundaries(
+        values: list[Decimal],
+        count: int,
+    ) -> tuple[Decimal, Decimal]:
+        """Return value boundaries; callers include every security tied there."""
+        ordered = sorted(values)
+        return ordered[count - 1], ordered[-count]
+
+    @staticmethod
+    def _top_quantile_turnover(
+        previous: set[str],
+        current: set[str],
+    ) -> Decimal | None:
+        """Symmetric set turnover for tie-inclusive top groups of varying size."""
+        total_memberships = len(previous) + len(current)
+        if total_memberships == 0:
+            return None
+        retained_twice = Decimal(2 * len(previous & current))
+        return Decimal(1) - retained_twice / Decimal(total_memberships)
 
     @staticmethod
     def _quantile(values: list[Decimal], quantile: Decimal) -> Decimal | None:

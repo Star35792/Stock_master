@@ -391,3 +391,129 @@ def test_cross_section_forward_return_uses_next_exchange_open_day_across_holiday
     assert profile["rank_ic_1d"] == Decimal("1.0000000000")
     assert profile["top_quantile_forward_return_1d"] == Decimal("0.0400000000")
     assert profile["bottom_quantile_forward_return_1d"] == Decimal("0.0100000000")
+
+
+def test_quantile_diagnostics_include_complete_boundary_tie_groups() -> None:
+    service = FactorCrossSectionService()
+    factor_values = {
+        "AAA": Decimal("1"),
+        "BBB": Decimal("2"),
+        "CCC": Decimal("2.5"),
+        "DDD": Decimal("3"),
+        "EEE": Decimal("3"),
+    }
+    forward_returns = {
+        "AAA": Decimal("0.1"),
+        "BBB": Decimal("0.2"),
+        "CCC": Decimal("0.3"),
+        "DDD": Decimal("-0.5"),
+        "EEE": Decimal("0.5"),
+    }
+
+    diagnostics = service._quantile_forward_diagnostics(
+        factor_values,
+        forward_returns,
+    )
+
+    assert diagnostics.top_return == Decimal("0")
+    assert diagnostics.bottom_return == Decimal("0.1")
+    assert diagnostics.long_short_return == Decimal("-0.1")
+    assert service._top_quantile_symbols(factor_values) == {"DDD", "EEE"}
+
+
+def test_quantile_diagnostics_are_neutral_without_factor_dispersion() -> None:
+    service = FactorCrossSectionService()
+    factor_values = {
+        "AAA": Decimal("1"),
+        "BBB": Decimal("1"),
+        "CCC": Decimal("1"),
+        "DDD": Decimal("1"),
+        "EEE": Decimal("1"),
+    }
+    forward_returns = {
+        "AAA": Decimal("-0.2"),
+        "BBB": Decimal("-0.1"),
+        "CCC": Decimal("0"),
+        "DDD": Decimal("0.1"),
+        "EEE": Decimal("0.2"),
+    }
+
+    diagnostics = service._quantile_forward_diagnostics(
+        factor_values,
+        forward_returns,
+    )
+
+    assert diagnostics.top_return == Decimal("0")
+    assert diagnostics.bottom_return == Decimal("0")
+    assert diagnostics.long_short_return == Decimal("0")
+    assert diagnostics.monotonicity is None
+    assert service._top_quantile_symbols(factor_values) == set(factor_values)
+
+
+def test_quantile_diagnostics_do_not_depend_on_symbols_inside_ties() -> None:
+    service = FactorCrossSectionService()
+    baseline = service._quantile_forward_diagnostics(
+        {
+            "AAA": Decimal("1"),
+            "BBB": Decimal("2"),
+            "CCC": Decimal("2.5"),
+            "DDD": Decimal("3"),
+            "EEE": Decimal("3"),
+        },
+        {
+            "AAA": Decimal("0.1"),
+            "BBB": Decimal("0.2"),
+            "CCC": Decimal("0.3"),
+            "DDD": Decimal("-0.5"),
+            "EEE": Decimal("0.5"),
+        },
+    )
+    renamed = service._quantile_forward_diagnostics(
+        {
+            "AAA": Decimal("1"),
+            "BBB": Decimal("2"),
+            "CCC": Decimal("2.5"),
+            "A_TIE": Decimal("3"),
+            "Z_TIE": Decimal("3"),
+        },
+        {
+            "AAA": Decimal("0.1"),
+            "BBB": Decimal("0.2"),
+            "CCC": Decimal("0.3"),
+            "A_TIE": Decimal("0.5"),
+            "Z_TIE": Decimal("-0.5"),
+        },
+    )
+
+    assert renamed == baseline
+
+
+def test_top_quantile_turnover_is_symmetric_when_tie_group_size_changes() -> None:
+    service = FactorCrossSectionService()
+    small = {"AAA", "BBB"}
+    large = {"AAA", "BBB", "CCC", "DDD"}
+
+    expansion = service._top_quantile_turnover(small, large)
+    contraction = service._top_quantile_turnover(large, small)
+
+    assert expansion == Decimal(1) / Decimal(3)
+    assert contraction == expansion
+
+
+def test_quantile_monotonicity_keeps_ties_in_one_bucket() -> None:
+    service = FactorCrossSectionService()
+    ordered = [
+        ("AAA", Decimal("1"), Decimal("0.1")),
+        ("BBB", Decimal("2"), Decimal("0.2")),
+        ("CCC", Decimal("2"), Decimal("0.4")),
+        ("DDD", Decimal("3"), Decimal("0.5")),
+    ]
+
+    monotonicity = service._quantile_monotonicity(ordered)
+    reordered_tie = service._quantile_monotonicity(
+        [ordered[0], ordered[2], ordered[1], ordered[3]]
+    )
+
+    assert monotonicity == reordered_tie
+    assert monotonicity is not None
+    assert monotonicity > Decimal("0.98")
