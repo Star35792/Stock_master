@@ -31,7 +31,7 @@
 
 ## 金融正确性不变量
 
-- 层 0 = 最低因子值（bottom），层 `n-1` = 最高（top）；各层互斥且覆盖全排名 universe。
+- 层 0 = 最低因子值（bottom），层 `n-1` = 最高（top）；存在横截面离散度时，各层互斥且覆盖全排名 universe。同值组不得被证券代码切穿，最低/最高不同值组必须锚定首尾层；因子全体同值时所有层为空并退出旧仓，不制造 top-bottom 统计差。
 - 每个层组合是完整目标组合：离开上期桶的证券必须收到 `target_weight=0`，当期空桶必须清空上期持仓；互斥性不仅适用于信号集合，也必须适用于 T+1 执行后的非零持仓。
 - 拼接第一窗从 `initial_cash` 起，后续窗 scale 接续（**本金不重置**），故组合总收益 = 各窗收益乘积 − 1。
 - 重叠窗：拼接拒绝，但各窗独立结果仍可用。
@@ -41,7 +41,7 @@
 ## 实现要点
 
 ### `backend/app/backtest/quantile.py`（纯函数）
-- `partition_universe_by_factor(factor_values_by_date, decision_dates, n_layers, *, max_assets_per_layer=None)`：升序稳定排序、确定性分桶；空日期返回固定 `n_layers` 个空桶，使编排层能显式退出全部旧成员；`max_assets_per_layer` 截断到各桶领先（最低因子值）成员。
+- `partition_universe_by_factor(factor_values_by_date, decision_dates, n_layers, *, max_assets_per_layer=None)`：按因子值升序，以名义等量边界把完整同值组确定性分配到单一层，证券代码仅用于同值组内稳定展示；最低/最高不同值组锚定首尾层，低离散因子允许中间层为空。空日期或全体同值日期返回固定 `n_layers` 个空桶，使编排层显式退出全部旧成员；`max_assets_per_layer` 是名义上限，截断时保留边界成员的完整同值组，实际容量可超过上限。
 
 ### `backend/app/backtest/quantile_result.py`（数据结构 + 序列化）
 - `QuantileBacktestMeta`（split 因子/版本/n_layers/max_assets_per_layer/layer_bounds）。
@@ -92,6 +92,17 @@
 - 本机 `data/research.duckdb` 只读盘点未发现已保存的 `quantile_backtest` / `quantile_backtest_error` 运行，因此无需本地数据迁移。
 
 回归覆盖成员轮换的零权重退出、空桶清仓、T+1 后持仓与最新桶一致、量化证券超出主策略信号集合时的独立行情加载，以及量化公司行为失败不影响主回测。
+
+## 2026-11-02 P0 修正：分层边界不切穿同值组
+
+复核发现首版分层按 `(factor_value, symbol)` 排序后直接按固定人数切桶，同值因子可能仅因证券代码不同进入不同层；层容量上限也会再次切穿同值组。这会制造无经济含义的层间收益差和代码重命名敏感性。
+
+修正后的口径：
+
+- 名义等量边界只决定完整同值组归属；同组证券全部进入同一层，证券代码只决定层内稳定顺序。
+- 最低和最高不同值组固定进入首尾层；同值组较少时允许中间层为空。全体同值时所有层为空并触发既有退出信号，不将无离散度截面解释为收益差。
+- `max_assets_per_layer` 改为名义上限：若上限落在同值组中，完整保留该组，实际证券数可超过上限。
+- 旧分层运行不改写；任何比较或研究结论必须按新代码版本重跑。该修复不改变存储结构、API 或主策略回测，也不解除 PIT、幸存者、ST/停牌、行业时点和公司行为限制。
 
 ## 已知限制（沿用在位声明，不扣偏差）
 

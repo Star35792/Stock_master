@@ -61,6 +61,87 @@ def test_partition_handles_odd_bucket_sizes_deterministically() -> None:
     assert set(layers[1]) == {"DDD", "EEE"}
 
 
+def test_partition_keeps_boundary_ties_in_one_layer() -> None:
+    d = date(2026, 1, 2)
+    values = {
+        d: {
+            "AAA": Decimal("1"),
+            "BBB": Decimal("2"),
+            "CCC": Decimal("2"),
+            "DDD": Decimal("3"),
+        }
+    }
+
+    layers = partition_universe_by_factor(values, [d], n_layers=2)[0].layers
+
+    assert layers == (("AAA", "BBB", "CCC"), ("DDD",))
+    assert not (set(layers[0]) & set(layers[1]))
+
+
+def test_partition_is_invariant_to_symbol_names_with_ties() -> None:
+    d = date(2026, 1, 2)
+    first = {
+        d: {
+            "AAA": Decimal("1"),
+            "BBB": Decimal("2"),
+            "CCC": Decimal("2"),
+            "DDD": Decimal("3"),
+        }
+    }
+    renamed = {
+        d: {
+            "ZZZ": Decimal("1"),
+            "YYY": Decimal("2"),
+            "XXX": Decimal("2"),
+            "WWW": Decimal("3"),
+        }
+    }
+
+    first_sizes = tuple(
+        len(layer)
+        for layer in partition_universe_by_factor(first, [d], n_layers=2)[0].layers
+    )
+    renamed_sizes = tuple(
+        len(layer)
+        for layer in partition_universe_by_factor(renamed, [d], n_layers=2)[0].layers
+    )
+
+    assert first_sizes == renamed_sizes == (3, 1)
+
+
+def test_partition_withholds_zero_dispersion_cross_section() -> None:
+    d = date(2026, 1, 2)
+    values = {
+        d: {
+            "AAA": Decimal("2"),
+            "BBB": Decimal("2"),
+            "CCC": Decimal("2"),
+        }
+    }
+
+    layers = partition_universe_by_factor(values, [d], n_layers=2)[0].layers
+
+    assert layers == (tuple(), tuple())
+
+
+def test_partition_anchors_low_cardinality_groups_to_endpoint_layers() -> None:
+    d = date(2026, 1, 2)
+    values = {
+        d: {
+            "AAA": Decimal("1"),
+            "BBB": Decimal("1"),
+            "CCC": Decimal("2"),
+            "DDD": Decimal("2"),
+        }
+    }
+
+    layers = partition_universe_by_factor(values, [d], n_layers=5)[0].layers
+
+    assert layers[0] == ("AAA", "BBB")
+    assert layers[-1] == ("CCC", "DDD")
+    assert layers[1:4] == (tuple(), tuple(), tuple())
+
+
 def test_partition_empty_date_yields_empty_layers() -> None:
     missing = date(2026, 1, 3)
     present = date(2026, 1, 2)
@@ -84,6 +165,25 @@ def test_partition_applies_max_assets_per_layer() -> None:
     )[0].layers
     # Each layer keeps only its leading (lowest-factor-value) member.
     assert layers[0] == ("AAA",)
+    assert layers[1] == ("CCC",)
+
+
+def test_partition_nominal_cap_keeps_complete_boundary_tie() -> None:
+    d = date(2026, 1, 2)
+    values = {
+        d: {
+            "AAA": Decimal("1"),
+            "BBB": Decimal("1"),
+            "CCC": Decimal("2"),
+            "DDD": Decimal("3"),
+        }
+    }
+
+    layers = partition_universe_by_factor(
+        values, [d], n_layers=2, max_assets_per_layer=1
+    )[0].layers
+
+    assert layers[0] == ("AAA", "BBB")
     assert layers[1] == ("CCC",)
 
 
