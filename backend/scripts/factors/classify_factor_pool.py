@@ -84,6 +84,8 @@ def main() -> int:
                 "reasons": c.reasons,
                 "summary": {
                     "trade_date_count": c.summary.trade_date_count,
+                    "code_version": c.summary.code_version,
+                    "code_version_count": c.summary.code_version_count,
                     "mean_coverage_rate": (
                         str(c.summary.mean_coverage_rate)
                         if c.summary.mean_coverage_rate is not None

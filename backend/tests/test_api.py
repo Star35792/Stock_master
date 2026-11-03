@@ -1432,6 +1432,8 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
                     trade_date_count=10,
                     first_trade_date=date(2026, 7, 1),
                     last_trade_date=date(2026, 7, 17),
+                    code_version="code-a",
+                    code_version_count=1,
                     mean_ic_1d=Decimal("0.03"),
                     mean_rank_ic_1d=Decimal("0.04"),
                 )
@@ -1452,6 +1454,8 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["has_ic_evidence"] is True
+    assert body["items"][0]["code_version"] == "code-a"
+    assert body["items"][0]["code_version_count"] == 1
     assert body["items"][0]["mean_ic_1d"] == "0.03"
     assert captured["factor_name"] == "ret_1d"
     assert captured["limit"] == 5
@@ -1473,6 +1477,8 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
                     trade_date_count=250,
                     first_trade_date=date(2024, 1, 2),
                     last_trade_date=date(2025, 12, 31),
+                    code_version="code-a",
+                    code_version_count=1,
                     mean_coverage_rate=Decimal("0.90"),
                     mean_rank_ic_1d=Decimal("0.02"),
                     mean_rank_ic_5d=Decimal("0.02"),

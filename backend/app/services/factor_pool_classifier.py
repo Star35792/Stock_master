@@ -34,6 +34,12 @@
 
 因子定义携带 ``status``：``retired`` 表示该定义已被取代或已知有误
 （例如方向性错误的 ``value_pe_ttm``），证据保留供审计，但因子硬冻结。
+
+**代码版本闸门**
+
+同一评估窗口的逐日画像必须来自恰好一个可审计的 ``code_version``；空值及
+``local`` / ``unknown`` 占位不具备审计意义。混合旧、新诊断口径的均值只可
+保留为观察证据，不得据此授予核心池资格。
 """
 
 from __future__ import annotations
@@ -203,6 +209,15 @@ class FactorPoolClassifierService:
                 "不得进入核心池"
             )
 
+        # --- 代码版本一致性闸门（fail-closed） -------------------------
+        has_consistent_code_version = summary.has_consistent_code_version
+        if not has_consistent_code_version:
+            structural_reasons.append(
+                f"code_version={summary.code_version!r}, "
+                f"code_version_count={summary.code_version_count}: "
+                "评估窗口混合或缺失代码版本，必须整窗重算后才能进入核心池"
+            )
+
         # --- 池归属 -----------------------------------------------------
         if (
             has_minimum_history
@@ -212,6 +227,7 @@ class FactorPoolClassifierService:
             and endpoint_ok
             and not is_retired
             and evidence_is_strategy_eligible
+            and has_consistent_code_version
         ):
             pool: FactorPool = "core"
             reasons = structural_reasons + ic_reasons

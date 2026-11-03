@@ -18,6 +18,8 @@ def _summary(
     factor_status: str = "active",
     evidence_eligibility: str = "strategy_eligible",
     evidence_eligibility_reason: str = "verified PIT evidence",
+    code_version: str | None = "code-a",
+    code_version_count: int = 1,
 ) -> FactorProfileSummary:
     return FactorProfileSummary(
         factor_name="ret_1d",
@@ -26,6 +28,8 @@ def _summary(
         trade_date_count=trade_date_count,
         first_trade_date=date(2024, 1, 2),
         last_trade_date=date(2025, 12, 31),
+        code_version=code_version,
+        code_version_count=code_version_count,
         mean_coverage_rate=coverage,
         mean_ic_1d=Decimal("0.01"),
         mean_rank_ic_1d=rank_ic_1d,
@@ -180,6 +184,26 @@ def test_research_only_evidence_cannot_enter_core() -> None:
     )[0]
     assert result.pool == "observation"
     assert any("evidence_eligibility=research_only" in reason for reason in result.reasons)
+
+
+def test_mixed_code_versions_cannot_enter_core() -> None:
+    """Old and new daily diagnostics must not be averaged into core evidence."""
+    service = FactorPoolClassifierService()
+    result = service.classify(
+        [_summary(code_version=None, code_version_count=2)]
+    )[0]
+    assert result.pool == "observation"
+    assert any("code_version_count=2" in reason for reason in result.reasons)
+
+
+def test_missing_or_placeholder_code_version_cannot_enter_core() -> None:
+    service = FactorPoolClassifierService()
+    for code_version, count in ((None, 0), ("", 1), ("local", 1), ("unknown", 1)):
+        result = service.classify(
+            [_summary(code_version=code_version, code_version_count=count)]
+        )[0]
+        assert result.pool == "observation"
+        assert any("code_version=" in reason for reason in result.reasons)
 
 
 def test_default_pit_status_is_unknown() -> None:

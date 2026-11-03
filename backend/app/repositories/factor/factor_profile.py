@@ -162,6 +162,14 @@ class FactorProfileRepository:
                 func.count().label("trade_date_count"),
                 func.min(FactorProfile.trade_date).label("first_trade_date"),
                 func.max(FactorProfile.trade_date).label("last_trade_date"),
+                # A factor version is not a complete evidence identity by
+                # itself: the daily profiles must also come from one code
+                # version.  Keep this in the aggregate instead of silently
+                # averaging old and new diagnostic implementations.
+                func.min(FactorProfile.code_version).label("code_version"),
+                func.count(func.distinct(FactorProfile.code_version)).label(
+                    "code_version_count"
+                ),
                 func.avg(FactorProfile.coverage_rate).label("mean_coverage_rate"),
                 func.avg(FactorProfile.ic_1d).label("mean_ic_1d"),
                 func.avg(FactorProfile.rank_ic_1d).label("mean_rank_ic_1d"),

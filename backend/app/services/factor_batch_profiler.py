@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.config.settings import Settings
 from app.repositories.factor import FactorDefinitionRepository, FactorProfileRepository
 from app.repositories.system import JobLogRepository
 from app.services.factor_cross_section import FactorCrossSectionService
@@ -83,6 +84,10 @@ class FactorProfileSummary:
     trade_date_count: int
     first_trade_date: date
     last_trade_date: date
+    #: Exact diagnostic implementation when the whole window is uniform.
+    code_version: str | None = None
+    #: Distinct implementations represented in the aggregated date window.
+    code_version_count: int = 0
     mean_coverage_rate: Decimal | None = None
     mean_ic_1d: Decimal | None = None
     mean_rank_ic_1d: Decimal | None = None
@@ -125,6 +130,16 @@ class FactorProfileSummary:
         """是否真的测量过端点价差（而非缺证据）。"""
         return self.endpoint_observation_count > 0
 
+    @property
+    def has_consistent_code_version(self) -> bool:
+        """Whether every daily profile uses one auditable diagnostic build."""
+        normalized = (self.code_version or "").strip().lower()
+        return self.code_version_count == 1 and normalized not in {
+            "",
+            "local",
+            "unknown",
+        }
+
 
 class FactorBatchProfilerService:
     """批量运行活跃因子的截面诊断。"""
@@ -157,7 +172,7 @@ class FactorBatchProfilerService:
         excluded_categories: set[str] | None = None,
         size_factor_name: str | None = DEFAULT_SIZE_FACTOR_NAME,
         size_factor_version: str | None = DEFAULT_SIZE_FACTOR_VERSION,
-        code_version: str = "local",
+        code_version: str | None = None,
         release_id: str | None = None,
         parent_job_id: int | None = None,
     ) -> FactorBatchProfilerRunResult:
@@ -169,6 +184,9 @@ class FactorBatchProfilerService:
             raise ValueError(
                 "size_factor_name and size_factor_version must be provided together"
             )
+        resolved_code_version = (code_version or Settings().app_code_version).strip()
+        if not resolved_code_version:
+            raise ValueError("code_version must not be blank")
 
         definitions, _ = self.definition_repository.list(
             db,
@@ -225,7 +243,7 @@ class FactorBatchProfilerService:
                     start_date=start_date,
                     end_date=end_date,
                     adjust_type=adjust_type,
-                    code_version=code_version,
+                    code_version=resolved_code_version,
                     size_factor_name=size_factor_name,
                     size_factor_version=size_factor_version,
                     release_id=release_id,
@@ -337,6 +355,12 @@ class FactorBatchProfilerService:
         evidence_eligibility_reason = str(
             row.get("evidence_eligibility_reason") or "unverified_evidence_eligibility"
         )
+        code_version_count = int(row.get("code_version_count") or 0)
+        code_version = (
+            str(row["code_version"])
+            if code_version_count == 1 and row.get("code_version")
+            else None
+        )
         if self._summary_db is not None:
             try:
                 definition = self.definition_repository.get_by_name_version(
@@ -357,6 +381,8 @@ class FactorBatchProfilerService:
             trade_date_count=int(row["trade_date_count"] or 0),
             first_trade_date=row["first_trade_date"],  # type: ignore[arg-type]
             last_trade_date=row["last_trade_date"],  # type: ignore[arg-type]
+            code_version=code_version,
+            code_version_count=code_version_count,
             mean_coverage_rate=_to_decimal(row.get("mean_coverage_rate")),
             mean_ic_1d=_to_decimal(row.get("mean_ic_1d")),
             mean_rank_ic_1d=_to_decimal(row.get("mean_rank_ic_1d")),

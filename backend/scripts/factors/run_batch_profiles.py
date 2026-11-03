@@ -43,7 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip industry_size_neutral transforms (drops the size factor).",
     )
-    parser.add_argument("--code-version", default="local")
+    parser.add_argument(
+        "--code-version",
+        default=None,
+        help="Diagnostic code version (defaults to the deterministic app source fingerprint).",
+    )
     return parser
 
 

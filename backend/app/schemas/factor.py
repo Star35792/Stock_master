@@ -109,7 +109,7 @@ class FactorBatchProfileRunRequest(BaseModel):
     excluded_categories: list[str] | None = None
     size_factor_name: str | None = "market_cap"
     size_factor_version: str | None = "v1"
-    code_version: str = "local"
+    code_version: str | None = None
     release_id: str | None = None
 
 
@@ -142,6 +142,8 @@ class FactorProfileSummaryRead(BaseModel):
     trade_date_count: int
     first_trade_date: date
     last_trade_date: date
+    code_version: str | None = None
+    code_version_count: int = 0
     mean_coverage_rate: Decimal | None = None
     mean_ic_1d: Decimal | None = None
     mean_rank_ic_1d: Decimal | None = None

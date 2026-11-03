@@ -123,6 +123,9 @@ def test_batch_profiler_runs_active_factors_and_skips_derived() -> None:
     assert job_log.created[0]["metadata"]["size_factor_version"] == "v1"
     assert {call["size_factor_name"] for call in cross_section.calls} == {"market_cap"}
     assert {call["size_factor_version"] for call in cross_section.calls} == {"v1"}
+    code_versions = {str(call["code_version"]) for call in cross_section.calls}
+    assert len(code_versions) == 1
+    assert next(iter(code_versions)).startswith("source-")
     finished = job_log.finished[0]
     assert finished["status"] == "success"
     assert finished["rows_failed"] == 0
@@ -206,6 +209,8 @@ def test_batch_profiler_summarize_maps_rows() -> None:
             "trade_date_count": 12,
             "first_trade_date": date(2026, 7, 1),
             "last_trade_date": date(2026, 7, 17),
+            "code_version": "code-a",
+            "code_version_count": 1,
             "mean_coverage_rate": Decimal("0.95"),
             "mean_ic_1d": Decimal("0.03"),
             "mean_rank_ic_1d": Decimal("0.04"),
@@ -226,6 +231,9 @@ def test_batch_profiler_summarize_maps_rows() -> None:
     summary = summaries[0]
     assert summary.factor_name == "ret_1d"
     assert summary.trade_date_count == 12
+    assert summary.code_version == "code-a"
+    assert summary.code_version_count == 1
+    assert summary.has_consistent_code_version is True
     assert summary.mean_ic_1d == Decimal("0.03")
     assert summary.mean_rank_ic_5d is None
     assert summary.has_ic_evidence is True
@@ -295,6 +303,9 @@ def test_profile_repository_summarize_aggregates_across_dates() -> None:
     assert summary.trade_date_count == 2
     assert summary.first_trade_date == date(2026, 7, 1)
     assert summary.last_trade_date == date(2026, 7, 2)
+    assert summary.code_version == "local"
+    assert summary.code_version_count == 1
+    assert summary.has_consistent_code_version is False
     assert summary.mean_coverage_rate == pytest.approx(Decimal("0.925"))
     assert summary.mean_ic_1d == pytest.approx(Decimal("0.03"))
     assert summary.mean_rank_ic_1d == pytest.approx(Decimal("0.04"))
@@ -303,3 +314,44 @@ def test_profile_repository_summarize_aggregates_across_dates() -> None:
     assert summary.evidence_eligibility == "research_only"
     assert summary.evidence_eligibility_reason == "late history"
     assert summary.has_ic_evidence is True
+
+
+def test_profile_repository_summarize_flags_mixed_code_versions() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE SCHEMA IF NOT EXISTS factor"))
+    Base.metadata.create_all(engine, tables=[FactorProfile.__table__])
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with factory() as db:
+        db.execute(
+            text(
+                "INSERT INTO factor.factor_profile ("
+                "id, factor_name, factor_version, trade_date, universe_size, "
+                "observation_count, missing_count, coverage_rate, missing_rate, "
+                "extreme_count, evidence_eligibility, "
+                "evidence_eligibility_reason, code_version"
+                ") VALUES "
+                "(1, 'ret_1d', 'v1-qfq', DATE '2026-07-01', 100, 90, 10, "
+                "0.9, 0.1, 0, 'strategy_eligible', 'trusted', 'code-a'), "
+                "(2, 'ret_1d', 'v1-qfq', DATE '2026-07-02', 100, 90, 10, "
+                "0.9, 0.1, 0, 'strategy_eligible', 'trusted', 'code-b')"
+            )
+        )
+        db.commit()
+
+        service = FactorBatchProfilerService()
+        summaries, _ = service.summarize(db)
+        single_day_summaries, _ = service.summarize(
+            db,
+            end_date=date(2026, 7, 1),
+        )
+
+    summary = summaries[0]
+    assert summary.code_version is None
+    assert summary.code_version_count == 2
+    assert summary.has_consistent_code_version is False
+    single_day = single_day_summaries[0]
+    assert single_day.code_version == "code-a"
+    assert single_day.code_version_count == 1
+    assert single_day.has_consistent_code_version is True

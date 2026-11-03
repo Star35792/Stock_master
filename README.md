@@ -140,8 +140,8 @@ curl http://127.0.0.1:8000/health
 - `GET /api/v1/factors/values`
 - `GET /api/v1/factors/profiles`
 - `POST /api/v1/factors/batch-profiles`
-- `GET /api/v1/factors/batch-profiles/summary`
-- `POST /api/v1/factors/pool-classifications`（因子池分级：`min_long_short_forward_return_1d` 端点闸门 + `pit_status` PIT 闸门 + `status` 生命周期闸门）
+- `GET /api/v1/factors/batch-profiles/summary`（返回评估窗口统一的 `code_version` 与 `code_version_count`；混合版本时统一版本为 `null`）
+- `POST /api/v1/factors/pool-classifications`（因子池分级：端点、PIT、生命周期、证据资格与代码版本一致性闸门；混合、缺失或占位代码版本不得进入核心池）
 
 ### 研究与回测
 
