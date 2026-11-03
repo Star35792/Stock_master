@@ -1436,6 +1436,9 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
                     code_version_count=1,
                     mean_ic_1d=Decimal("0.03"),
                     mean_rank_ic_1d=Decimal("0.04"),
+                    rank_ic_1d_observation_count=10,
+                    rank_ic_5d_observation_count=9,
+                    rank_ic_20d_observation_count=7,
                 )
             ],
             1,
@@ -1457,6 +1460,9 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
     assert body["items"][0]["code_version"] == "code-a"
     assert body["items"][0]["code_version_count"] == 1
     assert body["items"][0]["mean_ic_1d"] == "0.03"
+    assert body["items"][0]["rank_ic_1d_observation_count"] == 10
+    assert body["items"][0]["rank_ic_5d_observation_count"] == 9
+    assert body["items"][0]["rank_ic_20d_observation_count"] == 7
     assert captured["factor_name"] == "ret_1d"
     assert captured["limit"] == 5
 
@@ -1481,8 +1487,11 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
                     code_version_count=1,
                     mean_coverage_rate=Decimal("0.90"),
                     mean_rank_ic_1d=Decimal("0.02"),
+                    rank_ic_1d_observation_count=250,
                     mean_rank_ic_5d=Decimal("0.02"),
+                    rank_ic_5d_observation_count=250,
                     mean_rank_ic_20d=Decimal("0.02"),
+                    rank_ic_20d_observation_count=250,
                     mean_long_short_forward_return_1d=Decimal("0.002"),
                     endpoint_observation_count=250,
                     pit_status="point_in_time",
@@ -1513,6 +1522,9 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
     assert len(body) == 1
     assert body[0]["pool"] == "core"
     assert body[0]["category"] == "price_volume_risk"
+    assert body[0]["summary"]["rank_ic_1d_observation_count"] == 250
+    assert body[0]["summary"]["rank_ic_5d_observation_count"] == 250
+    assert body[0]["summary"]["rank_ic_20d_observation_count"] == 250
     assert captured_query["start_date"] == date(2024, 1, 2)
     assert captured_query["end_date"] == date(2025, 12, 31)
 

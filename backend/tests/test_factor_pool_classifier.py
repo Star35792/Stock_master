@@ -12,6 +12,9 @@ def _summary(
     rank_ic_1d: Decimal | None = Decimal("0.02"),
     rank_ic_5d: Decimal | None = Decimal("0.02"),
     rank_ic_20d: Decimal | None = Decimal("0.02"),
+    rank_ic_1d_observation_count: int = 250,
+    rank_ic_5d_observation_count: int = 250,
+    rank_ic_20d_observation_count: int = 250,
     long_short_1d: Decimal | None = Decimal("0.002"),
     endpoint_observation_count: int = 250,
     pit_status: str = "point_in_time",
@@ -33,10 +36,13 @@ def _summary(
         mean_coverage_rate=coverage,
         mean_ic_1d=Decimal("0.01"),
         mean_rank_ic_1d=rank_ic_1d,
+        rank_ic_1d_observation_count=rank_ic_1d_observation_count,
         mean_ic_5d=Decimal("0.015"),
         mean_rank_ic_5d=rank_ic_5d,
+        rank_ic_5d_observation_count=rank_ic_5d_observation_count,
         mean_ic_20d=Decimal("0.005"),
         mean_rank_ic_20d=rank_ic_20d,
+        rank_ic_20d_observation_count=rank_ic_20d_observation_count,
         mean_long_short_forward_return_1d=long_short_1d,
         endpoint_observation_count=endpoint_observation_count,
         pit_status=pit_status,
@@ -137,6 +143,44 @@ def test_missing_endpoint_evidence_keeps_factor_out_of_core() -> None:
     result = service.classify([summary])[0]
     assert result.pool == "observation"
     assert any("端点" in reason for reason in result.reasons)
+
+
+def test_sparse_rank_ic_horizon_keeps_factor_out_of_core() -> None:
+    service = FactorPoolClassifierService()
+    summary = _summary(rank_ic_20d_observation_count=1)
+    result = service.classify([summary])[0]
+    assert result.pool == "observation"
+    assert any(
+        "rank_ic_20d_observation_count=1 < 200" in reason
+        for reason in result.reasons
+    )
+
+
+def test_sparse_endpoint_keeps_factor_out_of_core() -> None:
+    service = FactorPoolClassifierService()
+    summary = _summary(endpoint_observation_count=1)
+    result = service.classify([summary])[0]
+    assert result.pool == "observation"
+    assert any(
+        "endpoint_observation_count=1 < 200" in reason
+        for reason in result.reasons
+    )
+
+
+def test_horizon_observation_counts_equal_to_threshold_can_enter_core() -> None:
+    service = FactorPoolClassifierService()
+    result = service.classify(
+        [
+            _summary(
+                trade_date_count=200,
+                rank_ic_1d_observation_count=200,
+                rank_ic_5d_observation_count=200,
+                rank_ic_20d_observation_count=200,
+                endpoint_observation_count=200,
+            )
+        ]
+    )[0]
+    assert result.pool == "core"
 
 
 def test_endpoint_threshold_is_configurable() -> None:

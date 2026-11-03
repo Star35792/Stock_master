@@ -140,7 +140,7 @@ curl http://127.0.0.1:8000/health
 - `GET /api/v1/factors/values`
 - `GET /api/v1/factors/profiles`
 - `POST /api/v1/factors/batch-profiles`
-- `GET /api/v1/factors/batch-profiles/summary`（返回评估窗口统一的 `code_version` 与 `code_version_count`；混合版本时统一版本为 `null`）
+- `GET /api/v1/factors/batch-profiles/summary`（返回评估窗口统一的 `code_version` 与 `code_version_count`；混合版本时统一版本为 `null`；另返回 1/5/20 日 Rank IC 各自的非空观测数）
 - `POST /api/v1/factors/pool-classifications`（因子池分级：端点、PIT、生命周期、证据资格与代码版本一致性闸门；混合、缺失或占位代码版本不得进入核心池）
 
 ### 研究与回测

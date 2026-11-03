@@ -173,10 +173,19 @@ class FactorProfileRepository:
                 func.avg(FactorProfile.coverage_rate).label("mean_coverage_rate"),
                 func.avg(FactorProfile.ic_1d).label("mean_ic_1d"),
                 func.avg(FactorProfile.rank_ic_1d).label("mean_rank_ic_1d"),
+                func.count(FactorProfile.rank_ic_1d).label(
+                    "rank_ic_1d_observation_count"
+                ),
                 func.avg(FactorProfile.ic_5d).label("mean_ic_5d"),
                 func.avg(FactorProfile.rank_ic_5d).label("mean_rank_ic_5d"),
+                func.count(FactorProfile.rank_ic_5d).label(
+                    "rank_ic_5d_observation_count"
+                ),
                 func.avg(FactorProfile.ic_20d).label("mean_ic_20d"),
                 func.avg(FactorProfile.rank_ic_20d).label("mean_rank_ic_20d"),
+                func.count(FactorProfile.rank_ic_20d).label(
+                    "rank_ic_20d_observation_count"
+                ),
                 # Endpoint (long-short) aggregates.  The pool classifier gates
                 # on these: a factor can carry a positive IC while its extreme
                 # buckets still lose money, and such a factor is not tradable.

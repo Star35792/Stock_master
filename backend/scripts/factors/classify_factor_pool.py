@@ -96,15 +96,24 @@ def main() -> int:
                         if c.summary.mean_rank_ic_1d is not None
                         else None
                     ),
+                    "rank_ic_1d_observation_count": (
+                        c.summary.rank_ic_1d_observation_count
+                    ),
                     "mean_rank_ic_5d": (
                         str(c.summary.mean_rank_ic_5d)
                         if c.summary.mean_rank_ic_5d is not None
                         else None
                     ),
+                    "rank_ic_5d_observation_count": (
+                        c.summary.rank_ic_5d_observation_count
+                    ),
                     "mean_rank_ic_20d": (
                         str(c.summary.mean_rank_ic_20d)
                         if c.summary.mean_rank_ic_20d is not None
                         else None
+                    ),
+                    "rank_ic_20d_observation_count": (
+                        c.summary.rank_ic_20d_observation_count
                     ),
                     "mean_long_short_forward_return_1d": (
                         str(c.summary.mean_long_short_forward_return_1d)

@@ -91,10 +91,13 @@ class FactorProfileSummary:
     mean_coverage_rate: Decimal | None = None
     mean_ic_1d: Decimal | None = None
     mean_rank_ic_1d: Decimal | None = None
+    rank_ic_1d_observation_count: int = 0
     mean_ic_5d: Decimal | None = None
     mean_rank_ic_5d: Decimal | None = None
+    rank_ic_5d_observation_count: int = 0
     mean_ic_20d: Decimal | None = None
     mean_rank_ic_20d: Decimal | None = None
+    rank_ic_20d_observation_count: int = 0
     #: 端点（多空分位）价差均值：可交易性的直接证据。
     mean_long_short_forward_return_1d: Decimal | None = None
     mean_long_short_forward_return_5d: Decimal | None = None
@@ -127,7 +130,7 @@ class FactorProfileSummary:
 
     @property
     def has_endpoint_evidence(self) -> bool:
-        """是否真的测量过端点价差（而非缺证据）。"""
+        """是否真的测量过 1 日端点价差（而非缺证据）。"""
         return self.endpoint_observation_count > 0
 
     @property
@@ -386,10 +389,19 @@ class FactorBatchProfilerService:
             mean_coverage_rate=_to_decimal(row.get("mean_coverage_rate")),
             mean_ic_1d=_to_decimal(row.get("mean_ic_1d")),
             mean_rank_ic_1d=_to_decimal(row.get("mean_rank_ic_1d")),
+            rank_ic_1d_observation_count=int(
+                row.get("rank_ic_1d_observation_count") or 0
+            ),
             mean_ic_5d=_to_decimal(row.get("mean_ic_5d")),
             mean_rank_ic_5d=_to_decimal(row.get("mean_rank_ic_5d")),
+            rank_ic_5d_observation_count=int(
+                row.get("rank_ic_5d_observation_count") or 0
+            ),
             mean_ic_20d=_to_decimal(row.get("mean_ic_20d")),
             mean_rank_ic_20d=_to_decimal(row.get("mean_rank_ic_20d")),
+            rank_ic_20d_observation_count=int(
+                row.get("rank_ic_20d_observation_count") or 0
+            ),
             mean_long_short_forward_return_1d=_to_decimal(
                 row.get("mean_long_short_forward_return_1d")
             ),

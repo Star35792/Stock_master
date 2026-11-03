@@ -18,7 +18,8 @@
 
 秩 IC 只说明「因子值与未来收益单调相关」，不说明「极端分位可交易」。一个
 因子可以拥有正的 IC，但它的最贵分位跑输最便宜分位——这种因子不可交易。
-因此进入核心池要求 1 日多空（top−bottom 分位）价差**严格为正**。
+因此进入核心池要求 1 日多空（top−bottom 分位）价差**严格为正**，且
+1/5/20 日 Rank IC 与 1 日端点各自都有足够的非空交易日证据。
 
 **时点性闸门（PIT gate，fail-closed）**
 
@@ -67,8 +68,10 @@ class FactorPoolPolicy:
     """因子池分级阈值。
 
     所有阈值都是「且」的关系。``min_trade_dates`` 和
-    ``min_coverage_rate`` 是进入任何池的前提；``min_rank_ic`` 决定
-    核心池与观察池的边界；``min_long_short_forward_return_1d`` 是端点闸门。
+    ``min_coverage_rate`` 是进入任何池的前提；``min_trade_dates`` 同时约束
+    总画像天数、三个 Rank IC horizon 和 1 日端点的有效观测天数；
+    ``min_rank_ic`` 决定核心池与观察池的边界；
+    ``min_long_short_forward_return_1d`` 是端点闸门。
     """
 
     min_trade_dates: int = 200
@@ -135,6 +138,18 @@ class FactorPoolClassifierService:
         )
 
         has_minimum_history = summary.trade_date_count >= self.policy.min_trade_dates
+        rank_ic_observation_counts = {
+            "rank_ic_1d_observation_count": summary.rank_ic_1d_observation_count,
+            "rank_ic_5d_observation_count": summary.rank_ic_5d_observation_count,
+            "rank_ic_20d_observation_count": summary.rank_ic_20d_observation_count,
+        }
+        has_sufficient_rank_ic_observations = all(
+            count >= self.policy.min_trade_dates
+            for count in rank_ic_observation_counts.values()
+        )
+        has_sufficient_endpoint_observations = (
+            summary.endpoint_observation_count >= self.policy.min_trade_dates
+        )
         has_minimum_coverage = (
             coverage is not None and coverage >= self.policy.min_coverage_rate
         )
@@ -146,6 +161,11 @@ class FactorPoolClassifierService:
                 f"trade_date_count={summary.trade_date_count} "
                 f"< {self.policy.min_trade_dates}"
             )
+        for field_name, count in rank_ic_observation_counts.items():
+            if count < self.policy.min_trade_dates:
+                structural_reasons.append(
+                    f"{field_name}={count} < {self.policy.min_trade_dates}"
+                )
         if not has_minimum_coverage:
             structural_reasons.append(
                 f"mean_coverage_rate={coverage} "
@@ -176,6 +196,11 @@ class FactorPoolClassifierService:
             structural_reasons.append(
                 f"mean_long_short_forward_return_1d={endpoint_value} "
                 f"<= {self.policy.min_long_short_forward_return_1d}"
+            )
+        if not has_sufficient_endpoint_observations:
+            structural_reasons.append(
+                f"endpoint_observation_count={summary.endpoint_observation_count} "
+                f"< {self.policy.min_trade_dates}"
             )
 
         # --- 时点性闸门（fail-closed） ----------------------------------
@@ -221,6 +246,8 @@ class FactorPoolClassifierService:
         # --- 池归属 -----------------------------------------------------
         if (
             has_minimum_history
+            and has_sufficient_rank_ic_observations
+            and has_sufficient_endpoint_observations
             and has_minimum_coverage
             and all_rank_ic_ok
             and pit_is_clean

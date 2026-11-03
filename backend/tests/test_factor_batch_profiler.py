@@ -214,10 +214,13 @@ def test_batch_profiler_summarize_maps_rows() -> None:
             "mean_coverage_rate": Decimal("0.95"),
             "mean_ic_1d": Decimal("0.03"),
             "mean_rank_ic_1d": Decimal("0.04"),
+            "rank_ic_1d_observation_count": 12,
             "mean_ic_5d": Decimal("0.02"),
             "mean_rank_ic_5d": None,
+            "rank_ic_5d_observation_count": 0,
             "mean_ic_20d": None,
             "mean_rank_ic_20d": None,
+            "rank_ic_20d_observation_count": 0,
         }
     ]
     service, _, _ = _service(
@@ -235,6 +238,7 @@ def test_batch_profiler_summarize_maps_rows() -> None:
     assert summary.code_version_count == 1
     assert summary.has_consistent_code_version is True
     assert summary.mean_ic_1d == Decimal("0.03")
+    assert summary.rank_ic_1d_observation_count == 12
     assert summary.mean_rank_ic_5d is None
     assert summary.has_ic_evidence is True
 
@@ -309,8 +313,11 @@ def test_profile_repository_summarize_aggregates_across_dates() -> None:
     assert summary.mean_coverage_rate == pytest.approx(Decimal("0.925"))
     assert summary.mean_ic_1d == pytest.approx(Decimal("0.03"))
     assert summary.mean_rank_ic_1d == pytest.approx(Decimal("0.04"))
+    assert summary.rank_ic_1d_observation_count == 2
     assert summary.mean_ic_5d == pytest.approx(Decimal("0.01"))
+    assert summary.rank_ic_5d_observation_count == 1
     assert summary.mean_ic_20d is None
+    assert summary.rank_ic_20d_observation_count == 0
     assert summary.evidence_eligibility == "research_only"
     assert summary.evidence_eligibility_reason == "late history"
     assert summary.has_ic_evidence is True

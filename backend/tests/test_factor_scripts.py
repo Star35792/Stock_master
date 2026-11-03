@@ -45,6 +45,21 @@ def test_run_batch_profiles_defaults_to_market_cap_v1() -> None:
     assert args.size_factor_version == "v1"
 
 
+def test_factor_pool_cli_exports_horizon_observation_counts() -> None:
+    script_path = (
+        Path(__file__).parents[1] / "scripts" / "factors" / "classify_factor_pool.py"
+    )
+    source = script_path.read_text(encoding="utf-8")
+
+    for field_name in (
+        "rank_ic_1d_observation_count",
+        "rank_ic_5d_observation_count",
+        "rank_ic_20d_observation_count",
+        "endpoint_observation_count",
+    ):
+        assert f'"{field_name}"' in source
+
+
 def _synthetic_closes(symbol_index: int, day_index: int) -> Decimal:
     base = Decimal("10") + Decimal(symbol_index) * Decimal("7.5")
     drift = Decimal("0.11") * day_index
