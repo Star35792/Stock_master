@@ -63,6 +63,7 @@ class PreTradeRiskEngine:
     ) -> OrderRiskDecision:
         if order.order_quantity == 0:
             raise ValueError("order_quantity must not be zero")
+        self._validate_order(order)
         self._validate_limits(limits)
         risk_reducing_symbol = (
             order.projected_symbol_weight < order.current_symbol_weight
@@ -134,7 +135,11 @@ class PreTradeRiskEngine:
         order: OrderRiskInput,
         limit: Decimal,
     ) -> RiskRuleResult:
-        if order.market_price is None or order.market_price <= 0:
+        if (
+            order.market_price is None
+            or not order.market_price.is_finite()
+            or order.market_price <= 0
+        ):
             return RiskRuleResult(
                 "price_deviation",
                 False,
@@ -240,7 +245,11 @@ class PreTradeRiskEngine:
         order: OrderRiskInput,
         limit: Decimal,
     ) -> RiskRuleResult:
-        if order.average_daily_amount is None or order.average_daily_amount <= 0:
+        if (
+            order.average_daily_amount is None
+            or not order.average_daily_amount.is_finite()
+            or order.average_daily_amount <= 0
+        ):
             return RiskRuleResult(
                 "amount_capacity",
                 False,
@@ -267,14 +276,43 @@ class PreTradeRiskEngine:
             limits.max_drawdown,
             limits.max_amount_participation,
         ):
-            if value <= 0 or value > 1:
+            if not value.is_finite() or value <= 0 or value > 1:
                 raise ValueError("risk limits must be between 0 and 1")
         if (
             limits.max_price_deviation is not None
-            and (limits.max_price_deviation <= 0 or limits.max_price_deviation > 1)
+            and (
+                not limits.max_price_deviation.is_finite()
+                or limits.max_price_deviation <= 0
+                or limits.max_price_deviation > 1
+            )
         ):
             raise ValueError("max_price_deviation must be between 0 and 1")
-        if limits.max_order_amount is not None and limits.max_order_amount <= 0:
+        if limits.max_order_amount is not None and (
+            not limits.max_order_amount.is_finite() or limits.max_order_amount <= 0
+        ):
             raise ValueError("max_order_amount must be positive")
-        if limits.max_cycle_turnover is not None and limits.max_cycle_turnover <= 0:
+        if limits.max_cycle_turnover is not None and (
+            not limits.max_cycle_turnover.is_finite()
+            or limits.max_cycle_turnover <= 0
+        ):
             raise ValueError("max_cycle_turnover must be positive")
+
+    @staticmethod
+    def _validate_order(order: OrderRiskInput) -> None:
+        if not order.price.is_finite() or order.price <= 0:
+            raise ValueError("order price must be positive and finite")
+        weights = (
+            order.current_symbol_weight,
+            order.projected_symbol_weight,
+            order.current_industry_weight,
+            order.projected_industry_weight,
+        )
+        if any(not value.is_finite() or value < 0 for value in weights):
+            raise ValueError("order weights must be non-negative and finite")
+        if not order.current_drawdown.is_finite():
+            raise ValueError("current_drawdown must be finite")
+        if order.projected_cycle_turnover is not None and (
+            not order.projected_cycle_turnover.is_finite()
+            or order.projected_cycle_turnover < 0
+        ):
+            raise ValueError("projected_cycle_turnover must be non-negative and finite")

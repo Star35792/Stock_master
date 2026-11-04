@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from app.risk import OrderRiskInput, PreTradeRiskEngine, RiskLimits
 
 LIMITS = RiskLimits(
@@ -268,3 +270,111 @@ def test_risk_engine_fails_closed_when_cycle_turnover_input_is_missing() -> None
     )
 
     assert decision.rejection_reasons == ("cycle_turnover_data_missing",)
+
+
+@pytest.mark.parametrize("price", [Decimal("-1"), Decimal("0"), Decimal("NaN")])
+def test_risk_engine_rejects_invalid_order_price(price: Decimal) -> None:
+    with pytest.raises(ValueError, match="order price must be positive and finite"):
+        PreTradeRiskEngine().check(
+            order=OrderRiskInput(
+                symbol="AAA",
+                industry="Tech",
+                order_quantity=100,
+                price=price,
+                current_symbol_weight=Decimal("0.10"),
+                projected_symbol_weight=Decimal("0.15"),
+                current_industry_weight=Decimal("0.20"),
+                projected_industry_weight=Decimal("0.25"),
+                average_daily_amount=Decimal("100000"),
+                current_drawdown=Decimal("-0.05"),
+            ),
+            limits=LIMITS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("projected_symbol_weight", Decimal("NaN"), "order weights"),
+        ("current_industry_weight", Decimal("-0.01"), "order weights"),
+        ("current_drawdown", Decimal("Infinity"), "current_drawdown"),
+        ("projected_cycle_turnover", Decimal("-0.01"), "projected_cycle_turnover"),
+    ],
+)
+def test_risk_engine_rejects_malformed_order_metrics(
+    field: str,
+    value: Decimal,
+    message: str,
+) -> None:
+    values = {
+        "symbol": "AAA",
+        "industry": "Tech",
+        "order_quantity": 100,
+        "price": Decimal("10"),
+        "current_symbol_weight": Decimal("0.10"),
+        "projected_symbol_weight": Decimal("0.15"),
+        "current_industry_weight": Decimal("0.20"),
+        "projected_industry_weight": Decimal("0.25"),
+        "average_daily_amount": Decimal("100000"),
+        "current_drawdown": Decimal("-0.05"),
+        "projected_cycle_turnover": Decimal("0.10"),
+    }
+    values[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        PreTradeRiskEngine().check(order=OrderRiskInput(**values), limits=LIMITS)
+
+
+def test_risk_engine_fails_closed_for_non_finite_market_inputs() -> None:
+    limits = RiskLimits(
+        max_symbol_weight=Decimal("0.20"),
+        max_industry_weight=Decimal("0.40"),
+        max_drawdown=Decimal("0.10"),
+        max_amount_participation=Decimal("0.10"),
+        max_price_deviation=Decimal("0.02"),
+    )
+    decision = PreTradeRiskEngine().check(
+        order=OrderRiskInput(
+            symbol="AAA",
+            industry="Tech",
+            order_quantity=100,
+            price=Decimal("10"),
+            current_symbol_weight=Decimal("0.10"),
+            projected_symbol_weight=Decimal("0.15"),
+            current_industry_weight=Decimal("0.20"),
+            projected_industry_weight=Decimal("0.25"),
+            average_daily_amount=Decimal("NaN"),
+            current_drawdown=Decimal("-0.05"),
+            market_price=Decimal("Infinity"),
+        ),
+        limits=limits,
+    )
+
+    assert decision.rejection_reasons == (
+        "amount_capacity_data_missing",
+        "price_deviation_data_missing",
+    )
+
+
+def test_risk_engine_rejects_non_finite_limits() -> None:
+    with pytest.raises(ValueError, match="risk limits must be between 0 and 1"):
+        PreTradeRiskEngine().check(
+            order=OrderRiskInput(
+                symbol="AAA",
+                industry="Tech",
+                order_quantity=100,
+                price=Decimal("10"),
+                current_symbol_weight=Decimal("0.10"),
+                projected_symbol_weight=Decimal("0.15"),
+                current_industry_weight=Decimal("0.20"),
+                projected_industry_weight=Decimal("0.25"),
+                average_daily_amount=Decimal("100000"),
+                current_drawdown=Decimal("-0.05"),
+            ),
+            limits=RiskLimits(
+                max_symbol_weight=Decimal("NaN"),
+                max_industry_weight=Decimal("0.40"),
+                max_drawdown=Decimal("0.10"),
+                max_amount_participation=Decimal("0.10"),
+            ),
+        )
