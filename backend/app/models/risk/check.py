@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     Sequence,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,7 +36,8 @@ class RiskCheck(CreatedAtMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("risk_risk_check_id_seq"), primary_key=True
+        BigInteger, Sequence("risk_risk_check_id_seq"),
+        server_default=text("nextval('risk_risk_check_id_seq')"), primary_key=True
     )
     plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     current_drawdown: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)
@@ -66,7 +68,8 @@ class RiskCheckOrder(CreatedAtMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("risk_risk_check_order_id_seq"), primary_key=True
+        BigInteger, Sequence("risk_risk_check_order_id_seq"),
+        server_default=text("nextval('risk_risk_check_order_id_seq')"), primary_key=True
     )
     check_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

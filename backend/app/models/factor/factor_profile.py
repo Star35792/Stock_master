@@ -27,7 +27,8 @@ class FactorProfile(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("factor_factor_profile_id_seq"), primary_key=True
+        BigInteger, Sequence("factor_factor_profile_id_seq"),
+        server_default=text("nextval('factor_factor_profile_id_seq')"), primary_key=True
     )
     factor_name: Mapped[str] = mapped_column(String(100), nullable=False)
     factor_version: Mapped[str] = mapped_column(String(100), nullable=False)

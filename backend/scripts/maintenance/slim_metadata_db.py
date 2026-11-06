@@ -30,7 +30,7 @@ from typing import Any
 import duckdb
 from sqlalchemy import create_engine
 
-from app.database.session import ensure_duckdb_sequences
+from app.database.session import checkpoint_duckdb, ensure_duckdb_sequences
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,9 +102,7 @@ def _copy_control_tables(
         ).fetchall()
         for (table_name,) in tables:
             full_name = f"{schema_name}.{table_name}"
-            if (schema_name, table_name) in {
-                (s, t) for s, t, _ in HOT_WINDOW_TABLES
-            }:
+            if (schema_name, table_name) in {(s, t) for s, t, _ in HOT_WINDOW_TABLES}:
                 continue
             logger.info("Copying control table %s", full_name)
             target.execute(f"CREATE TABLE {full_name} AS SELECT * FROM source.{full_name}")
@@ -120,8 +118,7 @@ def _copy_sequences(
 ) -> list[str]:
     """Copy sequence DDL from source to target."""
     existing = {
-        r[0]
-        for r in target.execute("SELECT sequence_name FROM duckdb_sequences()").fetchall()
+        r[0] for r in target.execute("SELECT sequence_name FROM duckdb_sequences()").fetchall()
     }
     created: list[str] = []
     rows = source.execute("SELECT sequence_name, sql FROM duckdb_sequences()").fetchall()
@@ -176,9 +173,7 @@ def _copy_defaults(
                 f"ALTER TABLE {full_name} ALTER COLUMN {column} SET DEFAULT {default_expr}"
             )
         except Exception as exc:
-            logger.warning(
-                "Failed to set default on %s.%s: %s", full_name, column, exc
-            )
+            logger.warning("Failed to set default on %s.%s: %s", full_name, column, exc)
 
 
 def _copy_unique_indexes(
@@ -229,9 +224,7 @@ def _copy_unique_indexes(
             target.execute(sql)
             logger.info("Copied unique index %s on %s", idx_name, full_name)
         except Exception as exc:
-            logger.warning(
-                "Failed to copy unique index %s on %s: %s", idx_name, full_name, exc
-            )
+            logger.warning("Failed to copy unique index %s on %s: %s", idx_name, full_name, exc)
 
     # 2) Also create indexes for any UNIQUE constraints that are not backed by
     #    an index in the source (rare, but keeps the previous behaviour).
@@ -256,9 +249,7 @@ def _copy_unique_indexes(
             target.execute(f"CREATE UNIQUE INDEX {idx_name} ON {full_name} ({col_sql})")
             logger.info("Created unique index %s on %s", idx_name, full_name)
         except Exception as exc:
-            logger.warning(
-                "Failed to create unique index on %s (%s): %s", full_name, col_sql, exc
-            )
+            logger.warning("Failed to create unique index on %s (%s): %s", full_name, col_sql, exc)
 
 
 def _copy_hot_window(
@@ -310,9 +301,7 @@ def _copy_hot_window(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Shrink the control-plane DuckDB to a hot window."
-    )
+    parser = argparse.ArgumentParser(description="Shrink the control-plane DuckDB to a hot window.")
     parser.add_argument(
         "--db-path",
         default=str(DEFAULT_DB_PATH),
@@ -435,6 +424,11 @@ def main(argv: list[str] | None = None) -> int:
         repaired_engine = create_engine(f"duckdb:///{db_path.as_posix()}")
         try:
             ensure_duckdb_sequences(repaired_engine)
+            # The sequence defaults are restored with ALTER statements, and
+            # DuckDB cannot replay a WAL entry that carries a default
+            # expression (duckdb/duckdb#18259).  Fold them into the file now
+            # so a crash during the rest of the slim cannot strand them.
+            checkpoint_duckdb(repaired_engine)
         finally:
             repaired_engine.dispose(close=True)
 
@@ -446,14 +440,12 @@ def main(argv: list[str] | None = None) -> int:
             "slim_size_bytes": slim_size,
             "size_reduction_bytes": original_size - slim_size,
             "size_reduction_pct": (
-                (original_size - slim_size) / original_size * 100
-                if original_size else 0
+                (original_size - slim_size) / original_size * 100 if original_size else 0
             ),
             "hot_window_tables": hot_window_stats,
         }
         summary_path = (
-            db_path.parent
-            / f"slim_summary-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.json"
+            db_path.parent / f"slim_summary-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.json"
         )
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.info("Slimmed DB size: %.2f MiB", slim_size / 1024 / 1024)

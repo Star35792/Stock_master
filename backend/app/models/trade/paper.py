@@ -15,6 +15,7 @@ from sqlalchemy import (
     Sequence,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,7 +31,8 @@ class PaperAccount(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_account_id_seq"), primary_key=True
+        BigInteger, Sequence("trade_paper_account_id_seq"),
+        server_default=text("nextval('trade_paper_account_id_seq')"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     cash_balance: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
@@ -55,7 +57,8 @@ class PaperOrder(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_order_id_seq"), primary_key=True
+        BigInteger, Sequence("trade_paper_order_id_seq"),
+        server_default=text("nextval('trade_paper_order_id_seq')"), primary_key=True
     )
     account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -82,7 +85,8 @@ class PaperFill(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_fill_id_seq"), primary_key=True
+        BigInteger, Sequence("trade_paper_fill_id_seq"),
+        server_default=text("nextval('trade_paper_fill_id_seq')"), primary_key=True
     )
     order_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -102,7 +106,8 @@ class PaperPosition(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_position_id_seq"), primary_key=True
+        BigInteger, Sequence("trade_paper_position_id_seq"),
+        server_default=text("nextval('trade_paper_position_id_seq')"), primary_key=True
     )
     account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -140,7 +145,10 @@ class PaperAccountEquitySnapshot(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_account_equity_snapshot_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("trade_paper_account_equity_snapshot_id_seq"),
+        server_default=text("nextval('trade_paper_account_equity_snapshot_id_seq')"),
+        primary_key=True,
     )
     account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     valuation_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -171,7 +179,10 @@ class PaperAccountEquityComponent(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_account_equity_component_id_seq"), primary_key=True
+        BigInteger,
+        Sequence("trade_paper_account_equity_component_id_seq"),
+        server_default=text("nextval('trade_paper_account_equity_component_id_seq')"),
+        primary_key=True,
     )
     snapshot_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

@@ -46,7 +46,8 @@ class ImportBatch(Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("raw_import_batch_id_seq"), primary_key=True
+        BigInteger, Sequence("raw_import_batch_id_seq"),
+        server_default=text("nextval('raw_import_batch_id_seq')"), primary_key=True
     )
     batch_no: Mapped[str] = mapped_column(String(64), nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)

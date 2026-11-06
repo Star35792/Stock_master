@@ -25,6 +25,7 @@
 | 存储体积、冗余副本与 qfq 物化优化 | [存储诊断与优化方案](relations/20261013-2207-storage-diagnosis-and-plan.md) | `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`、`aiDoc/data/daily-bar-contract.md` |
 | 真实持仓账本存储（SQLite 例外）、持仓分析与偏离检测 | [持仓账本 SQLite ADR](relations/20261023-1925-position-ledger-sqlite.md) | `aiDoc/plans/roadmap.md` V5.4、`aiDoc/modules/schema-plan.md` |
 | 研究库拆分（research.duckdb）、DuckDB 跨进程并发 | [研究库拆分 ADR](relations/20261024-1427-research-database-split.md) | `aiDoc/relations/system-map.md`、`aiDoc/modules/schema-plan.md` |
+| 主库打不开、WAL 回放失败、DuckDB 存储可用性 | [不可回放 WAL 的无损恢复与预防](relations/20261106-1442-duckdb-unreplayable-wal-recovery.md) | `aiDoc/memory/README.md`、`aiDoc/modules/module-index.md` |
 | 后端分层、代码规则 | `aiDoc/modules/backend-layer-rules.md` | 相关 `backend/app/**` 文件 |
 | schema、表、迁移 | `aiDoc/modules/module-index.md` | `aiDoc/modules/schema-plan.md`、`backend/app/database/` 初始化与兼容桥 |
 | 数据导入、质量、修复 | `aiDoc/relations/system-map.md` | `aiDoc/data/*.md` |

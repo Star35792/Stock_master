@@ -2,7 +2,17 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Date, Index, Numeric, Sequence, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Date,
+    Index,
+    Numeric,
+    Sequence,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -19,7 +29,8 @@ class ValuationSnapshot(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_valuation_snapshot_id_seq"), primary_key=True
+        BigInteger, Sequence("market_valuation_snapshot_id_seq"),
+        server_default=text("nextval('market_valuation_snapshot_id_seq')"), primary_key=True
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)

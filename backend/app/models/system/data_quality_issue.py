@@ -40,7 +40,8 @@ class DataQualityIssue(Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("system_data_quality_issue_id_seq"), primary_key=True
+        BigInteger, Sequence("system_data_quality_issue_id_seq"),
+        server_default=text("nextval('system_data_quality_issue_id_seq')"), primary_key=True
     )
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(20))

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, Index, Sequence, String, Text, func
+from sqlalchemy import BigInteger, Date, DateTime, Index, Sequence, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -20,7 +20,8 @@ class ManualCorrection(Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_manual_correction_id_seq"), primary_key=True
+        BigInteger, Sequence("market_manual_correction_id_seq"),
+        server_default=text("nextval('market_manual_correction_id_seq')"), primary_key=True
     )
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

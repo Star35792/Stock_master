@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,7 +29,8 @@ class DailyBarSourceCompare(Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_daily_bar_source_compare_id_seq"), primary_key=True
+        BigInteger, Sequence("market_daily_bar_source_compare_id_seq"),
+        server_default=text("nextval('market_daily_bar_source_compare_id_seq')"), primary_key=True
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)

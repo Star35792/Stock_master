@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +38,7 @@ class Release(Base):
     id: Mapped[int] = mapped_column(
         BigInteger,
         Sequence("lake_release_id_seq"),
+        server_default=text("nextval('lake_release_id_seq')"),
         primary_key=True,
     )
     release_id: Mapped[str] = mapped_column(String(64), nullable=False)

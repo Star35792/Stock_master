@@ -30,7 +30,8 @@ class TradingCalendar(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_trading_calendar_id_seq"), primary_key=True
+        BigInteger, Sequence("market_trading_calendar_id_seq"),
+        server_default=text("nextval('market_trading_calendar_id_seq')"), primary_key=True
     )
     exchange: Mapped[str] = mapped_column(String(10), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)

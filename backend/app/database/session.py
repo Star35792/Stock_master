@@ -1,3 +1,5 @@
+import logging
+import re
 from collections.abc import Generator
 from pathlib import Path
 
@@ -6,6 +8,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @event.listens_for(Engine, "connect")
@@ -242,12 +246,41 @@ def apply_schema_compatibility(bind: Engine) -> None:
             ))
 
 
+def _same_sequence_default(current: str, expected: str) -> bool:
+    """Compare two ``nextval(...)`` default expressions.
+
+    DuckDB stores the default as the original expression text, so the two
+    sides can differ in whitespace, letter case, or a schema qualifier on the
+    sequence name.  Normalizing those differences keeps the comparison from
+    degrading into "re-issue the DDL on every start".
+    """
+
+    def normalize(value: str) -> str:
+        collapsed = "".join(value.split()).lower()
+        # ``nextval('schema.seq')`` and ``nextval('seq')`` name the same
+        # default when the sequence lives in the current schema.
+        collapsed = re.sub(r"nextval\('[^.']*\.([^']+)'\)", r"nextval('\1')", collapsed)
+        return collapsed
+
+    return normalize(current) == normalize(expected)
+
+
 def ensure_duckdb_sequences(bind: Engine) -> None:
     """Restore model id sequences/defaults after a CTAS-based control-plane slim.
 
     DuckDB ``CREATE TABLE AS SELECT`` does not preserve primary-key sequences or
     column defaults.  Every sequence is restarted strictly above the retained
     table maximum, so a rebuilt control plane cannot reuse historical ids.
+
+    The default is only rewritten when it is actually missing or points at a
+    different sequence.  Re-issuing ``ALTER COLUMN ... SET DEFAULT nextval(...)``
+    on every start is not harmless: the default expression is logged to the WAL,
+    and DuckDB cannot replay a WAL entry that carries a default expression
+    (duckdb/duckdb#18259 -- "Failure while replaying WAL file ... Calling
+    DatabaseManager::GetDefaultDatabase with no default database set").  A
+    process that is killed between that DDL and the next checkpoint then leaves
+    a database that no longer opens at all.  Skipping the redundant DDL keeps
+    the WAL free of unreplayable entries.
     """
     if bind.dialect.name != "duckdb":
         return
@@ -264,8 +297,17 @@ def ensure_duckdb_sequences(bind: Engine) -> None:
                 )
 
     with bind.begin() as conn:
+        # ``information_schema`` and ``duckdb_sequences()`` span every attached
+        # catalog, so the queries below must be restricted to the catalog this
+        # engine owns.  Without that filter an attached database with a
+        # same-named table turns the lookup into multiple rows.
         existing = set(
-            conn.execute(text("SELECT sequence_name FROM duckdb_sequences()"))
+            conn.execute(
+                text(
+                    "SELECT sequence_name FROM duckdb_sequences() "
+                    "WHERE database_name = current_database()"
+                )
+            )
             .scalars()
             .all()
         )
@@ -273,7 +315,8 @@ def ensure_duckdb_sequences(bind: Engine) -> None:
             table_exists = conn.execute(
                 text(
                     "SELECT count(*) FROM information_schema.tables "
-                    "WHERE table_schema=:schema AND table_name=:table"
+                    "WHERE table_catalog = current_database() "
+                    "AND table_schema=:schema AND table_name=:table"
                 ),
                 {"schema": schema, "table": table},
             ).scalar_one()
@@ -288,10 +331,33 @@ def ensure_duckdb_sequences(bind: Engine) -> None:
                     text(f'CREATE SEQUENCE "{sequence_name}" START {start}')
                 )
                 existing.add(sequence_name)
+            expected = f"nextval('{sequence_name}')"
+            current = conn.execute(
+                text(
+                    "SELECT column_default FROM information_schema.columns "
+                    "WHERE table_catalog = current_database() "
+                    "AND table_schema=:schema AND table_name=:table AND column_name=:column"
+                ),
+                {"schema": schema, "table": table, "column": column},
+            ).scalar_one_or_none()
+            if current is not None and _same_sequence_default(current, expected):
+                continue
+            if current is not None:
+                # A mismatch means the stored default points somewhere else.
+                # Rewrite it, but say so: a silent mismatch would degrade back
+                # to re-issuing the DDL on every start.
+                logger.warning(
+                    "sequence default mismatch on %s.%s.%s: expected %s, found %s",
+                    schema,
+                    table,
+                    column,
+                    expected,
+                    current,
+                )
             conn.execute(
                 text(
                     f'ALTER TABLE "{schema}"."{table}" '
-                    f'ALTER COLUMN "{column}" SET DEFAULT nextval(\'{sequence_name}\')'
+                    f'ALTER COLUMN "{column}" SET DEFAULT {expected}'
                 )
             )
 
@@ -309,6 +375,33 @@ def initialize_database(bind: Engine | None = None) -> None:
     Base.metadata.create_all(bind=resolved_bind)
     ensure_duckdb_sequences(resolved_bind)
     apply_schema_compatibility(resolved_bind)
+    checkpoint_duckdb(resolved_bind)
+
+
+def checkpoint_duckdb(bind: Engine) -> None:
+    """Fold the WAL into the database file so it stays replayable.
+
+    DuckDB cannot replay a WAL entry that carries a default expression
+    (duckdb/duckdb#18259).  Schema upgrades legitimately produce such entries,
+    so a process killed before the next checkpoint would leave a database that
+    cannot be opened at all.  Checkpointing right after the upgrade moves the
+    DDL into the database file and truncates the WAL, which keeps a later
+    crash recoverable.
+
+    A failed checkpoint must not stop the process from starting: the database
+    itself stays healthy, and the WAL simply keeps the DDL it already had.  The
+    failure is logged so an operator can rerun the checkpoint, rather than
+    taking the whole service down over a fold that already succeeded
+    elsewhere.
+    """
+    if bind.dialect.name != "duckdb":
+        return
+    try:
+        with bind.connect() as conn:
+            conn.execute(text("CHECKPOINT"))
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - a checkpoint failure is reportable
+        logger.warning("schema upgrade checkpoint failed: %s", exc)
 
 
 Path(settings.metadata_db_path).parent.mkdir(parents=True, exist_ok=True)

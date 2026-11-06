@@ -2,7 +2,8 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, delete, select, text
+from sqlalchemy import create_engine, delete, event, select, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -195,3 +196,97 @@ def test_sequence_repair_restarts_above_retained_ids(tmp_path) -> None:
         assert row.id == 901
         db.rollback()
     engine.dispose()
+
+
+def _sequence_default_alters(engine: Engine) -> list[str]:
+    """Return the sequence-default DDL a connection would issue."""
+    captured: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        if "SET DEFAULT" in statement.upper():
+            captured.append(statement)
+
+    try:
+        initialize_database(engine)
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+    return captured
+
+
+def test_fresh_database_needs_no_sequence_default_ddl(tmp_path) -> None:
+    """A new database must be created with its defaults, not patched afterwards.
+
+    ``CREATE TABLE`` carrying a default expression is safe to replay, while
+    ``ALTER COLUMN ... SET DEFAULT nextval(...)`` is not (duckdb/duckdb#18259).
+    Declaring the default on the model keeps the first initialization free of
+    any statement that could strand the database.
+    """
+    engine = create_engine(f"duckdb:///{tmp_path / 'fresh.duckdb'}")
+    alters = _sequence_default_alters(engine)
+    with engine.connect() as connection:
+        defaults = connection.scalar(
+            text(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE column_default LIKE '%nextval%'"
+            )
+        )
+    engine.dispose()
+
+    assert alters == []
+    assert defaults == 40
+
+
+def test_repeated_initialization_does_not_reissue_sequence_default_ddl(tmp_path) -> None:
+    """Re-initializing an existing database must not re-emit the DDL.
+
+    The defaults are already correct after the first initialization, so the
+    schema bridge has nothing to do.  Re-issuing the statement would write an
+    unreplayable WAL entry on every single start.
+    """
+    database = tmp_path / "repeat.duckdb"
+    engine = create_engine(f"duckdb:///{database}")
+    initialize_database(engine)
+    engine.dispose()
+
+    engine = create_engine(f"duckdb:///{database}")
+    alters = _sequence_default_alters(engine)
+    engine.dispose()
+
+    assert alters == []
+
+
+def test_sequence_default_ddl_is_never_written_to_the_wal(tmp_path) -> None:
+    """A crash after initialization must leave a database that still opens.
+
+    DuckDB cannot replay a WAL entry that carries a default expression
+    (duckdb/duckdb#18259), so a process killed before the next checkpoint used
+    to leave a database that could not be opened again.  The schema upgrade is
+    checkpointed, so the WAL only ever holds ordinary row changes.
+    """
+    database = tmp_path / "checkpointed.duckdb"
+
+    def reopen() -> int:
+        engine = create_engine(f"duckdb:///{database}")
+        try:
+            with engine.connect() as connection:
+                return connection.scalar(
+                    text("SELECT count(*) FROM metadata.job_log")
+                )
+        finally:
+            engine.dispose()
+
+    engine = create_engine(f"duckdb:///{database}")
+    initialize_database(engine)
+    # Write a row and keep the WAL: this is what a killed process leaves behind.
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA disable_checkpoint_on_shutdown"))
+        connection.execute(
+            text(
+                "INSERT INTO metadata.job_log (job_name, job_type) "
+                "VALUES ('probe', 'schedule')"
+            )
+        )
+    engine.dispose()
+
+    assert reopen() == 1

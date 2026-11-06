@@ -9,6 +9,7 @@ from sqlalchemy import (
     Sequence,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,7 +27,8 @@ class FactorValue(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("factor_factor_value_id_seq"), primary_key=True
+        BigInteger, Sequence("factor_factor_value_id_seq"),
+        server_default=text("nextval('factor_factor_value_id_seq')"), primary_key=True
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)

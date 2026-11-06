@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import JSON, BigInteger, Date, Index, Sequence, String
+from sqlalchemy import JSON, BigInteger, Date, Index, Sequence, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -15,7 +15,8 @@ class RawVendorSnapshot(Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("raw_vendor_snapshot_id_seq"), primary_key=True
+        BigInteger, Sequence("raw_vendor_snapshot_id_seq"),
+        server_default=text("nextval('raw_vendor_snapshot_id_seq')"), primary_key=True
     )
     batch_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)

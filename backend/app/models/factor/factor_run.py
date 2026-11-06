@@ -44,7 +44,8 @@ class FactorRun(CreatedAtMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("factor_factor_run_id_seq"), primary_key=True
+        BigInteger, Sequence("factor_factor_run_id_seq"),
+        server_default=text("nextval('factor_factor_run_id_seq')"), primary_key=True
     )
     definition_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     factor_name: Mapped[str] = mapped_column(String(100), nullable=False)

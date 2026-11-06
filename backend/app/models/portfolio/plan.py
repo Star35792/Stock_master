@@ -12,6 +12,7 @@ from sqlalchemy import (
     Sequence,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,7 +34,8 @@ class PortfolioPlanRecord(CreatedAtMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("portfolio_portfolio_plan_id_seq"), primary_key=True
+        BigInteger, Sequence("portfolio_portfolio_plan_id_seq"),
+        server_default=text("nextval('portfolio_portfolio_plan_id_seq')"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -58,7 +60,8 @@ class PortfolioTargetRecord(CreatedAtMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("portfolio_portfolio_target_id_seq"), primary_key=True
+        BigInteger, Sequence("portfolio_portfolio_target_id_seq"),
+        server_default=text("nextval('portfolio_portfolio_target_id_seq')"), primary_key=True
     )
     plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

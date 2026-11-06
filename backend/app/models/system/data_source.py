@@ -30,7 +30,8 @@ class DataSource(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("system_data_source_id_seq"), primary_key=True
+        BigInteger, Sequence("system_data_source_id_seq"),
+        server_default=text("nextval('system_data_source_id_seq')"), primary_key=True
     )
     source_name: Mapped[str] = mapped_column(String(50), nullable=False)
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)

@@ -38,7 +38,8 @@ class FactorDefinition(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("factor_factor_definition_id_seq"), primary_key=True
+        BigInteger, Sequence("factor_factor_definition_id_seq"),
+        server_default=text("nextval('factor_factor_definition_id_seq')"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(100))

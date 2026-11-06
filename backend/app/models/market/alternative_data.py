@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import JSON, BigInteger, Date, Index, Integer, Numeric, Sequence, String
+from sqlalchemy import JSON, BigInteger, Date, Index, Integer, Numeric, Sequence, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -23,7 +23,8 @@ class AlternativeDataSnapshot(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_alternative_data_snapshot_id_seq"), primary_key=True
+        BigInteger, Sequence("market_alternative_data_snapshot_id_seq"),
+        server_default=text("nextval('market_alternative_data_snapshot_id_seq')"), primary_key=True
     )
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -50,7 +51,8 @@ class IndexConstituentSnapshot(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("market_index_constituent_snapshot_id_seq"), primary_key=True
+        BigInteger, Sequence("market_index_constituent_snapshot_id_seq"),
+        server_default=text("nextval('market_index_constituent_snapshot_id_seq')"), primary_key=True
     )
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     index_symbol: Mapped[str] = mapped_column(String(20), nullable=False)

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     Sequence,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,7 +40,8 @@ class FinancialStatement(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("fundamental_financial_statement_id_seq"), primary_key=True
+        BigInteger, Sequence("fundamental_financial_statement_id_seq"),
+        server_default=text("nextval('fundamental_financial_statement_id_seq')"), primary_key=True
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     statement_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -69,7 +71,8 @@ class FinancialIndicator(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("fundamental_financial_indicator_id_seq"), primary_key=True
+        BigInteger, Sequence("fundamental_financial_indicator_id_seq"),
+        server_default=text("nextval('fundamental_financial_indicator_id_seq')"), primary_key=True
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     report: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -116,6 +119,7 @@ class FinancialStatementRevision(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(
         BigInteger,
         Sequence("fundamental_financial_statement_revision_id_seq"),
+        server_default=text("nextval('fundamental_financial_statement_revision_id_seq')"),
         primary_key=True,
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

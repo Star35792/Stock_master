@@ -43,7 +43,8 @@ class TrainingArtifact(CreatedAtMixin, ResearchBase):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("strategy_training_artifact_id_seq"), primary_key=True
+        BigInteger, Sequence("strategy_training_artifact_id_seq"),
+        server_default=text("nextval('strategy_training_artifact_id_seq')"), primary_key=True
     )
     window_id: Mapped[str] = mapped_column(String(200), nullable=False)
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -73,7 +74,8 @@ class BacktestRun(CreatedAtMixin, ResearchBase):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("strategy_backtest_run_id_seq"), primary_key=True
+        BigInteger, Sequence("strategy_backtest_run_id_seq"),
+        server_default=text("nextval('strategy_backtest_run_id_seq')"), primary_key=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -110,7 +112,8 @@ class BacktestTradeRecord(CreatedAtMixin, ResearchBase):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("strategy_backtest_trade_id_seq"), primary_key=True
+        BigInteger, Sequence("strategy_backtest_trade_id_seq"),
+        server_default=text("nextval('strategy_backtest_trade_id_seq')"), primary_key=True
     )
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     signal_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -133,7 +136,8 @@ class BacktestEquity(CreatedAtMixin, ResearchBase):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("strategy_backtest_equity_id_seq"), primary_key=True
+        BigInteger, Sequence("strategy_backtest_equity_id_seq"),
+        server_default=text("nextval('strategy_backtest_equity_id_seq')"), primary_key=True
     )
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -151,7 +155,8 @@ class BacktestPosition(CreatedAtMixin, ResearchBase):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("strategy_backtest_position_id_seq"), primary_key=True
+        BigInteger, Sequence("strategy_backtest_position_id_seq"),
+        server_default=text("nextval('strategy_backtest_position_id_seq')"), primary_key=True
     )
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -169,7 +174,8 @@ class BacktestPerformance(CreatedAtMixin, ResearchBase):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("strategy_backtest_performance_id_seq"), primary_key=True
+        BigInteger, Sequence("strategy_backtest_performance_id_seq"),
+        server_default=text("nextval('strategy_backtest_performance_id_seq')"), primary_key=True
     )
     run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     total_return: Mapped[Decimal] = mapped_column(Numeric(18, 10), nullable=False)

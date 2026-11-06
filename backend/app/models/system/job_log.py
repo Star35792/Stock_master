@@ -42,7 +42,12 @@ class JobLog(Base):
         {"schema": "metadata"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, Sequence("system_job_log_id_seq"), primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        Sequence("system_job_log_id_seq"),
+        server_default=text("nextval('system_job_log_id_seq')"),
+        primary_key=True,
+    )
     job_name: Mapped[str] = mapped_column(String(100), nullable=False)
     job_type: Mapped[str] = mapped_column(String(50), nullable=False)
     batch_id: Mapped[int | None] = mapped_column(BigInteger)

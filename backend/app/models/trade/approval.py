@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,7 +65,8 @@ class PaperExecutionApproval(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_execution_approval_id_seq"), primary_key=True
+        BigInteger, Sequence("trade_paper_execution_approval_id_seq"),
+        server_default=text("nextval('trade_paper_execution_approval_id_seq')"), primary_key=True
     )
     risk_check_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -140,7 +142,8 @@ class PaperExecutionBatch(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(
-        BigInteger, Sequence("trade_paper_execution_batch_id_seq"), primary_key=True
+        BigInteger, Sequence("trade_paper_execution_batch_id_seq"),
+        server_default=text("nextval('trade_paper_execution_batch_id_seq')"), primary_key=True
     )
     approval_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     risk_check_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
