@@ -1,0 +1,2413 @@
+{
+  "started_at": "2026-10-29T08:10:22.002975+00:00",
+  "as_of": "2026-10-29",
+  "status": "partial",
+  "scope": [
+    "000016.SZ",
+    "002532.SZ",
+    "002731.SZ",
+    "300002.SZ",
+    "300014.SZ",
+    "300016.SZ",
+    "300180.SZ",
+    "300212.SZ",
+    "300229.SZ",
+    "300246.SZ",
+    "300247.SZ",
+    "300248.SZ",
+    "300249.SZ",
+    "300250.SZ",
+    "300252.SZ",
+    "300260.SZ",
+    "300261.SZ",
+    "300502.SZ",
+    "300513.SZ",
+    "300515.SZ",
+    "300522.SZ",
+    "300788.SZ",
+    "300790.SZ",
+    "300814.SZ",
+    "300815.SZ",
+    "300821.SZ",
+    "300822.SZ",
+    "300852.SZ",
+    "300853.SZ",
+    "300856.SZ",
+    "300861.SZ",
+    "300862.SZ",
+    "300867.SZ",
+    "300868.SZ",
+    "300869.SZ",
+    "300870.SZ",
+    "300871.SZ",
+    "300872.SZ",
+    "300875.SZ",
+    "300877.SZ",
+    "300885.SZ",
+    "300886.SZ",
+    "300888.SZ",
+    "300890.SZ",
+    "300891.SZ",
+    "301139.SZ",
+    "301212.SZ",
+    "301217.SZ",
+    "301219.SZ",
+    "301223.SZ",
+    "301239.SZ",
+    "301248.SZ",
+    "301261.SZ",
+    "301262.SZ",
+    "301263.SZ",
+    "301270.SZ",
+    "301505.SZ",
+    "301575.SZ",
+    "301578.SZ",
+    "301616.SZ",
+    "301622.SZ",
+    "600123.SH",
+    "600133.SH",
+    "600157.SH",
+    "600249.SH",
+    "600257.SH",
+    "600261.SH",
+    "600262.SH",
+    "600272.SH",
+    "600276.SH",
+    "600285.SH",
+    "600287.SH",
+    "600601.SH",
+    "600602.SH",
+    "600929.SH",
+    "600935.SH",
+    "600936.SH",
+    "600938.SH",
+    "600955.SH",
+    "600960.SH",
+    "600961.SH",
+    "600963.SH",
+    "600965.SH",
+    "600968.SH",
+    "600969.SH",
+    "600973.SH",
+    "688358.SH",
+    "920305.BJ"
+  ],
+  "workers": 8,
+  "symbols": [
+    {
+      "symbol": "000016.SZ",
+      "annual": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      },
+      "quarterly": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      }
+    },
+    {
+      "symbol": "002532.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081023_4551257f",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "002731.SZ",
+      "annual": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      },
+      "quarterly": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      }
+    },
+    {
+      "symbol": "300002.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081023_85361884",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300014.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081023_c4054c1b",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300016.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081023_8fbef3f5",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300180.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081023_7f59d78b",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300212.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081023_7009f5a5",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300229.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081024_6e9ecba1",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300246.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081025_55277e0e",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081025_090ca7cc",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "300247.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081025_1c45b4e9",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300248.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081026_d712123b",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081026_ac18ea13",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300249.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081026_1a3d80fa",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081026_2c9e041a",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300250.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081026_e8b13609",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081027_25e54618",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "300252.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081027_750b5986",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081027_59578728",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "300260.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081027_fab5c8c9",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300261.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081028_7011d562",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300502.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081029_5434c0c4",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081029_d1c7062f",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "300513.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081029_98f71be3",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300515.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081029_179ad9ef",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300522.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081029_c10fea8d",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300788.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081030_ed57a31f",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300790.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081030_6069ac54",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300814.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081030_1aa97cda",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081030_962d0237",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300815.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081031_0764c663",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300821.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081031_65fdf82a",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300822.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081031_be1f4488",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300852.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081032_a2da646d",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300853.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081032_62ebaf95",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300856.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081032_f7aae458",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081032_3e2097f0",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "300861.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081032_933f4920",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300862.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081032_9be37f00",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081033_e99ccde3",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300867.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081034_b1751ac6",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300868.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081034_bd9b0ac9",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081034_d49f6004",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300869.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081035_55ab81ce",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081035_b06ce571",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "300870.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081035_a742de59",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300871.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081035_54c61b92",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300872.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081035_a49afd05",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300875.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081036_94e67d2b",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300877.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081036_1f3908bf",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300885.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081037_7b062f98",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300886.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081037_827314dc",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081037_507f4929",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300888.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081038_f5d2586c",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300890.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081038_82f0854e",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081038_2dec94c2",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "300891.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081038_23dd1527",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081039_afe56f5e",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301139.SZ",
+      "annual": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      },
+      "quarterly": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      }
+    },
+    {
+      "symbol": "301212.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081039_8baf2f0e",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301217.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081039_5e6d4a5d",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301219.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081040_3523f2f9",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081041_e5a46a6c",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "301223.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081041_8d031a6a",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301239.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081041_013e9df5",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301248.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081041_26ff6164",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081041_cfde8d32",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "301261.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081042_9bd7ccec",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301262.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081042_892023e7",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301263.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081042_8a27abc6",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301270.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081042_0d9380ec",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081042_96e5dd1d",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301505.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081043_3f9e23d9",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301575.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081044_8cc0c05f",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301578.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081044_d5e64dfb",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301616.SZ",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081044_84f175e6",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081044_7090ceb9",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "301622.SZ",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081044_b40a426f",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600123.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081045_9e8ed8e1",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600133.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081045_4994d486",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600157.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081045_f3be0e05",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081045_19481fb2",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600249.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081047_95c5e18c",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081047_100e97f5",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600257.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081047_748d70ce",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081047_56b39ba8",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600261.SH",
+      "annual": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081048_6bc1d6fd",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": false,
+        "missing_periods": {
+          "income": [],
+          "balance": [
+            "2025-12-31"
+          ],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081048_c4eec3af",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "balance": [
+            "2025-12-31",
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2025-09-30",
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600262.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081048_d620349f",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081048_05ca7b5d",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600272.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081049_c5eafca0",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081049_604acc74",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600276.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081049_e736aa2f",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600285.SH",
+      "annual": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081049_30738681",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": false,
+        "missing_periods": {
+          "income": [],
+          "balance": [
+            "2025-12-31"
+          ],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081049_7830e155",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "balance": [
+            "2025-12-31",
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2025-09-30",
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600287.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081050_38765706",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081050_9ac99022",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600601.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081051_a25ceacd",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600602.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081051_6ded924c",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600929.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081051_d42242d0",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600935.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081051_6f742357",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081052_db9130e3",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600936.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081052_9323eec4",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600938.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081052_e44a1431",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081052_30c73646",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600955.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081052_7aebae59",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600960.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081053_13675415",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081053_7b01c1b6",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600961.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081055_76904e80",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081055_e9371319",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600963.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081055_6a847a23",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081055_14f19594",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600965.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081055_32a8a6c9",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081056_9a26f937",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "600968.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081056_102be2e3",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600969.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081056_0183de45",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "600973.SH",
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081056_a749b894",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "quarterly": {
+        "status": "incomplete",
+        "batch_no": "hithink_financial_20261029081056_08d39f09",
+        "raw_rows": 21,
+        "statement_rows": 21,
+        "complete": false,
+        "missing_periods": {
+          "income": [
+            "2026-09-30"
+          ],
+          "balance": [
+            "2026-09-30"
+          ],
+          "cash_flow": [
+            "2026-09-30"
+          ]
+        }
+      }
+    },
+    {
+      "symbol": "688358.SH",
+      "quarterly": {
+        "status": "skipped_complete",
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      },
+      "annual": {
+        "status": "success",
+        "batch_no": "hithink_financial_20261029081057_a8266363",
+        "raw_rows": 12,
+        "statement_rows": 12,
+        "complete": true,
+        "missing_periods": {
+          "income": [],
+          "balance": [],
+          "cash_flow": []
+        }
+      }
+    },
+    {
+      "symbol": "920305.BJ",
+      "annual": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      },
+      "quarterly": {
+        "status": "fetch_failed",
+        "error": "HithinkFinanceError",
+        "detail": "statement fetch failed; retry this phase"
+      }
+    }
+  ],
+  "requested_symbols": 88,
+  "updated_at": "2026-10-29T08:10:57.295965+00:00",
+  "phase_counts": {
+    "annual": {
+      "success": 82,
+      "skipped_complete": 0,
+      "incomplete": 2,
+      "fetch_failed": 4,
+      "write_failed": 0
+    },
+    "quarterly": {
+      "success": 13,
+      "skipped_complete": 51,
+      "incomplete": 20,
+      "fetch_failed": 4,
+      "write_failed": 0
+    }
+  }
+}

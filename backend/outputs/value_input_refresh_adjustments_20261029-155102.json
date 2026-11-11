@@ -1,0 +1,18 @@
+{
+  "stage": "adjustments",
+  "started_at": "2026-10-29T00:51:02.710295-07:00",
+  "collection": {
+    "batch_no": "hithink_adjustment_20261029075104_1997f80b",
+    "release_tag": "a_share_adjustment_factors_event_none_all_20261028.parquet",
+    "file_path": "data\\hithink_dumps\\adjustment-factors.parquet",
+    "row_count": 57700
+  },
+  "build": {
+    "factor_rows": 347719,
+    "qfq_bar_rows": 0,
+    "version": "v1",
+    "release_id": null
+  },
+  "status": "success",
+  "finished_at": "2026-10-29T00:51:05.842606-07:00"
+}

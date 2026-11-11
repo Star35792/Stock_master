@@ -1,0 +1,62 @@
+[
+ {
+  "label": "Q1 单只股票完整K线(选股详情页)",
+  "sql": "SELECT trade_date,open,high,low,close,volume,pct_change FROM market.daily_bar WHERE symbol='688610.SH' ORDER BY trade_date",
+  "uses_index": false,
+  "ms": 20.05
+ },
+ {
+  "label": "Q2 单只股票近期窗口",
+  "sql": "SELECT trade_date,close,turnover_rate FROM market.daily_bar WHERE symbol='688610.SH' AND trade_date>='2026-01-01'",
+  "uses_index": false,
+  "ms": 8.58
+ },
+ {
+  "label": "Q3 全市场某日快照(因子横截面)",
+  "sql": "SELECT symbol,close,pct_change,turnover_rate FROM market.daily_bar WHERE trade_date='2026-10-19'",
+  "uses_index": false,
+  "ms": 21.45
+ },
+ {
+  "label": "Q4 近20日全市场(因子计算主查询)",
+  "sql": "SELECT trade_date,symbol,close,volume,turnover_rate FROM market.daily_bar WHERE trade_date>='2026-09-22'",
+  "uses_index": false,
+  "ms": 520.95
+ },
+ {
+  "label": "Q5 质量过滤(选股前置)",
+  "sql": "SELECT count(*) FROM market.daily_bar WHERE quality_status='ok' AND trade_date>='2026-10-01'",
+  "uses_index": false,
+  "ms": 0.33
+ },
+ {
+  "label": "Q6 raw 单只股票落地审计",
+  "sql": "SELECT source_name,adjust_type,trade_date,close FROM raw.daily_bar WHERE symbol='688610.SH'",
+  "uses_index": false,
+  "ms": 2.49
+ },
+ {
+  "label": "Q7 raw 按source核对",
+  "sql": "SELECT count(*) FROM raw.daily_bar WHERE source_name='hithink_finance_dump' AND trade_date='2026-10-19'",
+  "uses_index": false,
+  "ms": 0.71
+ },
+ {
+  "label": "Q8 复权因子单只",
+  "sql": "SELECT trade_date,factor FROM market.adjustment_factor WHERE symbol='688610.SH' AND adjust_type='qfq' ORDER BY trade_date",
+  "uses_index": false,
+  "ms": 7.84
+ },
+ {
+  "label": "Q9 因子值按日期取(API分页)",
+  "sql": "SELECT factor_name,symbol,value FROM factor.factor_value WHERE trade_date='2026-10-19' LIMIT 100",
+  "uses_index": false,
+  "ms": 2.25
+ },
+ {
+  "label": "Q10 行业/日期范围聚合",
+  "sql": "SELECT symbol,count(*) FROM market.daily_bar WHERE trade_date BETWEEN '2026-09-01' AND '2026-10-19' GROUP BY symbol LIMIT 50",
+  "uses_index": false,
+  "ms": 11.17
+ }
+]

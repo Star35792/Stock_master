@@ -1,0 +1,45 @@
+{
+  "run_id": 260,
+  "executed_at_shanghai": "2026-10-29T15:44:47.813095+08:00",
+  "target_trade_date": "2026-10-28",
+  "status": "blocked",
+  "universe_count": 5585,
+  "base_ready_count": 0,
+  "research_candidate_count": 0,
+  "selected": [],
+  "global_reason_codes": [
+    "input_preparation_missing_for_target",
+    "trusted_bars_missing_for_target",
+    "valuation_missing_for_target",
+    "roe_reported_missing_for_target"
+  ],
+  "freshness": {
+    "status": "current",
+    "expected_trade_date": "2026-10-28",
+    "checked_at": "2026-10-29T15:44:47.813095+08:00",
+    "reason_codes": []
+  },
+  "quality_status_counts": {
+    "not_applicable": 122,
+    "unknown": 5368,
+    "supported": 62,
+    "risk": 33
+  },
+  "trend_status_counts": {
+    "unknown": 5585
+  },
+  "reason_counts": {
+    "financial_industry_separate_model": 122,
+    "industry_missing": 3,
+    "input_preparation_missing_for_target": 5585,
+    "listing_unverified": 5,
+    "roe_reported_missing": 5585,
+    "roe_reported_missing_for_target": 5585,
+    "trusted_bars_missing_for_target": 5585,
+    "trusted_quote_missing": 5585,
+    "valuation_missing": 5585,
+    "valuation_missing_for_target": 5585
+  },
+  "comparison_status": "not_comparable_missing_current_inputs",
+  "return_improvement_verified": false
+}

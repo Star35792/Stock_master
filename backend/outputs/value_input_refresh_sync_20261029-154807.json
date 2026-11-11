@@ -1,0 +1,39 @@
+{
+  "stage": "sync",
+  "started_at": "2026-10-29T00:48:07.908057-07:00",
+  "result": {
+    "previous_end_date": "2026-10-27",
+    "end_date": "2026-10-28",
+    "advanced": true,
+    "release_tag": "a_share_daily_k_1d_none_10d_20261028.parquet",
+    "batch_nos": [
+      "hithink_dump_20261029074830_09fa988e"
+    ],
+    "rows_read": 55671,
+    "rows_inserted": 0,
+    "market_rows": 27830,
+    "coverage": {
+      "trade_date": "2026-10-28",
+      "eligible_stocks": 5584,
+      "covered_stocks": 5569,
+      "stock_coverage_rate": 0.9973137535816619,
+      "by_exchange": {
+        "BJ": {
+          "eligible": 355,
+          "covered": 353
+        },
+        "SH": {
+          "eligible": 2321,
+          "covered": 2315
+        },
+        "SZ": {
+          "eligible": 2908,
+          "covered": 2901
+        }
+      },
+      "index_rows": 0
+    }
+  },
+  "status": "success",
+  "finished_at": "2026-10-29T00:48:31.029570-07:00"
+}

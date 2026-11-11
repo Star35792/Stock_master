@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>价值投资安全边际报告 · 2026-11-10</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1a1d21; --ink-2:#4a5158; --ink-3:#8a929b;
+    --line:#e3e6ea; --line-2:#eef0f3;
+    --up:#c62828; --down:#1b7f3b; --accent:#1f5fa8; --accent-soft:#eaf1f9;
+    --warn:#b26a00; --warn-soft:#fdf4e3; --ok:#1b7f3b; --ok-soft:#eaf5ee;
+    --danger:#b3261e; --danger-soft:#fdecea;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    font-size:15px;line-height:1.72;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 28px 80px}
+  header.mast{border-bottom:2px solid var(--ink);padding-bottom:18px;margin-bottom:26px}
+  .kicker{font-size:12px;letter-spacing:.18em;color:var(--ink-3);text-transform:uppercase}
+  h1{font-size:30px;margin:8px 0 10px;letter-spacing:-.01em;line-height:1.28}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13px;color:var(--ink-2)}
+  .meta b{font-weight:600;color:var(--ink)}
+  .badge{display:inline-block;padding:2px 9px;border-radius:11px;font-size:12px;
+    background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .badge.ro{background:var(--warn-soft);color:var(--warn)}
+  section{margin:34px 0}
+  h2{font-size:19px;margin:0 0 6px;padding-left:11px;border-left:4px solid var(--accent)}
+  h2 .sub{font-weight:400;font-size:13px;color:var(--ink-3);margin-left:10px}
+  h3{font-size:15px;margin:22px 0 8px;color:var(--ink)}
+  p{margin:9px 0;color:var(--ink-2)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px 24px}
+  .grid{display:grid;gap:14px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:760px){.g4,.g3{grid-template-columns:1fr 1fr}}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 16px}
+  .kpi .lab{font-size:12px;color:var(--ink-3);letter-spacing:.03em}
+  .kpi .val{font-size:24px;font-weight:650;margin-top:5px;font-variant-numeric:tabular-nums}
+  .kpi .note{font-size:12px;color:var(--ink-3);margin-top:3px}
+  .hero{background:linear-gradient(180deg,#fff,#fbfcfd);border:1px solid var(--line);
+    border-left:5px solid var(--ok);border-radius:10px;padding:22px 24px}
+  .hero .name{font-size:22px;font-weight:650}
+  .hero .code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--ink-3);font-size:14px;margin-left:8px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0;font-variant-numeric:tabular-nums}
+  th,td{padding:9px 11px;border-bottom:1px solid var(--line-2);text-align:left;vertical-align:top}
+  th{color:var(--ink-3);font-weight:600;font-size:12.5px;background:#fafbfc;white-space:nowrap}
+  td.num,th.num{text-align:right}
+  tr:last-child td{border-bottom:none}
+  .pos{color:var(--up);font-weight:600}
+  .neg{color:var(--down);font-weight:600}
+  .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+  .callout{border-radius:8px;padding:14px 16px;font-size:13.5px;margin:14px 0}
+  .callout.warn{background:var(--warn-soft);border-left:3px solid var(--warn);color:#6b4400}
+  .callout.ok{background:var(--ok-soft);border-left:3px solid var(--ok);color:#14532d}
+  .callout.info{background:var(--accent-soft);border-left:3px solid var(--accent);color:#123c69}
+  .callout.bad{background:var(--danger-soft);border-left:3px solid var(--danger);color:#6f1a14}
+  .callout b{color:inherit}
+  ul{margin:8px 0 8px 20px;padding:0;color:var(--ink-2)}
+  li{margin:5px 0}
+  .bar{height:8px;border-radius:4px;background:#eceff3;overflow:hidden;margin-top:6px}
+  .bar>span{display:block;height:100%;background:var(--ok)}
+  footer{margin-top:46px;border-top:1px solid var(--line);padding-top:16px;font-size:12.5px;color:var(--ink-3)}
+  .tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:5px;background:#eef0f3;color:var(--ink-2);margin-right:6px}
+  .tag.fwd{background:#f3e9fb;color:#6b3fa0}
+  .tag.fact{background:var(--ok-soft);color:#14532d}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <div class="kicker">Stock Master · 价值投资研究输出</div>
+  <h1>价值投资安全边际选股报告</h1>
+  <div class="meta">
+    <span>策略 <b>value_investing_margin@v3</b></span>
+    <span>行情交易日 <b>2026-11-10</b>（收盘）</span>
+    <span>估值窗口 <b>2024-05-06 ~ 2026-11-10</b></span>
+    <span>生成时间 <b>2026-11-11 03:00 (UTC+8)</b></span>
+    <span class="badge ro">research_only · pit_verified=false · execution_eligible=false</span>
+  </div>
+</header>
+
+<div class="hero">
+  <div>
+    <span class="name">星宇股份</span><span class="code">601799.SH</span>
+    <span class="tag fact">ROE + 成长双路径</span><span class="tag">汽车零部件</span>
+  </div>
+  <p style="margin-top:10px;margin-bottom:0">
+    全市场 <b>5,586</b> 只个股，仅 <b>1 只</b>同时通过价格闸门、企业质地闸门与价值陷阱闸门。
+    收盘 <b>70.84</b>（当日 <b class="pos">+4.59%</b>），历史倍数保守锚 <b>110.69</b>，
+    买入成本上限 <b>77.48</b>，安全边际 <b class="pos">36.0%</b>（要求 ≥ 30%）。
+  </p>
+</div>
+
+<section>
+  <h2>先说数据：11-10 曾把盘中快照当成收盘价<span class="sub">已修复</span></h2>
+  <div class="card">
+    <p style="margin-top:0">这个问题比缺数据严重得多，值得单独记一笔。</p>
+    <table>
+      <thead><tr><th>证据</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>批次时间</td>
+          <td><span class="mono">hithink_daily_bar_20261110030248</span> 创建于 <b>2026-11-10 11:02</b>，状态 <span class="mono">partial</span> —— 上午盘中</td>
+        </tr>
+        <tr>
+          <td>不可能的价位</td>
+          <td><b>927 只</b>个股的「收盘价」高于它自己当日的「最高价」。收盘价不可能高于当日最高，除非那根 bar 不是完整交易日</td>
+        </tr>
+        <tr>
+          <td>与供应商对不上</td>
+          <td>东财 11-10 收盘价与可信层仅 <b>8.2%</b>（459/5,580）一致，差异集中在 0.3%~5%</td>
+        </tr>
+        <tr>
+          <td>修复后</td>
+          <td>收盘后重抓 → <b>6,146 只</b>、一致率 <b>99.9%</b>（5,572/5,580）、「收盘 &gt; 最高」归零</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout bad">
+      <b>所以「11-10 的估值采集不到」不是供应商没数据，是我们自己的可信日线是盘中半日快照。</b>
+      估值补采的价格闸门拿它做逐笔对账，自然整日拒收 —— 闸门是对的，错的是被它拒绝的那一侧。
+      上一条消息里我把它判断成「供应商快照未定稿」，那是误判，这里更正。
+    </div>
+    <div class="callout info">
+      <b>另有一个我自己的错</b>：上一版报告用 11-09 作基准日，理由是「上海今天还是 11-10」。
+      实际上海时间当时已是 <b>11-11 02:15</b>（Git Bash 里 <span class="mono">TZ=Asia/Shanghai date</span> 在 Windows 下算错了时区，我照抄了那个结果）。
+      11-10 本来就是完整交易日，上一版基准日选错了，已作废。
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>本轮同步结果</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>数据集</th><th>状态</th><th>处理</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>market.daily_bar</td>
+          <td class="mono">2016-10-26 ~ 2026-11-10<br>10,431,034 行 / 11-10 共 6,146 只</td>
+          <td>收盘后重抓 11-10 覆盖盘中快照（upsert，7,730 只活跃证券）；确认零重复键</td>
+        </tr>
+        <tr>
+          <td>research.valuation_history</td>
+          <td class="mono">2024-05-06 ~ 2026-11-10<br>3,315,923 行 / 611 期</td>
+          <td>分两批补采 16 个交易日（10-20~10-26 共 5 天、10-27~11-10 共 11 天），全部过双闸门</td>
+        </tr>
+        <tr>
+          <td>fundamental.financial_statement</td>
+          <td class="mono">5,575 只 / 覆盖至 2026-10-30</td>
+          <td>随 delta release 带入控制面完整窗口（FY2023–FY2025 + 2026 三季报）</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout info">
+      <b>温层链路</b>（新 → 旧，节选）：<span class="mono" style="font-size:12.5px">
+      20261111-0255-valhist-20261110 → 20261111-0250-data-close →
+      20261111-0230-valhist-20261027-20261109 → 20261111-0215-data-close →
+      20261111-0204-valhist-20261020-20261110 → 20261027-data-close-v2 → …</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>结论一览</h2>
+  <div class="grid g4">
+    <div class="kpi"><div class="lab">股票池</div><div class="val">5,586</div><div class="note">剔除金融与周期专用模型后</div></div>
+    <div class="kpi"><div class="lab">仅价格闸门达标</div><div class="val">5</div><div class="note">安全边际 ≥30% 且 PE/PB 双上限内</div></div>
+    <div class="kpi"><div class="lab">质地闸门后达标</div><div class="val">1</div><div class="note">剔除 4 只（ROE 2.0%~5.7%）</div></div>
+    <div class="kpi"><div class="lab">价值陷阱命中</div><div class="val">2,765</div><div class="note">净利连跌 1,363 / 营收连跌 1,305 / 杠杆上行 1,098</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>星宇股份 估值推演<span class="sub">双锚取较小者 · 25% 分位 · 611 期自身历史</span></h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>口径</th><th class="num">每股基准</th><th class="num">保守倍数</th><th class="num">内在价值</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>盈利锚（采用）</td>
+          <td class="num mono">EPS 4.9523</td>
+          <td class="num mono">PE 22.35</td>
+          <td class="num mono"><b>110.69</b></td>
+          <td>TTM 归母净利 14.15 亿 ÷ 2.857 亿股（截至 2026Q3）</td>
+        </tr>
+        <tr>
+          <td>净资产锚</td>
+          <td class="num mono">BPS 40.1953</td>
+          <td class="num mono">PB 3.161</td>
+          <td class="num mono">127.05</td>
+          <td>2026Q3 股东权益 114.83 亿</td>
+        </tr>
+        <tr style="background:#fafbfc">
+          <td><b>V_low（双锚取小）</b></td><td class="num">—</td><td class="num">—</td>
+          <td class="num mono"><b>110.69</b></td><td>盈利锚更低 → 采用盈利锚</td>
+        </tr>
+        <tr>
+          <td>买入成本上限（30% 边际）</td>
+          <td class="num">V_low × 0.70</td><td class="num">—</td>
+          <td class="num mono"><b>77.48</b></td>
+          <td>现价 70.84，低于上限 <b>8.6%</b>（11-09 时为 12.6%，已被当日上涨吃掉 4pp）</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-3)">
+        <span>现价 70.84</span><span>买入上限 77.48</span><span>V_low 110.69</span>
+      </div>
+      <div class="bar" style="margin-top:8px"><span style="width:36%"></span></div>
+      <div style="font-size:12.5px;color:var(--ink-2);margin-top:6px">
+        安全边际 <b class="pos">36.0%</b>（= (110.69 − 70.84) ÷ 110.69）。当前 PE 14.30 / PB 1.762。
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>企业质地与陷阱检验<span class="sub">两个硬闸门</span></h2>
+  <div class="grid g3">
+    <div class="kpi"><div class="lab">3 年年化 ROE</div><div class="val">13.46%</div><div class="note">门槛 8%，行业 3 年 ROE 中位数 7.68%</div></div>
+    <div class="kpi"><div class="lab">3 年营收 CAGR</div><div class="val">22.75%</div><div class="note">成长路径门槛 12%</div></div>
+    <div class="kpi"><div class="lab">3 年净利 CAGR</div><div class="val">19.93%</div><div class="note">成长路径门槛 15%</div></div>
+    <div class="kpi"><div class="lab">3 年现金流转化率</div><div class="val">97.8%</div><div class="note">门槛 80%（OCF 40.43 亿 / 净利 41.35 亿）</div></div>
+    <div class="kpi"><div class="lab">资产负债率</div><div class="val">39.1%</div><div class="note">3 年上升 +5.5pp（上限 10pp）</div></div>
+    <div class="kpi"><div class="lab">连跌年数</div><div class="val">0 / 0</div><div class="note">营收、净利均无连跌 2 年</div></div>
+  </div>
+  <div class="callout ok">
+    通过「企业质地闸门」（ROE 13.46% ≥ 8%）与「成长路径」（营收 22.75% ≥ 12%、净利 19.93% ≥ 15%），
+    且<b>未触发价值陷阱闸门</b>：营收连跌 0 年、净利连跌 0 年、负债率 3 年上升 5.5pp 低于 10pp 上限。近 5 年分红连续 5 年。
+  </div>
+</section>
+
+<section>
+  <h2>外部信息与关键风险<span class="sub">不参与任何闸门判定</span></h2>
+  <div class="card">
+    <h3>一致预期 <span class="tag fwd">forward-looking · 预测非事实</span></h3>
+    <table>
+      <thead><tr><th>年度</th><th class="num">EPS</th><th class="num">归母净利（万元）</th><th class="num">营收（万元）</th><th class="num">对应 PE</th><th class="num">净利同比</th></tr></thead>
+      <tbody>
+        <tr><td>2026E</td><td class="num mono">4.87</td><td class="num mono">139,152</td><td class="num mono">1,590,618</td><td class="num mono">14.55</td><td class="num neg">−14.3%</td></tr>
+        <tr><td>2027E</td><td class="num mono">5.90</td><td class="num mono">168,623</td><td class="num mono">1,822,535</td><td class="num mono">12.01</td><td class="num pos">+21.2%</td></tr>
+        <tr><td>2028E</td><td class="num mono">7.18</td><td class="num mono">205,093</td><td class="num mono">2,112,205</td><td class="num mono">9.87</td><td class="num pos">+21.6%</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:13px">一致目标价 <b>105.98</b>；覆盖机构 <b>1 家</b>、评级 1 个买入。
+    覆盖度极低，一致预期只能当一条可复核的外部线索，不构成独立证据。</p>
+
+    <h3>已实现事实：2026 三季报的边际变化 <span class="tag fact">已披露</span></h3>
+    <table>
+      <thead><tr><th>指标</th><th class="num">2026 前三季度</th><th class="num">2025 全年</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td>营收同比</td><td class="num neg">−2.02%</td><td class="num pos">+15.12%</td><td>收入端首次转负</td></tr>
+        <tr><td>归母净利同比</td><td class="num neg">−18.34%</td><td class="num pos">+15.32%</td><td>利润下滑快于收入，毛利率 19.65% → 18.23%</td></tr>
+        <tr><td>平均 ROE</td><td class="num">8.15%（9M）</td><td class="num">15.05%（FY）</td><td>年化后仍高于 8%，但趋势向下</td></tr>
+        <tr><td>净利润现金含量</td><td class="num">141.6%</td><td class="num">150.0%</td><td>利润的质量没坏，坏的是增速</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <b>这是本次结论最需要盯住的地方。</b>
+      安全边际只有 36.0%，比 11-09 的 38.8% 薄了 2.8pp —— 价格一天涨了 4.59%，价值锚没动。
+      按现价倒推，<b>锚点 PE 跌到 20.43 以下（较当前 22.35 低 8.6%），该股就不再达标</b>。
+      换句话说：<b>结论不脆弱于 2026 年这一次利润下滑</b>（按 2026E EPS 4.87 算仍有约 35% 边际），
+      <b>但脆弱于「市场对它长期的估值中枢下移」</b> —— 如果 14 倍 PE 是新常态而不是折价，22 倍的历史锚就是错的，边际会同时消失。
+    </div>
+    <div class="callout info">
+      <b>陷阱闸门的边界</b>：闸门看的是<b>完整年度</b>连跌。2025 年报是增长，2026 年即便全年下滑也只是连跌第 1 年，
+      所以本次不会、也不应该被拦下；若 2027 年继续下滑，下下轮年报后会自动判为价值陷阱。
+      这条规则在这里正好暴露盲区：<b>季报级别的恶化要等到年报才进入闸门</b>。
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>被质地闸门剔除的 4 只<span class="sub">价格已进入安全边际区，但生意回报不够</span></h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>代码</th><th>名称</th><th>行业</th><th class="num">3 年年化 ROE</th><th class="num">收盘价</th><th class="num">V_low</th><th class="num">买入上限</th><th class="num">安全边际</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">600839.SH</td><td>四川长虹</td><td>黑色家电</td><td class="num neg">3.17%</td><td class="num mono">5.13</td><td class="num mono">11.22</td><td class="num mono">7.86</td><td class="num">54.3%</td></tr>
+        <tr><td class="mono">600686.SH</td><td>金龙汽车</td><td>商用车</td><td class="num neg">5.50%</td><td class="num mono">8.86</td><td class="num mono">15.42</td><td class="num mono">10.79</td><td class="num">42.5%</td></tr>
+        <tr><td class="mono">000100.SZ</td><td>TCL 科技</td><td>光学光电子</td><td class="num neg">2.01%</td><td class="num mono">4.60</td><td class="num mono">6.83</td><td class="num mono">4.78</td><td class="num">32.6%</td></tr>
+        <tr><td class="mono">002758.SZ</td><td>浙农股份</td><td>综合Ⅱ</td><td class="num neg">5.69%</td><td class="num mono">7.46</td><td class="num mono">12.22</td><td class="num mono">8.56</td><td class="num">39.0%</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:13px;margin-bottom:0">这 4 只的价格边际（32.6%~54.3%）比星宇更厚，但三年年化 ROE 只有 2.0%~5.7%。
+    闸门的判断是：<b>折价来自生意本身的回报水平，不是市场错杀</b>。</p>
+  </div>
+</section>
+
+<section>
+  <h2>全市场筛除结构<span class="sub">按阻断原因计数（单只可命中多因）</span></h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>阻断原因</th><th class="num">证券数</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">margin_of_safety_not_met</td><td class="num">5,381</td><td>安全边际不足 30%，最主要约束</td></tr>
+        <tr><td class="mono">roe_3y_below_threshold</td><td class="num">3,745</td><td>3 年年化 ROE &lt; 8% 且成长路径未达标</td></tr>
+        <tr><td class="mono">pb_above_ceiling</td><td class="num">3,297</td><td>PB &gt; 2.0</td></tr>
+        <tr><td class="mono">pe_above_ceiling</td><td class="num">2,929</td><td>PE &gt; 20</td></tr>
+        <tr><td class="mono">pe_history_insufficient</td><td class="num">2,400</td><td>上市不足 500 期，构不成自身历史分布</td></tr>
+        <tr><td class="mono">ttm_net_profit_not_positive</td><td class="num">1,684</td><td>TTM 亏损，按定义无 PE</td></tr>
+        <tr><td class="mono">liquidity_insufficient</td><td class="num">1,405</td><td>20 日均额 &lt; 5,000 万</td></tr>
+        <tr><td class="mono">cyclic_industry_separate_model</td><td class="num">987</td><td>周期行业倍数不可跨期比较，另建模型</td></tr>
+        <tr><td class="mono">cash_conversion_weak</td><td class="num">937</td><td>3 年 OCF/净利 &lt; 0.8</td></tr>
+        <tr><td class="mono">special_treatment_restricted</td><td class="num">201</td><td>ST / 退市风险</td></tr>
+        <tr><td class="mono">financial_industry_separate_model</td><td class="num">122</td><td>银行/保险/券商估值口径不可比</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>口径与免责</h2>
+  <div class="card">
+    <ul>
+      <li><b>三年 ROE 口径</b>：3 年累计归母净利 ÷ 3 个年报期末股东权益（含少数股东权益）均值 ÷ 3。与供应商「平均净资产收益率」（单年、归母权益）是两套口径，会翻转临界标的结论。</li>
+      <li><b>估值锚</b>：每只股票自身 2024-05 起 611 期 PE_TTM / PB_MRQ 正值样本的 25% 分位（最近秩下取整），双锚取较小者。它是「历史倍数保守锚」，不是内在价值，也不是 DCF。</li>
+      <li><b>PIT 约束</b>：估值历史是事后补采的观测，全部 <span class="mono">pit_verified=false</span>；财报按披露日截断；基准日取上海时区今日之前的最近完整交易日。</li>
+      <li><b>外部数据不入闸门</b>：一致预期、评级、研报没有首次可得时间，接入闸门会让 PIT 约束形同虚设，因此只出现在研究卡与本节。</li>
+      <li><b>边界</b>：本报告只到「研究结论 + 选股名单」，不产生权重、订单或收益承诺；实际下单由人工在外部终端完成。</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  数据底座：market.daily_bar（可信层）· research.valuation_history（温层研究表）· fundamental.financial_statement（控制面）。
+  快照哈希 <span class="mono">6d7a0a08…75ee440</span>。同一输入重跑结果一致。
+  外部观测：NeoData（公司概况、财务指标）、WeStock（一致预期、评级），观测日 2026-11-10。
+</footer>
+
+</div>
+</body>
+</html>

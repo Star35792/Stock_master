@@ -1,0 +1,653 @@
+[
+ {
+  "index": "ix_factor_definition_active_frequency",
+  "table": "factor.factor_definition",
+  "table_rows": 79,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_definition_active_frequency ON factor.factor_definition(is_active, frequency);"
+ },
+ {
+  "index": "ix_factor_definition_category",
+  "table": "factor.factor_definition",
+  "table_rows": 79,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_definition_category ON factor.factor_definition(category);"
+ },
+ {
+  "index": "ix_factor_definition_name_version",
+  "table": "factor.factor_definition",
+  "table_rows": 79,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_definition_name_version ON factor.factor_definition(\"name\", \"version\");"
+ },
+ {
+  "index": "ix_factor_profile_factor_date",
+  "table": "factor.factor_profile",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_profile_factor_date ON factor.factor_profile(factor_name, factor_version, trade_date);"
+ },
+ {
+  "index": "ix_factor_run_definition",
+  "table": "factor.factor_run",
+  "table_rows": 928,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_run_definition ON factor.factor_run(definition_id);"
+ },
+ {
+  "index": "ix_factor_run_factor_status_started",
+  "table": "factor.factor_run",
+  "table_rows": 928,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_run_factor_status_started ON factor.factor_run(factor_name, status, started_at);"
+ },
+ {
+  "index": "ix_factor_value_factor_date",
+  "table": "factor.factor_value",
+  "table_rows": 1057199,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_value_factor_date ON factor.factor_value(factor_name, factor_version, trade_date);"
+ },
+ {
+  "index": "ix_factor_value_symbol_factor_date",
+  "table": "factor.factor_value",
+  "table_rows": 1057199,
+  "unique": false,
+  "sql": "CREATE INDEX ix_factor_value_symbol_factor_date ON factor.factor_value(symbol, factor_name, trade_date);"
+ },
+ {
+  "index": "ix_financial_indicator_name_report",
+  "table": "fundamental.financial_indicator",
+  "table_rows": 513479,
+  "unique": false,
+  "sql": "CREATE INDEX ix_financial_indicator_name_report ON fundamental.financial_indicator(indicator_name, report);"
+ },
+ {
+  "index": "ix_financial_statement_revision_lookup",
+  "table": "fundamental.financial_statement_revision",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_financial_statement_revision_lookup ON fundamental.financial_statement_revision(symbol, statement_type, fiscal_year, fiscal_period);"
+ },
+ {
+  "index": "ix_financial_statement_symbol_period_end",
+  "table": "fundamental.financial_statement",
+  "table_rows": 133773,
+  "unique": false,
+  "sql": "CREATE INDEX ix_financial_statement_symbol_period_end ON fundamental.financial_statement(symbol, period_end);"
+ },
+ {
+  "index": "uq_financial_indicator_key",
+  "table": "fundamental.financial_indicator",
+  "table_rows": 513479,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_financial_indicator_key ON fundamental.financial_indicator(symbol, report, ability, indicator_name);"
+ },
+ {
+  "index": "uq_financial_statement_key",
+  "table": "fundamental.financial_statement",
+  "table_rows": 133773,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_financial_statement_key ON fundamental.financial_statement(symbol, statement_type, period, fiscal_year, fiscal_period);"
+ },
+ {
+  "index": "uq_financial_statement_revision_key",
+  "table": "fundamental.financial_statement_revision",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_financial_statement_revision_key ON fundamental.financial_statement_revision(symbol, statement_type, period, fiscal_year, fiscal_period, revision_no);"
+ },
+ {
+  "index": "ix_adjustment_factor_date_type",
+  "table": "market.adjustment_factor",
+  "table_rows": 21310211,
+  "unique": false,
+  "sql": "CREATE INDEX ix_adjustment_factor_date_type ON market.adjustment_factor(trade_date, adjust_type);"
+ },
+ {
+  "index": "ix_adjustment_factor_symbol_type_date",
+  "table": "market.adjustment_factor",
+  "table_rows": 21310211,
+  "unique": false,
+  "sql": "CREATE INDEX ix_adjustment_factor_symbol_type_date ON market.adjustment_factor(symbol, adjust_type, trade_date);"
+ },
+ {
+  "index": "ix_alternative_snapshot_symbol_date",
+  "table": "market.alternative_data_snapshot",
+  "table_rows": 8207,
+  "unique": false,
+  "sql": "CREATE INDEX ix_alternative_snapshot_symbol_date ON market.alternative_data_snapshot(symbol, snapshot_date);"
+ },
+ {
+  "index": "ix_corporate_action_symbol_ex_date",
+  "table": "market.corporate_action",
+  "table_rows": 57734,
+  "unique": false,
+  "sql": "CREATE INDEX ix_corporate_action_symbol_ex_date ON market.corporate_action(symbol, ex_date);"
+ },
+ {
+  "index": "ix_corporate_action_type_ex_date",
+  "table": "market.corporate_action",
+  "table_rows": 57734,
+  "unique": false,
+  "sql": "CREATE INDEX ix_corporate_action_type_ex_date ON market.corporate_action(action_type, ex_date);"
+ },
+ {
+  "index": "ix_daily_bar_compare_conflict",
+  "table": "market.daily_bar_source_compare",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_daily_bar_compare_conflict ON market.daily_bar_source_compare(is_conflict);"
+ },
+ {
+  "index": "ix_daily_bar_compare_symbol_date",
+  "table": "market.daily_bar_source_compare",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_daily_bar_compare_symbol_date ON market.daily_bar_source_compare(symbol, trade_date, adjust_type);"
+ },
+ {
+  "index": "ix_daily_bar_quality_status",
+  "table": "market.daily_bar",
+  "table_rows": 21337514,
+  "unique": false,
+  "sql": "CREATE INDEX ix_daily_bar_quality_status ON market.daily_bar(quality_status);"
+ },
+ {
+  "index": "ix_daily_bar_status_symbol_adjust_date",
+  "table": "market.daily_bar",
+  "table_rows": 21337514,
+  "unique": false,
+  "sql": "CREATE INDEX ix_daily_bar_status_symbol_adjust_date ON market.daily_bar(quality_status, symbol, adjust_type, trade_date);"
+ },
+ {
+  "index": "ix_daily_bar_symbol_adjust_date",
+  "table": "market.daily_bar",
+  "table_rows": 21337514,
+  "unique": false,
+  "sql": "CREATE INDEX ix_daily_bar_symbol_adjust_date ON market.daily_bar(symbol, adjust_type, trade_date);"
+ },
+ {
+  "index": "ix_daily_bar_trade_date_type",
+  "table": "market.daily_bar",
+  "table_rows": 21337514,
+  "unique": false,
+  "sql": "CREATE INDEX ix_daily_bar_trade_date_type ON market.daily_bar(trade_date, security_type);"
+ },
+ {
+  "index": "ix_index_constituent_member_date",
+  "table": "market.index_constituent_snapshot",
+  "table_rows": 120343,
+  "unique": false,
+  "sql": "CREATE INDEX ix_index_constituent_member_date ON market.index_constituent_snapshot(member_symbol, snapshot_date);"
+ },
+ {
+  "index": "ix_manual_correction_symbol_date_field",
+  "table": "market.manual_correction",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_manual_correction_symbol_date_field ON market.manual_correction(symbol, trade_date, adjust_type, field_name);"
+ },
+ {
+  "index": "ix_security_exchange",
+  "table": "market.security",
+  "table_rows": 7727,
+  "unique": false,
+  "sql": "CREATE INDEX ix_security_exchange ON market.\"security\"(exchange);"
+ },
+ {
+  "index": "ix_security_industry_history_window",
+  "table": "market.security_industry_history",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_security_industry_history_window ON market.security_industry_history(symbol, effective_from, effective_to);"
+ },
+ {
+  "index": "ix_security_type",
+  "table": "market.security",
+  "table_rows": 7727,
+  "unique": false,
+  "sql": "CREATE INDEX ix_security_type ON market.\"security\"(security_type);"
+ },
+ {
+  "index": "ix_trading_calendar_exchange_open",
+  "table": "market.trading_calendar",
+  "table_rows": 7608,
+  "unique": false,
+  "sql": "CREATE INDEX ix_trading_calendar_exchange_open ON market.trading_calendar(exchange, is_open);"
+ },
+ {
+  "index": "ix_trading_calendar_trade_date",
+  "table": "market.trading_calendar",
+  "table_rows": 7608,
+  "unique": false,
+  "sql": "CREATE INDEX ix_trading_calendar_trade_date ON market.trading_calendar(trade_date);"
+ },
+ {
+  "index": "ix_valuation_snapshot_date",
+  "table": "market.valuation_snapshot",
+  "table_rows": 22248,
+  "unique": false,
+  "sql": "CREATE INDEX ix_valuation_snapshot_date ON market.valuation_snapshot(trade_date);"
+ },
+ {
+  "index": "ix_valuation_snapshot_symbol_date",
+  "table": "market.valuation_snapshot",
+  "table_rows": 22248,
+  "unique": false,
+  "sql": "CREATE INDEX ix_valuation_snapshot_symbol_date ON market.valuation_snapshot(symbol, trade_date);"
+ },
+ {
+  "index": "uq_alternative_snapshot_key",
+  "table": "market.alternative_data_snapshot",
+  "table_rows": 8207,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_alternative_snapshot_key ON market.alternative_data_snapshot(dataset, snapshot_date, item_key);"
+ },
+ {
+  "index": "uq_index_constituent_snapshot_key",
+  "table": "market.index_constituent_snapshot",
+  "table_rows": 120343,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_index_constituent_snapshot_key ON market.index_constituent_snapshot(snapshot_date, index_symbol, member_symbol);"
+ },
+ {
+  "index": "uq_security_industry_history_from",
+  "table": "market.security_industry_history",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_security_industry_history_from ON market.security_industry_history(symbol, effective_from);"
+ },
+ {
+  "index": "ix_data_source_active_priority",
+  "table": "metadata.data_source",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_data_source_active_priority ON metadata.data_source(is_active, priority);"
+ },
+ {
+  "index": "ix_job_log_batch_id",
+  "table": "metadata.job_log",
+  "table_rows": 232,
+  "unique": false,
+  "sql": "CREATE INDEX ix_job_log_batch_id ON metadata.job_log(batch_id);"
+ },
+ {
+  "index": "ix_job_log_type_status_started",
+  "table": "metadata.job_log",
+  "table_rows": 232,
+  "unique": false,
+  "sql": "CREATE INDEX ix_job_log_type_status_started ON metadata.job_log(job_type, status, started_at);"
+ },
+ {
+  "index": "ix_quality_issue_severity",
+  "table": "metadata.data_quality_issue",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_quality_issue_severity ON metadata.data_quality_issue(severity);"
+ },
+ {
+  "index": "ix_quality_issue_status",
+  "table": "metadata.data_quality_issue",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_quality_issue_status ON metadata.data_quality_issue(status);"
+ },
+ {
+  "index": "ix_quality_issue_status_severity_created",
+  "table": "metadata.data_quality_issue",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_quality_issue_status_severity_created ON metadata.data_quality_issue(status, severity, created_at);"
+ },
+ {
+  "index": "ix_quality_issue_symbol_date",
+  "table": "metadata.data_quality_issue",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_quality_issue_symbol_date ON metadata.data_quality_issue(symbol, trade_date);"
+ },
+ {
+  "index": "ix_quality_issue_symbol_status_date",
+  "table": "metadata.data_quality_issue",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_quality_issue_symbol_status_date ON metadata.data_quality_issue(symbol, status, trade_date);"
+ },
+ {
+  "index": "ix_quality_issue_type",
+  "table": "metadata.data_quality_issue",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_quality_issue_type ON metadata.data_quality_issue(issue_type);"
+ },
+ {
+  "index": "ix_portfolio_plan_as_of_date",
+  "table": "portfolio.portfolio_plan",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_portfolio_plan_as_of_date ON portfolio.portfolio_plan(as_of_date);"
+ },
+ {
+  "index": "ix_portfolio_target_plan",
+  "table": "portfolio.portfolio_target",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_portfolio_target_plan ON portfolio.portfolio_target(plan_id);"
+ },
+ {
+  "index": "uq_portfolio_plan_idempotency_key",
+  "table": "portfolio.portfolio_plan",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_portfolio_plan_idempotency_key ON portfolio.portfolio_plan(idempotency_key);"
+ },
+ {
+  "index": "ix_import_batch_source_dataset",
+  "table": "raw.import_batch",
+  "table_rows": 5785,
+  "unique": false,
+  "sql": "CREATE INDEX ix_import_batch_source_dataset ON raw.import_batch(source_name, dataset);"
+ },
+ {
+  "index": "ix_import_batch_started_at",
+  "table": "raw.import_batch",
+  "table_rows": 5785,
+  "unique": false,
+  "sql": "CREATE INDEX ix_import_batch_started_at ON raw.import_batch(started_at);"
+ },
+ {
+  "index": "ix_import_batch_status",
+  "table": "raw.import_batch",
+  "table_rows": 5785,
+  "unique": false,
+  "sql": "CREATE INDEX ix_import_batch_status ON raw.import_batch(status);"
+ },
+ {
+  "index": "ix_raw_corporate_action_batch",
+  "table": "raw.corporate_action",
+  "table_rows": 455914,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_corporate_action_batch ON raw.corporate_action(batch_id);"
+ },
+ {
+  "index": "ix_raw_corporate_action_hash",
+  "table": "raw.corporate_action",
+  "table_rows": 455914,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_corporate_action_hash ON raw.corporate_action(row_hash);"
+ },
+ {
+  "index": "ix_raw_corporate_action_symbol_date",
+  "table": "raw.corporate_action",
+  "table_rows": 455914,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_corporate_action_symbol_date ON raw.corporate_action(symbol, ex_date);"
+ },
+ {
+  "index": "ix_raw_daily_bar_batch_id",
+  "table": "raw.daily_bar",
+  "table_rows": 10995458,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_daily_bar_batch_id ON raw.daily_bar(batch_id);"
+ },
+ {
+  "index": "ix_raw_daily_bar_row_hash",
+  "table": "raw.daily_bar",
+  "table_rows": 10995458,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_daily_bar_row_hash ON raw.daily_bar(row_hash);"
+ },
+ {
+  "index": "ix_raw_daily_bar_source_date",
+  "table": "raw.daily_bar",
+  "table_rows": 10995458,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_daily_bar_source_date ON raw.daily_bar(source_name, trade_date);"
+ },
+ {
+  "index": "ix_raw_daily_bar_source_symbol_adjust_date",
+  "table": "raw.daily_bar",
+  "table_rows": 10995458,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_daily_bar_source_symbol_adjust_date ON raw.daily_bar(source_name, symbol, adjust_type, trade_date);"
+ },
+ {
+  "index": "ix_raw_daily_bar_symbol_adjust_date",
+  "table": "raw.daily_bar",
+  "table_rows": 10995458,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_daily_bar_symbol_adjust_date ON raw.daily_bar(symbol, adjust_type, trade_date);"
+ },
+ {
+  "index": "ix_raw_daily_bar_symbol_date",
+  "table": "raw.daily_bar",
+  "table_rows": 10995458,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_daily_bar_symbol_date ON raw.daily_bar(symbol, trade_date);"
+ },
+ {
+  "index": "ix_raw_financial_batch",
+  "table": "raw.financial_payload",
+  "table_rows": 155794,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_financial_batch ON raw.financial_payload(batch_id);"
+ },
+ {
+  "index": "ix_raw_financial_symbol_dataset",
+  "table": "raw.financial_payload",
+  "table_rows": 155794,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_financial_symbol_dataset ON raw.financial_payload(symbol, dataset);"
+ },
+ {
+  "index": "ix_raw_vendor_snapshot_batch",
+  "table": "raw.vendor_snapshot",
+  "table_rows": 2158,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_vendor_snapshot_batch ON raw.vendor_snapshot(batch_id);"
+ },
+ {
+  "index": "ix_raw_vendor_snapshot_dataset_date",
+  "table": "raw.vendor_snapshot",
+  "table_rows": 2158,
+  "unique": false,
+  "sql": "CREATE INDEX ix_raw_vendor_snapshot_dataset_date ON raw.vendor_snapshot(dataset, snapshot_date);"
+ },
+ {
+  "index": "ix_risk_check_account",
+  "table": "risk.risk_check",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_risk_check_account ON risk.risk_check(account_id);"
+ },
+ {
+  "index": "ix_risk_check_equity_snapshot",
+  "table": "risk.risk_check",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_risk_check_equity_snapshot ON risk.risk_check(equity_snapshot_id);"
+ },
+ {
+  "index": "ix_risk_check_order_check",
+  "table": "risk.risk_check_order",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_risk_check_order_check ON risk.risk_check_order(check_id);"
+ },
+ {
+  "index": "ix_risk_check_plan",
+  "table": "risk.risk_check",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_risk_check_plan ON risk.risk_check(plan_id);"
+ },
+ {
+  "index": "uq_risk_check_evaluation_hash",
+  "table": "risk.risk_check",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_risk_check_evaluation_hash ON risk.risk_check(evaluation_hash);"
+ },
+ {
+  "index": "uq_risk_check_idempotency_key",
+  "table": "risk.risk_check",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_risk_check_idempotency_key ON risk.risk_check(idempotency_key);"
+ },
+ {
+  "index": "ix_backtest_equity_run_date",
+  "table": "strategy.backtest_equity",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_backtest_equity_run_date ON strategy.backtest_equity(run_id, trade_date);"
+ },
+ {
+  "index": "ix_backtest_position_run_date",
+  "table": "strategy.backtest_position",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_backtest_position_run_date ON strategy.backtest_position(run_id, trade_date);"
+ },
+ {
+  "index": "ix_backtest_run_strategy_started",
+  "table": "strategy.backtest_run",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_backtest_run_strategy_started ON strategy.backtest_run(strategy_name, started_at);"
+ },
+ {
+  "index": "ix_backtest_run_training_artifact",
+  "table": "strategy.backtest_run",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_backtest_run_training_artifact ON strategy.backtest_run(training_artifact_id);"
+ },
+ {
+  "index": "ix_backtest_trade_run_date",
+  "table": "strategy.backtest_trade",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_backtest_trade_run_date ON strategy.backtest_trade(run_id, trade_date);"
+ },
+ {
+  "index": "ix_training_artifact_hash",
+  "table": "strategy.training_artifact",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_training_artifact_hash ON strategy.training_artifact(artifact_hash);"
+ },
+ {
+  "index": "ix_training_artifact_window_id",
+  "table": "strategy.training_artifact",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_training_artifact_window_id ON strategy.training_artifact(window_id);"
+ },
+ {
+  "index": "ix_paper_account_name",
+  "table": "trade.paper_account",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX ix_paper_account_name ON trade.paper_account(\"name\");"
+ },
+ {
+  "index": "ix_paper_equity_component_snapshot",
+  "table": "trade.paper_account_equity_component",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_equity_component_snapshot ON trade.paper_account_equity_component(snapshot_id);"
+ },
+ {
+  "index": "ix_paper_equity_snapshot_account_date",
+  "table": "trade.paper_account_equity_snapshot",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_equity_snapshot_account_date ON trade.paper_account_equity_snapshot(account_id, valuation_date);"
+ },
+ {
+  "index": "ix_paper_execution_approval_account_created",
+  "table": "trade.paper_execution_approval",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_execution_approval_account_created ON trade.paper_execution_approval(account_id, created_at);"
+ },
+ {
+  "index": "ix_paper_execution_approval_status_expiry",
+  "table": "trade.paper_execution_approval",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_execution_approval_status_expiry ON trade.paper_execution_approval(status, expires_at);"
+ },
+ {
+  "index": "ix_paper_execution_batch_account_created",
+  "table": "trade.paper_execution_batch",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_execution_batch_account_created ON trade.paper_execution_batch(account_id, created_at);"
+ },
+ {
+  "index": "ix_paper_fill_account_date",
+  "table": "trade.paper_fill",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_fill_account_date ON trade.paper_fill(account_id, trade_date);"
+ },
+ {
+  "index": "ix_paper_fill_order",
+  "table": "trade.paper_fill",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_fill_order ON trade.paper_fill(order_id);"
+ },
+ {
+  "index": "ix_paper_order_account_date",
+  "table": "trade.paper_order",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_order_account_date ON trade.paper_order(account_id, trade_date);"
+ },
+ {
+  "index": "ix_paper_order_check",
+  "table": "trade.paper_order",
+  "table_rows": 0,
+  "unique": false,
+  "sql": "CREATE INDEX ix_paper_order_check ON trade.paper_order(check_id);"
+ },
+ {
+  "index": "ix_paper_position_account_symbol",
+  "table": "trade.paper_position",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX ix_paper_position_account_symbol ON trade.paper_position(account_id, symbol);"
+ },
+ {
+  "index": "uq_paper_equity_snapshot_idempotency_key",
+  "table": "trade.paper_account_equity_snapshot",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_paper_equity_snapshot_idempotency_key ON trade.paper_account_equity_snapshot(idempotency_key);"
+ },
+ {
+  "index": "uq_paper_execution_approval_idempotency",
+  "table": "trade.paper_execution_approval",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_paper_execution_approval_idempotency ON trade.paper_execution_approval(idempotency_key);"
+ },
+ {
+  "index": "uq_paper_execution_approval_revocation_idempotency",
+  "table": "trade.paper_execution_approval",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_paper_execution_approval_revocation_idempotency ON trade.paper_execution_approval(revocation_idempotency_key);"
+ },
+ {
+  "index": "uq_paper_execution_batch_idempotency",
+  "table": "trade.paper_execution_batch",
+  "table_rows": 0,
+  "unique": true,
+  "sql": "CREATE UNIQUE INDEX uq_paper_execution_batch_idempotency ON trade.paper_execution_batch(idempotency_key);"
+ }
+]

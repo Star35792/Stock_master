@@ -1,0 +1,284 @@
+{
+  "captured_at": "2026-11-10T16:46:00+08:00",
+  "observations": [
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "601799.SH",
+        "stock_name": "星宇股份",
+        "company_name": "常州星宇车灯股份有限公司",
+        "business": "整车制造企业提供配套车灯产品,专注于汽车(主要是乘用车)车灯的研发、设计、制造和销售。",
+        "enterprise_type": "民营相对控股企业",
+        "employee_sum": "7532",
+        "listed_date": 20110201,
+        "legal_repr": "周晓萍",
+        "sw_info": "[{\"PlateCode\":\"01801880.PT\",\"PlateName\":\"汽车\",\"PlateType\":\"申万一级行业\"},{\"PlateCode\":\"01850922.PT\",\"PlateName\":\"车身附件及饰件\",\"PlateType\":\"申万三级行业\"},{\"PlateCode\":\"01801093.PT\",\"PlateName\":\"汽车零部件\",\"PlateType\":\"申万二级行业\"}]"
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "financial_indicators",
+      "as_of_date": "2025-12-31",
+      "payload": {
+        "stock_code": "601799.SH",
+        "stock_name": "星宇股份",
+        "fiscal_period": "2025-FY",
+        "end_date": "20251231",
+        "basic_eps": 5.7072,
+        "net_assets_per_share": 39.8987,
+        "operating_cashflow_per_share": 8.5295,
+        "roic": 14.994581,
+        "roe_average": 15.0549,
+        "operating_revenue_yoy": 15.1192,
+        "debt_to_assets_ratio": 41.079781,
+        "net_profit_margin": 10.645121,
+        "gross_profit_margin": 19.648589,
+        "current_ratio": 1.84897,
+        "interest_coverage_ratio": null,
+        "revenue_3y_cagr": 22.7544,
+        "parent_net_profit_yoy": 15.3244,
+        "parent_net_profit_3y_cagr": 19.9338,
+        "parent_net_profit_ex_yoy": 16.2945,
+        "net_profit_cash_content": 150.034146,
+        "currency": "人民币元"
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "westock",
+      "observation_type": "consensus",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh601799",
+        "name": "星宇股份",
+        "targetPrice": 105.9828,
+        "forecasts": [
+          {"year": 2026, "eps": 4.87, "revenue": 1590617.5, "netProfit": 139152.5, "pe": 13.91, "pb": 1.62, "revenueYoy": 4.26, "netProfitYoy": -14.32},
+          {"year": 2027, "eps": 5.9, "revenue": 1822535, "netProfit": 168622.5, "pe": 11.47, "pb": 1.42, "revenueYoy": 14.58, "netProfitYoy": 21.18},
+          {"year": 2028, "eps": 7.18, "revenue": 2112205, "netProfit": 205092.5, "pe": 9.43, "pb": 1.23, "revenueYoy": 15.89, "netProfitYoy": 21.63}
+        ]
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "westock",
+      "observation_type": "rating",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh601799",
+        "name": "星宇股份",
+        "forecastInstitutions": 1,
+        "ratingBuyCnt": 1,
+        "ratingCnt": 1
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "research_report",
+      "as_of_date": "2026-04-08",
+      "payload": {
+        "title": "星宇股份：智能电动化浪潮下全球市占率提升与出海新机遇",
+        "publish": "国泰海通证券",
+        "publishTime": "20260408",
+        "market_share_note": "2024 年星宇股份按收入计在全球汽车照明行业排名第七，占 4.2% 份额，是排名最高的中国企业；在中国汽车照明行业排名第一，占 11.0%。2024 年智能车灯市场，星宇按收入计算全球和中国均排名第一，市占率分别为 24.5% 和 70.2%。"
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "research_report",
+      "as_of_date": "2026-01-25",
+      "payload": {
+        "title": "星宇股份推进Micro LED国产化，车灯业务量价双升，维持优于大市评级",
+        "publish": "国信证券",
+        "publishTime": "20260125",
+        "market_share_note": "星宇股份前大灯在国内市占率估计 15%，全球市占率估计 3-4%。预计 25/26/27 年营收 160.0/194.0/236.7 亿元，归母净利润 16.9/21.1/26.4 亿元。风险提示：国内车市景气度持续下行；年降和原材料价格波动。"
+      }
+    },
+    {
+      "symbol": "000100.SZ",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "000100.SZ",
+        "stock_name": "TCL科技",
+        "company_name": "TCL科技集团股份有限公司",
+        "business": "半导体显示产品及材料的研发、生产和销售及产业金融、投资及创投业务。",
+        "enterprise_type": "民营企业",
+        "employee_sum": "71419",
+        "sw_info": "[{\"PlateCode\":\"01801084.PT\",\"PlateName\":\"光学光电子\",\"PlateType\":\"申万二级行业\"},{\"PlateCode\":\"01801080.PT\",\"PlateName\":\"电子\",\"PlateType\":\"申万一级行业\"},{\"PlateCode\":\"01850831.PT\",\"PlateName\":\"面板\",\"PlateType\":\"申万三级行业\"}]"
+      }
+    },
+    {
+      "symbol": "000100.SZ",
+      "source": "westock",
+      "observation_type": "consensus",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sz000100",
+        "name": "TCL科技",
+        "targetPrice": 6.0186,
+        "forecasts": [
+          {"year": 2026, "eps": 0.33, "revenue": 20332156.74, "netProfit": 709977.95, "pe": 14.08, "pb": 1.41, "revenueYoy": 10.37, "netProfitYoy": 57.19},
+          {"year": 2027, "eps": 0.46, "revenue": 22510515.72, "netProfit": 1011790.98, "pe": 9.92, "pb": 1.24, "revenueYoy": 10.71, "netProfitYoy": 42.51},
+          {"year": 2028, "eps": 0.6, "revenue": 24640474.15, "netProfit": 1325436.1, "pe": 7.59, "pb": 1.07, "revenueYoy": 9.46, "netProfitYoy": 31}
+        ]
+      }
+    },
+    {
+      "symbol": "600839.SH",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "600839.SH",
+        "stock_name": "四川长虹",
+        "company_name": "四川长虹电器股份有限公司",
+        "business": "主营消费电器业务（电视、冰箱、空调、洗衣机等）、部品业务（冰箱压缩机）、ICT综合服务业务与电子制造（EMS）服务业务。",
+        "enterprise_type": "地方国企",
+        "employee_sum": "46886",
+        "sw_info": "[{\"PlateCode\":\"01801110.PT\",\"PlateName\":\"家用电器\",\"PlateType\":\"申万一级行业\"},{\"PlateCode\":\"01801112.PT\",\"PlateName\":\"黑色家电\",\"PlateType\":\"申万二级行业\"},{\"PlateName\":\"彩电\",\"PlateType\":\"申万三级行业\"}]"
+      }
+    },
+    {
+      "symbol": "600839.SH",
+      "source": "westock",
+      "observation_type": "consensus",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh600839",
+        "name": "四川长虹",
+        "targetPrice": 0,
+        "forecasts": [
+          {"year": 2026, "eps": 0.08, "revenue": 11488000, "netProfit": 36900, "pe": 63.38, "pb": 1.52, "revenueYoy": 5.57, "netProfitYoy": -62.69},
+          {"year": 2027, "eps": 0.24, "revenue": 12135700, "netProfit": 108600, "pe": 21.13, "pb": 1.4, "revenueYoy": 5.64, "netProfitYoy": 194.31},
+          {"year": 2028, "eps": 0.3, "revenue": 12789100, "netProfit": 140400, "pe": 16.9, "pb": 1.33, "revenueYoy": 5.38, "netProfitYoy": 29.28}
+        ]
+      }
+    },
+    {
+      "symbol": "600686.SH",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "600686.SH",
+        "stock_name": "金龙汽车",
+        "company_name": "厦门金龙汽车集团股份有限公司",
+        "business": "大、中、轻型客车的生产和销售。",
+        "enterprise_type": "地方国企",
+        "employee_sum": "12619",
+        "sw_info": "[{\"PlateCode\":\"01801880.PT\",\"PlateName\":\"汽车\",\"PlateType\":\"申万一级行业\"},{\"PlateCode\":\"01850913.PT\",\"PlateName\":\"商用载客车\",\"PlateType\":\"申万三级行业\"},{\"PlateCode\":\"01801096.PT\",\"PlateName\":\"商用车\",\"PlateType\":\"申万二级行业\"}]"
+      }
+    },
+    {
+      "symbol": "002758.SZ",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "002758.SZ",
+        "stock_name": "浙农股份",
+        "company_name": "浙农集团股份有限公司",
+        "business": "农业综合服务、汽车商贸服务和医药生产销售等。",
+        "enterprise_type": "民营企业",
+        "employee_sum": "5637",
+        "sw_info": "[{\"PlateCode\":\"01850381.PT\",\"PlateName\":\"复合肥\",\"PlateType\":\"申万三级行业\"},{\"PlateCode\":\"01801038.PT\",\"PlateName\":\"农化制品\",\"PlateType\":\"申万二级行业\"},{\"PlateCode\":\"01801030.PT\",\"PlateName\":\"基础化工\",\"PlateType\":\"申万一级行业\"}]"
+      }
+    },
+    {
+      "symbol": "600048.SH",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "600048.SH",
+        "stock_name": "保利发展",
+        "company_name": "保利发展控股集团股份有限公司",
+        "business": "房地产开发和经营。",
+        "enterprise_type": "国有企业",
+        "employee_sum": "44445",
+        "sw_info": "[{\"PlateCode\":\"01801181.PT\",\"PlateName\":\"房地产开发\",\"PlateType\":\"申万二级行业\"},{\"PlateCode\":\"01801180.PT\",\"PlateName\":\"房地产\",\"PlateType\":\"申万一级行业\"},{\"PlateCode\":\"01851811.PT\",\"PlateName\":\"住宅开发\",\"PlateType\":\"申万三级行业\"}]"
+      }
+    },
+    {
+      "symbol": "600048.SH",
+      "source": "westock",
+      "observation_type": "consensus",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh600048",
+        "name": "保利发展",
+        "targetPrice": 7.6194,
+        "forecasts": [
+          {"year": 2026, "eps": 0.11, "revenue": 26913413.09, "netProfit": 133646.97, "pe": 49.55, "pb": 0.34, "revenueYoy": -12.66, "netProfitYoy": 29.17},
+          {"year": 2027, "eps": 0.15, "revenue": 25538297.28, "netProfit": 177641.62, "pe": 36.74, "pb": 0.33, "revenueYoy": -5.11, "netProfitYoy": 32.92},
+          {"year": 2028, "eps": 0.19, "revenue": 24798785.68, "netProfit": 223154.41, "pe": 29.39, "pb": 0.33, "revenueYoy": -2.9, "netProfitYoy": 25.62}
+        ]
+      }
+    },
+    {
+      "symbol": "600048.SH",
+      "source": "westock",
+      "observation_type": "rating",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh600048",
+        "name": "保利发展",
+        "forecastInstitutions": 2,
+        "ratingBuyCnt": 1,
+        "ratingIncCnt": 1,
+        "ratingCnt": 2
+      }
+    },
+    {
+      "symbol": "600383.SH",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "600383.SH",
+        "stock_name": "金地集团",
+        "company_name": "深圳市金地集团有限公司",
+        "business": "房地产开发与经营、物业管理和物业租赁等。",
+        "enterprise_type": "民营企业",
+        "employee_sum": "36633",
+        "sw_info": "[{\"PlateCode\":\"01801181.PT\",\"PlateName\":\"房地产开发\",\"PlateType\":\"申万二级行业\"},{\"PlateCode\":\"01851811.PT\",\"PlateName\":\"住宅开发\",\"PlateType\":\"申万三级行业\"},{\"PlateCode\":\"01801180.PT\",\"PlateName\":\"房地产\",\"PlateType\":\"申万一级行业\"}]"
+      }
+    },
+    {
+      "symbol": "600383.SH",
+      "source": "westock",
+      "observation_type": "consensus",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh600383",
+        "name": "金地集团",
+        "targetPrice": 3.64,
+        "forecasts": [
+          {"year": 2026, "eps": -0.95, "revenue": 2876133.33, "netProfit": -430233.33, "pe": -2.22, "pb": 0.23, "revenueYoy": -19.79, "netProfitYoy": 67.61},
+          {"year": 2027, "eps": -0.46, "revenue": 2643700, "netProfit": -206966.67, "pe": -4.61, "pb": 0.25, "revenueYoy": -8.08, "netProfitYoy": 51.89},
+          {"year": 2028, "eps": -0.01, "revenue": 2589933.33, "netProfit": -6666.67, "pe": -143.24, "pb": 0.25, "revenueYoy": -2.03, "netProfitYoy": 96.78}
+        ]
+      }
+    },
+    {
+      "symbol": "600383.SH",
+      "source": "neodata",
+      "observation_type": "research_report",
+      "as_of_date": "2026-04-08",
+      "payload": {
+        "title": "金地集团2026-2028年营收预测下降，预计亏损持续",
+        "publish": "中银国际",
+        "publishTime": "20260408",
+        "market_share_note": "考虑到2024、2025年公司连续出现亏损及行业持续面临下行压力，下调2026-2027年盈利预测。预计2026-2028年营业收入255/176/148亿元，同比-29%/-31%/-16%；归母净利润-117/-112/-104亿元，EPS -2.58/-2.48/-2.30元。"
+      }
+    }
+  ]
+}

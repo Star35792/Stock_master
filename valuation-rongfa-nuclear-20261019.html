@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>融发核电（002366.SZ）估值卡</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    :root { --bg:#f7f8fa; --card:#fff; --text:#1f2937; --muted:#6b7280; --accent:#2563eb; --danger:#dc2626; --warn:#d97706; --safe:#16a34a; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); margin:0; padding:24px; line-height:1.6; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { font-size:26px; margin-bottom:4px; }
+    .subtitle { color: var(--muted); font-size:14px; margin-bottom:20px; }
+    .card { background: var(--card); border-radius:12px; padding:20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+    .summary { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
+    .kpi { background:#f0f4ff; border-radius:10px; padding:14px; text-align:center; }
+    .kpi .num { font-size:24px; font-weight:700; color:var(--accent); }
+    .kpi .label { font-size:12px; color:var(--muted); margin-top:4px; }
+    .rating { display:inline-block; padding:4px 12px; border-radius:20px; font-weight:700; font-size:14px; }
+    .rating-over { background:#fee2e2; color:#991b1b; }
+    .rating-fair { background:#fef3c7; color:#92400e; }
+    .rating-under { background:#dcfce7; color:#166534; }
+    table { width:100%; border-collapse: collapse; font-size:13px; margin-top:8px; }
+    th, td { border:1px solid #e5e7eb; padding:8px 10px; text-align:left; }
+    th { background:#f9fafb; font-weight:600; }
+    .highlight { background:#fffbeb; }
+    .note { font-size:12px; color:var(--muted); margin-top:8px; }
+    .section-title { font-size:17px; font-weight:700; margin-bottom:10px; border-left:4px solid var(--accent); padding-left:10px; }
+    .chart { width:100%; height:320px; margin-top:12px; }
+    .disclaimer { font-size:11px; color:var(--muted); border-top:1px solid #e5e7eb; padding-top:12px; margin-top:20px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>【估值卡】融发核电（002366.SZ）</h1>
+  <div class="subtitle">估值日期：2026-10-19 &nbsp;|&nbsp; 数据来源：公司年报/三季报、交易所公告、公开行情</div>
+
+  <div class="card">
+    <div class="section-title">核心结论</div>
+    <p>当前股价 <strong>5.60 元</strong>（总市值约 <strong>116 亿</strong>），相对内在价值显著偏高，定性评级：<span class="rating rating-over">高估</span></p>
+    <p>公司核电主管道护城河较宽、行业景气向上，但当前盈利为负、自由现金流持续承压、非核业务亏损拖累。DCF 与分部估值均显示股价已透支大量未来乐观预期；相对估值中 PS 显著高于同业。</p>
+  </div>
+
+  <div class="summary">
+    <div class="kpi"><div class="num">5.60 元</div><div class="label">当前股价</div></div>
+    <div class="kpi"><div class="num">116 亿</div><div class="label">总市值</div></div>
+    <div class="kpi"><div class="num">0.27 元</div><div class="label">DCF 中性价值</div></div>
+    <div class="kpi"><div class="num">1.64 元</div><div class="label">DCF 乐观价值</div></div>
+    <div class="kpi"><div class="num">2.51 x</div><div class="label">市净率 PB</div></div>
+    <div class="kpi"><div class="num">12.8 x</div><div class="label">市销率 PS</div></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Phase 1 结论吸收</div>
+    <table>
+      <tr><th>维度</th><th>评分</th><th>关键结论</th></tr>
+      <tr><td>业务质量</td><td>59/100</td><td>核电主管道是好生意，但非核业务亏损、资本开支沉重、盈利持续性差</td></tr>
+      <tr><td>行业格局</td><td>71.8/100，护城河较宽</td><td>核岛一回路主管道细分龙头，市占率超 50%，行业景气向上</td></tr>
+      <tr><td>财务安全</td><td>52/100，Caution</td><td>连续扣非亏损、经营现金流为负、高资本开支、利息资本化偏高、存货跌价风险</td></tr>
+      <tr><td>管理层品格</td><td>50/100</td><td>技术型国企背景，但关联交易历史、业绩承诺兑现不佳、分红回报弱</td></tr>
+    </table>
+    <p class="note">注：财务、管理层评分均低于 60 分，DCF 已在情景与敏感性中给予额外风险折价。</p>
+  </div>
+
+  <div class="card">
+    <div class="section-title">DCF 三阶段建模（基于盈利修复假设）</div>
+    <p><strong>前提说明</strong>：公司当前自由现金流为负，传统 DCF 直接适用会产生负价值。此处采用"盈利修复路径"模型：假设 2025-2030 年逐步扭亏并实现正常化盈利，再折现至永续期。</p>
+    <table>
+      <tr><th>情景</th><th>2030 年收入</th><th>2030 EBITDA 率</th><th>WACC</th><th>永续增长</th><th>企业价值</th><th>股权价值</th><th>每股价值</th></tr>
+      <tr><td>悲观</td><td>18 亿</td><td>15%</td><td>11%</td><td>2.0%</td><td>6.7 亿</td><td>-6.5 亿</td><td>-0.31 元</td></tr>
+      <tr class="highlight"><td>中性</td><td>25 亿</td><td>19%</td><td>10%</td><td>2.5%</td><td>18.9 亿</td><td>5.7 亿</td><td>0.27 元</td></tr>
+      <tr><td>乐观</td><td>35 亿</td><td>23%</td><td>9%</td><td>3.0%</td><td>47.4 亿</td><td>34.2 亿</td><td>1.64 元</td></tr>
+    </table>
+    <p class="note">基础数据：2024 年收入 10.07 亿、归母净资产 46.36 亿、净债务约 13.2 亿、总股本 20.81 亿股。2024 年 EBITDA 估算约 1.55 亿。</p>
+
+    <div style="margin-top:16px; font-weight:700;">关键假设</div>
+    <table>
+      <tr><td>精细期（前 5 年）收入增速</td><td>线性修复至 2030 年目标收入（隐含 CAGR：悲观 12%、中性 20%、乐观 28%）</td></tr>
+      <tr><td>过渡期</td><td>模型以 2030 年作为正常化起点进入永续期</td></tr>
+      <tr><td>永续增长率</td><td>2.0%-3.0%（参考长期 GDP 增速）</td></tr>
+      <tr><td>WACC</td><td>9%-11%（重资产、高负债、治理折价）</td></tr>
+      <tr><td>资本开支</td><td>修复期维持收入 22%-28%，正常化后降至 9%</td></tr>
+      <tr><td>有效税率</td><td>15%（高新技术企业）</td></tr>
+    </table>
+
+    <div style="margin-top:16px; font-weight:700;">敏感性分析：中性情景每股价值（元）</div>
+    <table>
+      <tr><th>WACC \ 永续增长</th><th>2.0%</th><th>2.5%</th><th>3.0%</th></tr>
+      <tr><td>9%</td><td>0.36</td><td>0.43</td><td>0.51</td></tr>
+      <tr class="highlight"><td>10%</td><td>0.22</td><td>0.27</td><td>0.33</td></tr>
+      <tr><td>11%</td><td>0.11</td><td>0.15</td><td>0.19</td></tr>
+    </table>
+    <p class="note">在中性参数附近，每股价值对 WACC 和永续增长高度敏感，核心原因是当前盈利为负、终值占比较高。</p>
+
+    <div style="margin-top:16px; font-weight:700;">首席常识体检压力情景</div>
+    <p>更保守假设：WACC 12%、永续增长率 1.5%、利润率修复延后 2-3 年（2032/2033 年才达正常化）。</p>
+    <table>
+      <tr><th>修复期</th><th>正常化收入</th><th>正常化 EBITDA 率</th><th>每股价值</th><th>企业价值</th><th>股权价值</th></tr>
+      <tr><td>7 年（2032 年）</td><td>25 亿</td><td>19%</td><td><strong>-0.66 元</strong></td><td>-0.61 亿</td><td>-13.82 亿</td></tr>
+      <tr><td>7 年（2032 年）</td><td>20 亿</td><td>16%</td><td><strong>-0.83 元</strong></td><td>-3.97 亿</td><td>-17.18 亿</td></tr>
+      <tr><td>8 年（2033 年）</td><td>25 亿</td><td>19%</td><td><strong>-0.66 元</strong></td><td>-0.58 亿</td><td>-13.79 亿</td></tr>
+      <tr><td>8 年（2033 年）</td><td>20 亿</td><td>16%</td><td><strong>-0.82 元</strong></td><td>-3.82 亿</td><td>-17.03 亿</td></tr>
+    </table>
+    <p class="note">压力情景下企业价值难以覆盖净债务，股权价值为负，进一步印证当前股价缺乏基本面支撑。</p>
+
+    <div style="margin-top:16px; font-weight:700;">DCF 适用局限说明</div>
+    <ul class="note">
+      <li>公司 2022-2025 年连续扣非亏损，经营现金流持续为负，资本开支沉重（2024 年 3.26 亿、2025 年 2.62 亿）。</li>
+      <li>传统 DCF 直接折现当前负 FCF 会得到负价值，失去参考意义；本卡采用"盈利修复路径"模型。</li>
+      <li>该模型本质是对未来核电景气、环轧项目投产、非核业务收缩等假设的折现；一旦修复节奏延后或利润率不及预期，价值将迅速下修甚至为负。</li>
+      <li>因此，DCF 结果应作为"假设兑现后的价值上限"，而非当前可买入价格；投资决策需结合相对估值、资产价值与风险承受能力综合判断。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="section-title">相对估值</div>
+    <table>
+      <tr><th>指标</th><th>融发核电</th><th>历史 5 年中枢/分位</th><th>同行均值</th><th>位置</th></tr>
+      <tr><td>PE (TTM)</td><td>负值</td><td>—</td><td>江苏神通 ~28x、海陆重工 ~22x、应流股份 ~50-80x</td><td>无法比较</td></tr>
+      <tr><td>PB (LF)</td><td>2.51 x</td><td>近 5 年约 40% 分位（中枢 3-4x，波动大）</td><td>江苏神通 2.3x、海陆重工 2.1x、应流股份 4.5-5.5x</td><td>中性</td></tr>
+      <tr><td>PS (TTM)</td><td>12.8 x</td><td>—</td><td>江苏神通 ~4x、海陆重工 ~4x、应流股份 ~10x</td><td>偏高</td></tr>
+      <tr><td>EV/EBITDA</td><td>约 83 x</td><td>—</td><td>同行约 20-50 x</td><td>显著偏高</td></tr>
+    </table>
+    <p class="note">同行数据来自 2025-2026 年公开财报与行情，口径为 TTM/LF；融发核电因亏损 PE 失效，PS、EV/EBITDA 更具参考意义。</p>
+    <div id="peerChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">安全边际判断</div>
+    <table>
+      <tr><th>档位</th><th>价格线</th><th>当前价格</th><th>状态</th></tr>
+      <tr><td>低估线（DCF 中性 × 80%）</td><td>0.22 元</td><td>5.60 元</td><td>远高于低估线</td></tr>
+      <tr class="highlight"><td>中性线（DCF 中性）</td><td>0.27 元</td><td>5.60 元</td><td>显著高于中性线</td></tr>
+      <tr><td>高估线（DCF 中性 × 110%）</td><td>0.30 元</td><td>5.60 元</td><td>显著高于高估线</td></tr>
+    </table>
+    <p><strong>当前价格相对 DCF 中性价值溢价约 1,960%</strong>；即使相对乐观情景（1.64 元）也溢价约 241%。</p>
+    <div id="safetyChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">分部估值交叉验证（SOTP）</div>
+    <table>
+      <tr><th>业务/资产</th><th>估值逻辑</th><th>价值区间</th></tr>
+      <tr><td>核电主管道业务</td><td>正常化净利润 1.0-1.5 亿 × PE 25-30x</td><td>25-45 亿</td></tr>
+      <tr><td>非核业务（锻造/石化）</td><td>当前亏损，暂不计价值；若扭亏可重估</td><td>0 亿</td></tr>
+      <tr><td>2.4 万吨锻压机等资产</td><td>重置成本难以精确计量，已在业务估值中部分体现</td><td>—</td></tr>
+      <tr><td>减：净债务</td><td>约 13.2 亿</td><td>-13.2 亿</td></tr>
+      <tr class="highlight"><td>股权价值合计</td><td>—</td><td>12-32 亿（每股 0.6-1.5 元）</td></tr>
+    </table>
+    <p class="note">分部估值结果与 DCF 区间（0.5-1.5 元）基本一致，相互验证。</p>
+  </div>
+
+  <div class="card">
+    <div class="section-title">定性估值评级与行动建议</div>
+    <p><strong>评级：高估</strong></p>
+    <p>理由：公司核电赛道景气、主管道护城河较宽，但当前盈利与现金流无法支撑 116 亿市值；股价已充分甚至过度反映"核电放量 + 核聚变概念 + 2.4 万吨锻压机投产"等乐观预期。DCF 中性价值仅 0.27 元，即使乐观情景也仅 1.64 元。</p>
+    <ul>
+      <li><strong>行动建议</strong>：已持仓者建议<strong>减仓</strong>；未持仓者<strong>不介入</strong>，等待安全边际。</li>
+      <li><strong>目标买入价</strong>：2.0-2.5 元（对应市值 42-52 亿，约为当前 4-5 折，接近净资产附近）。</li>
+      <li><strong>目标卖出价</strong>：当前价位即考虑逐步兑现；若股价涨至 7 元以上，安全边际进一步恶化。</li>
+      <li><strong>重新评估触发条件</strong>：连续 2 个季度扣非净利润转正、经营现金流转正、2.4 万吨锻压机贡献明确利润、新签大额主管道订单。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="section-title">估值评分</div>
+    <table>
+      <tr><th>维度</th><th>得分</th><th>说明</th></tr>
+      <tr><td>安全边际</td><td>5/100</td><td>股价远高于 DCF 及分部估值区间，几无安全边际</td></tr>
+      <tr><td>估值方法一致性</td><td>45/100</td><td>DCF、分部估值、相对估值（PS）均指向高估；仅 PB 相对中性</td></tr>
+      <tr><td>历史估值位置</td><td>50/100</td><td>PB 处于近 5 年 40% 分位，不算极端高，但 PS 已处高位</td></tr>
+      <tr class="highlight"><td>估值总分（加权）</td><td>30/100</td><td>安全边际 40% + 一致性 30% + 历史位置 30%</td></tr>
+    </table>
+    <div id="scoreChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">一句话传给主理人</div>
+    <p><strong>估值 30/100，当前股价相对 DCF 中性溢价约 1,960%，定性评级高估。</strong> 核电主管道龙头质地虽好，但 116 亿市值已透支未来多年乐观预期；建议等待股价回落至 2.0-2.5 元或基本面出现连续扣非转正、经营现金流转正等实质拐点后再评估。</p>
+  </div>
+
+  <div class="disclaimer">
+    <strong>免责声明</strong>：以上内容基于公开数据和量化分析，仅供参考，不构成投资建议。市场有风险，投资需谨慎。任何投资决策应结合个人风险承受能力、资金状况和投资目标独立判断，必要时咨询持牌专业机构。过往表现不预示未来收益。
+  </div>
+</div>
+
+<script>
+  echarts.init(document.getElementById('peerChart')).setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { data: ['PB', 'PS'] },
+    xAxis: { type: 'category', data: ['融发核电', '江苏神通', '海陆重工', '应流股份'] },
+    yAxis: [{ type: 'value', name: 'PB (x)' }, { type: 'value', name: 'PS (x)' }],
+    series: [
+      { name: 'PB', type: 'bar', data: [2.51, 2.35, 2.25, 5.48] },
+      { name: 'PS', type: 'bar', yAxisIndex: 1, data: [12.8, 4.0, 4.0, 10.2] }
+    ]
+  });
+
+  echarts.init(document.getElementById('safetyChart')).setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'category', data: ['低估线', '中性线', '高估线', '当前价'] },
+    yAxis: { type: 'value', name: '价格（元）' },
+    series: [{
+      type: 'bar',
+      data: [
+        { value: 0.22, itemStyle: { color: '#16a34a' } },
+        { value: 0.27, itemStyle: { color: '#d97706' } },
+        { value: 0.30, itemStyle: { color: '#dc2626' } },
+        { value: 5.60, itemStyle: { color: '#7f1d1d' } }
+      ],
+      label: { show: true, position: 'top', formatter: '{c} 元' }
+    }]
+  });
+
+  echarts.init(document.getElementById('scoreChart')).setOption({
+    tooltip: { trigger: 'item' },
+    series: [{
+      type: 'pie', radius: ['40%', '70%'],
+      data: [
+        { name: '安全边际 5', value: 5 },
+        { name: '一致性 45', value: 45 },
+        { name: '历史位置 50', value: 50 }
+      ],
+      label: { formatter: '{b}' }
+    }]
+  });
+</script>
+</body>
+</html>

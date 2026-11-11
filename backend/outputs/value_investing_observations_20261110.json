@@ -1,0 +1,133 @@
+{
+  "captured_at": "2026-11-11T02:12:00+08:00",
+  "observations": [
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "company_profile",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "stock_code": "601799.SH",
+        "stock_name": "星宇股份",
+        "company_name": "常州星宇车灯股份有限公司",
+        "business": "整车制造企业提供配套车灯产品,专注于汽车(主要是乘用车)车灯的研发、设计、制造和销售。",
+        "enterprise_type": "民营相对控股企业",
+        "employee_sum": "7532",
+        "listed_date": 20110201,
+        "legal_repr": "周晓萍",
+        "sw_info": "[{\"PlateCode\":\"01801880.PT\",\"PlateName\":\"汽车\",\"PlateType\":\"申万一级行业\"},{\"PlateCode\":\"01850922.PT\",\"PlateName\":\"车身附件及饰件\",\"PlateType\":\"申万三级行业\"},{\"PlateCode\":\"01801093.PT\",\"PlateName\":\"汽车零部件\",\"PlateType\":\"申万二级行业\"}]"
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "financial_indicators",
+      "as_of_date": "2026-09-30",
+      "payload": {
+        "stock_code": "601799.SH",
+        "stock_name": "星宇股份",
+        "fiscal_period": "2026-9M",
+        "end_date": "20260930",
+        "basic_eps": 3.3,
+        "net_assets_per_share": 40.1849,
+        "operating_cashflow_per_share": 4.6175,
+        "roic": 8.153326,
+        "roe_average": 8.1451,
+        "operating_revenue_yoy": -2.0184,
+        "debt_to_assets_ratio": 37.684329,
+        "net_profit_margin": 8.878714,
+        "gross_profit_margin": 18.232908,
+        "current_ratio": 1.908273,
+        "interest_coverage_ratio": 29.600945,
+        "revenue_3y_cagr": 13.1868,
+        "parent_net_profit_yoy": -18.3436,
+        "parent_net_profit_3y_cagr": 6.031,
+        "parent_net_profit_ex_yoy": -20.8629,
+        "net_profit_cash_content": 141.580785
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "neodata",
+      "observation_type": "financial_indicators",
+      "as_of_date": "2025-12-31",
+      "payload": {
+        "stock_code": "601799.SH",
+        "stock_name": "星宇股份",
+        "fiscal_period": "2025-FY",
+        "end_date": "20251231",
+        "basic_eps": 5.7072,
+        "net_assets_per_share": 39.8987,
+        "operating_cashflow_per_share": 8.5295,
+        "roic": 14.994581,
+        "roe_average": 15.0549,
+        "operating_revenue_yoy": 15.1192,
+        "debt_to_assets_ratio": 41.079781,
+        "net_profit_margin": 10.645121,
+        "gross_profit_margin": 19.648589,
+        "current_ratio": 1.84897,
+        "revenue_3y_cagr": 22.7544,
+        "parent_net_profit_yoy": 15.3244,
+        "parent_net_profit_3y_cagr": 19.9338,
+        "parent_net_profit_ex_yoy": 16.2945,
+        "net_profit_cash_content": 150.034146
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "westock",
+      "observation_type": "consensus",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh601799",
+        "name": "星宇股份",
+        "targetPrice": 105.9828,
+        "forecasts": [
+          {
+            "year": 2026,
+            "eps": 4.87,
+            "revenue": 1590617.5,
+            "netProfit": 139152.5,
+            "pe": 13.91,
+            "pb": 1.62,
+            "revenueYoy": 4.26,
+            "netProfitYoy": -14.32
+          },
+          {
+            "year": 2027,
+            "eps": 5.9,
+            "revenue": 1822535,
+            "netProfit": 168622.5,
+            "pe": 11.47,
+            "pb": 1.42,
+            "revenueYoy": 14.58,
+            "netProfitYoy": 21.18
+          },
+          {
+            "year": 2028,
+            "eps": 7.18,
+            "revenue": 2112205,
+            "netProfit": 205092.5,
+            "pe": 9.43,
+            "pb": 1.23,
+            "revenueYoy": 15.89,
+            "netProfitYoy": 21.63
+          }
+        ]
+      }
+    },
+    {
+      "symbol": "601799.SH",
+      "source": "westock",
+      "observation_type": "rating",
+      "as_of_date": "2026-11-10",
+      "payload": {
+        "code": "sh601799",
+        "name": "星宇股份",
+        "forecastInstitutions": 1,
+        "ratingBuyCnt": 1,
+        "ratingCnt": 1
+      }
+    }
+  ]
+}
