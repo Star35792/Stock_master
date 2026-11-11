@@ -23,7 +23,7 @@ class FactorDefinitionRepository:
         dependencies: list[str] | None = None,
         parameters_schema: dict[str, Any] | None = None,
         is_active: bool = True,
-        pit_status: str = "unknown",
+        pit_status: str | None = None,
         status: str = "active",
     ) -> FactorDefinition:
         """Create or refresh a factor definition.
@@ -40,8 +40,21 @@ class FactorDefinitionRepository:
           default;
         * ``status='retired'`` marks a superseded or known-wrong definition.
           Its evidence is kept for audit but the factor is frozen.
+
+        **``pit_status=None`` 表示保留既有值**，而不是写回 ``unknown``。
+        因子服务每次运行都会重新登记自己的定义行；若这里默认写回
+        ``unknown``，审计结论（``app/factors/pit_audit_catalog.py``、
+        ``app/factors/evidence_catalog.py``）会在下一次运行时被**静默抹掉**，
+        分级器又会把因子判成「未完成时点性审计」。新建的定义行仍取
+        fail-closed 默认 ``unknown``。
         """
         definition = self.get_by_name_version(db, name=name, version=version)
+        if pit_status is None:
+            pit_status = (
+                (definition.pit_status or "unknown")
+                if definition is not None
+                else "unknown"
+            )
         values = {
             "display_name": display_name,
             "description": description,

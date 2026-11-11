@@ -16,6 +16,7 @@ from app.factors.evidence_catalog import (
     annotate_price_volume_pit_status,
     register_evidence_factor_definitions,
 )
+from app.factors.pit_audit_catalog import annotate_six_family_pit_status
 from app.repositories.factor import FactorDefinitionRepository
 from app.services.basic_price_volume_factors import (
     BASIC_FACTOR_SPECS,
@@ -83,9 +84,15 @@ def register_all_factor_definitions(db: Session) -> dict[str, int]:
 
     幂等：ensure 按 name+version upsert，重复调用只更新不新增行。
 
-    除证据目录与价格量因子外，其余因子家族的 ``pit_status`` 保持默认的
-    ``"unknown"``：它们尚未完成时点性审计，而因子池分级器对 ``unknown``
-    fail-closed（不得进入核心池）。
+    ``pit_status`` 的来源分三类：
+
+    * 证据目录（``app/factors/evidence_catalog.py``）与价格量因子自带判定；
+    * 六族因子由时点性审计台账（``app/factors/pit_audit_catalog.py``）标注；
+    * 其余因子家族保持默认的 ``"unknown"``：它们尚未完成时点性审计，
+      而因子池分级器对 ``unknown`` fail-closed（不得进入核心池）。
+
+    注意 ``ensure()`` 默认**保留**既有 ``pit_status``（``None`` 表示保留），
+    否则每次因子服务重新登记定义行时会把上面的审计结论抹回 ``unknown``。
     """
     repo = FactorDefinitionRepository()
     counts: dict[str, int] = {}
@@ -214,8 +221,14 @@ def register_all_factor_definitions(db: Session) -> dict[str, int]:
     # 就无法判断这些因子能否进入核心池。
     counts["evidence_factors"] = register_evidence_factor_definitions(db)["total"]
     counts["price_volume_pit_annotated"] = annotate_price_volume_pit_status(db)
+    # 六族因子的时点性审计结论。审计在代码里（app/factors/pit_audit_catalog.py），
+    # 不靠人手改库；未审计的因子保持 fail-closed 的 unknown。
+    six_family_pit = annotate_six_family_pit_status(db)
+    counts["six_family_pit_annotated"] = int(six_family_pit["rows_updated"] or 0)
     db.flush()
     counts["total"] = sum(
-        value for key, value in counts.items() if key != "price_volume_pit_annotated"
+        value
+        for key, value in counts.items()
+        if key not in {"price_volume_pit_annotated", "six_family_pit_annotated"}
     )
     return counts
