@@ -140,19 +140,22 @@ SIX_FAMILY_PIT_AUDIT: tuple[PitAuditEntry, ...] = (
     ),
     PitAuditEntry(
         factor_name="limit_up_failure_rate",
-        pit_status=PIT_UNKNOWN,
+        pit_status=PIT_POINT_IN_TIME,
         datasets=("failed_limit_up", "limit_up_pool"),
         reason=(
-            "炸板池端点至今未找到（dataset 从未接通），**无法验证它的 as-of 语义**；"
-            "fail-closed 保持 unknown，不因「涨停池那一半是干净的」就放行整个因子。"
+            "炸板池（limit-break-pool）端点已接通并实测落库：2026-10-20 落库 29 条，"
+            "与当日 limit-up-statistics 的 open_stock_count=29 交叉验算一致。"
+            "炸板池是**收盘后快照**（涨停后又打开），snapshot_date=该池对应交易日；"
+            f"{_SNAPSHOT_RULE}。"
         ),
     ),
     PitAuditEntry(
         factor_name="overheat_reversal_signal",
-        pit_status=PIT_UNKNOWN,
+        pit_status=PIT_POINT_IN_TIME,
         datasets=("hot_stock", "skyrocket", "limit_up_pool", "failed_limit_up"),
         reason=(
-            "含未接通的炸板池输入，无法验证 as-of 语义；fail-closed 保持 unknown。"
+            "四个输入都是收盘后快照（热股榜 / 火箭榜 / 涨停池 / 炸板池），"
+            f"各自 snapshot_date=对应交易日；{_SNAPSHOT_RULE}。"
         ),
     ),
     # ---------------- capital_flow ----------------

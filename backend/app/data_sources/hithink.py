@@ -234,9 +234,7 @@ class HithinkFinanceDataSource:
     def fetch_ths_indices(self, *, tag: str = "industry") -> list[dict[str, Any]]:
         if tag not in {"cn_concept", "region", "tszs", "industry"}:
             raise ValueError("unsupported index tag")
-        return self._get(
-            "/api/a-share-index/catalog/ths-index-list", {"tag": tag}
-        ).get("item", [])
+        return self._get("/api/a-share-index/catalog/ths-index-list", {"tag": tag}).get("item", [])
 
     def fetch_index_constituents(self, *, symbol: str) -> list[dict[str, Any]]:
         return self._get(
@@ -245,18 +243,68 @@ class HithinkFinanceDataSource:
         ).get("item", [])
 
     def fetch_limit_up_pool(self, *, date_ms: int | None = None) -> dict[str, Any]:
+        return self._fetch_pool_pages(
+            "/api/a-share/special-data/limit-up-pool",
+            date_ms,
+            extra_params={"sort_field": "last_price", "sort_dir": "desc"},
+        )
+
+    def fetch_limit_break_pool(self, *, date_ms: int | None = None) -> dict[str, Any]:
+        """炸板池（涨停后打开的个股），``failed_limit_up`` 数据集的来源。
+
+        **参数名必须是 ``date_ms``**（毫秒时间戳）：传 ``date`` / ``trade_date``
+        会被端点**静默忽略**并返回**当期**数据——不报错、不提示，与龙虎榜
+        ``board_type`` 同一类坑。
+
+        **响应不回显请求日期**（``date_ms`` 为 None、``timestamp`` 是响应时刻），
+        所以回填历史时必须由调用方把请求日期写进 payload，否则快照日期会变成
+        回填当天，把历史数据标成今天。
+        """
+        return self._fetch_pool_pages("/api/a-share/special-data/limit-break-pool", date_ms)
+
+    def fetch_limit_down_pool(self, *, date_ms: int | None = None) -> dict[str, Any]:
+        """跌停池。历史参数与炸板池相同（``date_ms``，毫秒），同样不回显日期。"""
+        return self._fetch_pool_pages("/api/a-share/special-data/limit-down-pool", date_ms)
+
+    def fetch_limit_up_statistics(self, *, date: str | None = None) -> dict[str, Any]:
+        """涨停统计（封板率 / 涨停数 / 炸板数 / 触及涨停数）。
+
+        **参数是 ISO 日期字符串**（``date=2026-10-20``），不是 ``date_ms``——
+        传 ``date_ms`` 会被**静默忽略**并返回当期统计。响应**会回显**
+        ``trade_date``，是池类端点里唯一自带日期的。
+
+        与炸板池交叉验算：``seal_rate = limit_up_stock_count /
+        touched_limit_up_stock_count``，且 ``open_stock_count`` 等于当日炸板池
+        条数（实测 2026-10-20 两者都是 29）。
+        """
+        return self._get(
+            "/api/a-share/special-data/limit-up-statistics",
+            {"date": date},
+        )
+
+    def _fetch_pool_pages(
+        self,
+        path: str,
+        date_ms: int | None,
+        *,
+        extra_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """抓取池类端点的全部分页。
+
+        端点服务端会把 ``size`` 压到 50（实测请求 200 仍返回 size=50、pages=2），
+        所以必须按 ``pagination.pages`` 循环，不能只取第一页。
+        """
         page = 1
         items: list[dict[str, Any]] = []
         result: dict[str, Any] = {}
         while True:
             result = self._get(
-                "/api/a-share/special-data/limit-up-pool",
+                path,
                 {
                     "date_ms": date_ms,
                     "page": page,
                     "size": 200,
-                    "sort_field": "last_price",
-                    "sort_dir": "desc",
+                    **(extra_params or {}),
                 },
             )
             current = result.get("item", [])
@@ -278,16 +326,12 @@ class HithinkFinanceDataSource:
     def fetch_hot_stock_list(self, *, period: str = "day") -> dict[str, Any]:
         if period not in {"day", "hour"}:
             raise ValueError("period must be one of: day, hour")
-        return self._get(
-            "/api/a-share/special-data/hot-stock-list", {"period": period}
-        )
+        return self._get("/api/a-share/special-data/hot-stock-list", {"period": period})
 
     def fetch_skyrocket_list(self, *, period: str = "day") -> dict[str, Any]:
         if period not in {"day", "hour"}:
             raise ValueError("period must be one of: day, hour")
-        return self._get(
-            "/api/a-share/special-data/skyrocket-list", {"period": period}
-        )
+        return self._get("/api/a-share/special-data/skyrocket-list", {"period": period})
 
     def fetch_dragon_tiger_list(
         self, *, board_type: str = "all", trade_date: date | None = None

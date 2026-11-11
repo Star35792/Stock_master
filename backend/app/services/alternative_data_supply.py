@@ -85,11 +85,51 @@ DATASET_SUPPLY_REGISTRY: dict[str, DatasetSupplySpec] = {
         DatasetSupplySpec(
             dataset="limit_up_pool",
             factor_family="sentiment",
-            endpoint="hithink /api/a-share/limit-up-pool",
+            endpoint="hithink /api/a-share/special-data/limit-up-pool",
             min_expected_rows=10,
             pit_semantics=PitSemantics.SAME_DAY_CLOSE,
             status=SupplyStatus.CONNECTED,
-            notes="涨停池；T 日收盘后可知，炸板池（failed_limit_up）尚无端点",
+            notes=(
+                "涨停池；T 日收盘后可知。历史参数为 date_ms（毫秒），响应不回显"
+                "请求日期，回填时必须由调用方注入请求日期"
+            ),
+        ),
+        DatasetSupplySpec(
+            dataset="failed_limit_up",
+            factor_family="sentiment",
+            endpoint="hithink /api/a-share/special-data/limit-break-pool",
+            min_expected_rows=1,
+            pit_semantics=PitSemantics.SAME_DAY_CLOSE,
+            status=SupplyStatus.CONNECTED,
+            notes=(
+                "炸板池（涨停后打开的个股）。**此前记成「未找到端点」是错的**——"
+                "端点一直在，只是没对着端点清单核对。历史参数 date_ms（毫秒）；"
+                "传 date/trade_date 会被静默忽略并返回当期数据。limit_up_failure_rate "
+                "因子依赖它"
+            ),
+        ),
+        DatasetSupplySpec(
+            dataset="limit_down_pool",
+            factor_family="sentiment",
+            endpoint="hithink /api/a-share/special-data/limit-down-pool",
+            min_expected_rows=1,
+            pit_semantics=PitSemantics.SAME_DAY_CLOSE,
+            status=SupplyStatus.CONNECTED,
+            notes="跌停池；历史参数 date_ms（毫秒），同样不回显请求日期",
+        ),
+        DatasetSupplySpec(
+            dataset="limit_up_statistics",
+            factor_family="sentiment",
+            endpoint="hithink /api/a-share/special-data/limit-up-statistics",
+            min_expected_rows=1,
+            pit_semantics=PitSemantics.SAME_DAY_CLOSE,
+            status=SupplyStatus.CONNECTED,
+            notes=(
+                "涨停统计聚合口径：封板率 / 涨停数 / 炸板数 / 触及涨停数。"
+                "历史参数是 ISO 日期字符串 date（不是 date_ms）；是池类端点里"
+                "唯一回显 trade_date 的。seal_rate = 涨停数 / 触及涨停数，"
+                "open_stock_count 与当日炸板池条数一致（实测 2026-10-20 都是 29）"
+            ),
         ),
         DatasetSupplySpec(
             dataset="limit_up_ladder",
@@ -103,10 +143,14 @@ DATASET_SUPPLY_REGISTRY: dict[str, DatasetSupplySpec] = {
         DatasetSupplySpec(
             dataset="hot_stock",
             factor_family="sentiment",
-            endpoint="hithink /api/a-share/hot-stock-list",
+            endpoint="hithink /api/a-share/special-data/hot-stock-list",
             min_expected_rows=10,
             pit_semantics=PitSemantics.SAME_DAY_CLOSE,
             status=SupplyStatus.CONNECTED,
+            notes=(
+                "热股榜；当期用 hot-stock-list，历史用 hot-stock-list-history"
+                "（参数 date 为 ISO 日期，响应回显 date）"
+            ),
         ),
         DatasetSupplySpec(
             dataset="skyrocket",
@@ -137,16 +181,6 @@ DATASET_SUPPLY_REGISTRY: dict[str, DatasetSupplySpec] = {
                 "hot_money_items 恒为空——早期把它判成「端点无内容」是误判。"
                 "数据为席位口径，与总榜 dragon_tiger 口径不同，不得混用于同一因子"
             ),
-        ),
-        DatasetSupplySpec(
-            dataset="failed_limit_up",
-            factor_family="sentiment",
-            endpoint=None,
-            min_expected_rows=1,
-            pit_semantics=PitSemantics.SAME_DAY_CLOSE,
-            status=SupplyStatus.NOT_CONNECTED,
-            blocker="未找到炸板池端点；涨停池端点不含炸板列表",
-            notes="limit_up_failure_rate 因子依赖它",
         ),
         # ---- 东财资金流族（实测端点可用）----
         DatasetSupplySpec(
@@ -354,9 +388,7 @@ def blocked_datasets() -> tuple[DatasetSupplySpec, ...]:
     """返回因上游断供而补不了的 dataset。"""
 
     return tuple(
-        spec
-        for spec in DATASET_SUPPLY_REGISTRY.values()
-        if spec.status is SupplyStatus.BLOCKED
+        spec for spec in DATASET_SUPPLY_REGISTRY.values() if spec.status is SupplyStatus.BLOCKED
     )
 
 

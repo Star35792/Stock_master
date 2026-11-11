@@ -58,11 +58,18 @@ class HithinkAlternativeCollectionService:
         # 游资榜是**独立的一张榜**：端点用 ``board_type`` 选择返回哪张榜，
         # ``board_type="all"`` 的响应里 ``hot_money_items`` 恒为空数组。
         # 早先把这个数据集判成「端点该子集无内容」是误判——参数没传对而已。
-        dragon_tiger_hot_money = self.data_source.fetch_dragon_tiger_list(
-            board_type="hot_money"
-        )
+        dragon_tiger_hot_money = self.data_source.fetch_dragon_tiger_list(board_type="hot_money")
         payloads = {
             "limit_up_pool": self.data_source.fetch_limit_up_pool(),
+            # 炸板池：``failed_limit_up`` 数据集的来源。早先记成「未找到端点」
+            # 是错的——端点一直在（/api/a-share/special-data/limit-break-pool），
+            # 只是此前没有对着端点清单核对过。
+            "failed_limit_up": self.data_source.fetch_limit_break_pool(),
+            "limit_down_pool": self.data_source.fetch_limit_down_pool(),
+            # 涨停统计是**聚合口径**（没有逐股 item），落成一条 ``market`` 汇总行：
+            # 封板率 / 涨停数 / 炸板数 / 触及涨停数都在 attributes 里。
+            # 它也是池类端点里唯一**回显 trade_date** 的，回填历史最省事。
+            "limit_up_statistics": self.data_source.fetch_limit_up_statistics(),
             "limit_up_ladder": self.data_source.fetch_limit_up_ladder(),
             "anomaly": self.data_source.fetch_anomaly_list(),
             "hot_stock": self.data_source.fetch_hot_stock_list(),
@@ -71,9 +78,7 @@ class HithinkAlternativeCollectionService:
             "dragon_tiger_hot_money": {
                 "timestamp": dragon_tiger_hot_money.get("timestamp"),
                 "trade_date": dragon_tiger_hot_money.get("trade_date"),
-                "item": _flatten_hot_money(
-                    dragon_tiger_hot_money.get("hot_money_items") or []
-                ),
+                "item": _flatten_hot_money(dragon_tiger_hot_money.get("hot_money_items") or []),
             },
             **{
                 f"index_catalog_{tag}": {
@@ -153,6 +158,20 @@ def _normalize_payload(
         items = payload.get("stock_items", [])
     if dataset == "limit_up_ladder":
         items = _flatten_ladder(items)
+    if dataset == "limit_up_statistics":
+        # 聚合口径：没有逐股明细，落成一条 market 汇总行，值取封板率。
+        return [
+            {
+                "dataset": dataset,
+                "snapshot_date": snapshot_date,
+                "item_key": "market",
+                "symbol": None,
+                "rank": None,
+                "value": _first_decimal(payload, "seal_rate"),
+                "attributes": payload,
+                "source_name": source_name,
+            }
+        ]
     rows = []
     for index, item in enumerate(items):
         symbol = item.get("thscode")
@@ -233,10 +252,7 @@ def _upsert_alternative_rows(db: Session, rows: list[dict]) -> int:
     if not rows:
         return 0
     rows = list(
-        {
-            (row["dataset"], row["snapshot_date"], row["item_key"]): row
-            for row in rows
-        }.values()
+        {(row["dataset"], row["snapshot_date"], row["item_key"]): row for row in rows}.values()
     )
     statement = insert(AlternativeDataSnapshot).values(rows)
     statement = statement.on_conflict_do_update(
