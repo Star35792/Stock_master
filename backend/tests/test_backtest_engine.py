@@ -77,6 +77,26 @@ def test_backtest_executes_signal_on_next_available_open() -> None:
     assert result.total_return == Decimal("0.09")
 
 
+def test_backtest_rejects_missing_held_bar_without_pending_order() -> None:
+    days = _calendar("AAA")["AAA"]
+    with pytest.raises(ValueError, match="missing trusted held-position bar.*2026-07-03.*AAA"):
+        DailyEventBacktestEngine(initial_cash=Decimal("10000")).run(
+            bars=[_bar(day, "AAA", "10", "10") for day in days[:2]],
+            signals=[TargetWeightSignal(days[0], "AAA", Decimal("1"))],
+            execution_calendar=_calendar("AAA"),
+        )
+
+
+def test_backtest_allows_missing_bar_when_symbol_exchange_is_closed() -> None:
+    days = _calendar("AAA")["AAA"]
+    result = DailyEventBacktestEngine(initial_cash=Decimal("10000")).run(
+        bars=[_bar(day, "AAA", "10", "10") for day in days[:2]],
+        signals=[TargetWeightSignal(days[0], "AAA", Decimal("1"))],
+        execution_calendar={"AAA": days[:2], "BBB": days},
+    )
+    assert result.equity_curve[-1].trade_date == days[2]
+
+
 def test_backtest_rejects_missing_bar_on_scheduled_trade_date() -> None:
     bars = [
         _bar(date(2026, 7, 1), "AAA", "10", "10"),
@@ -110,6 +130,7 @@ def test_backtest_applies_costs_on_next_scheduled_open() -> None:
     bars = [
         _bar(date(2026, 7, 1), "AAA", "10", "10"),
         _bar(date(2026, 7, 2), "AAA", "10", "10"),
+        _bar(date(2026, 7, 3), "AAA", "10", "10"),
     ]
     engine = DailyEventBacktestEngine(
         initial_cash=Decimal("10000"),
@@ -184,6 +205,8 @@ def test_backtest_ordering_is_independent_of_signal_and_bar_order() -> None:
         _bar(date(2026, 7, 1), "BBB", "10", "10"),
         _bar(date(2026, 7, 2), "AAA", "10", "11"),
         _bar(date(2026, 7, 2), "BBB", "10", "9"),
+        _bar(date(2026, 7, 3), "AAA", "11", "11"),
+        _bar(date(2026, 7, 3), "BBB", "9", "9"),
     ]
     signals = [
         TargetWeightSignal(date(2026, 7, 1), "BBB", Decimal("0.5")),
@@ -381,7 +404,7 @@ def _run_with_constraints(
     """
     symbols = [symbol for symbol, _, _ in symbols_weights]
     bars = []
-    for trade_day in (date(2026, 7, 1), date(2026, 7, 2)):
+    for trade_day in _calendar(*symbols)[symbols[0]]:
         for symbol, open_, _ in symbols_weights:
             bars.append(_bar(trade_day, symbol, open_, open_))
     signals = [

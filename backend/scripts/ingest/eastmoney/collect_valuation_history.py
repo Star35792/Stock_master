@@ -125,9 +125,7 @@ def main() -> int:
     # The export lives outside the staging directory: the staging tree is
     # moved into ``exported/`` on publication, and the closes are only an
     # input to the gate.
-    trusted_parquet = Path(tempfile.gettempdir()) / (
-        f"trusted_closes_{release_tag}.parquet"
-    )
+    trusted_parquet = Path(tempfile.gettempdir()) / (f"trusted_closes_{release_tag}.parquet")
     try:
         return _run_sweep(
             args=args,
@@ -158,9 +156,7 @@ def _run_sweep(
     trusted_parquet: Path,
 ) -> int:
     """Fetch, gate and publish one valuation-history sweep."""
-    trusted_con = store.connect(
-        release_tag=base_tag, read_only=True, attach_control=False
-    )
+    trusted_con = store.connect(release_tag=base_tag, read_only=True, attach_control=False)
     trusted_count = collector.export_trusted_closes(
         trusted_con,
         start_date=args.start_date,
@@ -261,9 +257,7 @@ def _run_sweep(
                 )
             )
             page_rows = collector.build_rows(items, observed_at=observed_at)
-            collector.write_parquet(
-                page_rows, output_dir=pages_dir / f"page_{page:05d}"
-            )
+            collector.write_parquet(page_rows, output_dir=pages_dir / f"page_{page:05d}")
             if result.pages_fetched % 25 == 0:
                 db.commit()
         db.commit()
@@ -276,9 +270,7 @@ def _run_sweep(
         )
         result.gates.extend(gates)
         accepted_dates = [gate.trade_date for gate in gates if gate.accepted]
-        accepted_count = sum(
-            gate.accepted_rows for gate in gates if gate.accepted
-        )
+        accepted_count = sum(gate.accepted_rows for gate in gates if gate.accepted)
         total_rows = sum(gate.supplier_rows for gate in gates)
 
         result.row_count = accepted_count

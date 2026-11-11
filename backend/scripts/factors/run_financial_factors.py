@@ -20,9 +20,7 @@ def _parse_factor_names(value: str | None) -> list[str] | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Calculate trusted financial decision factors."
-    )
+    parser = argparse.ArgumentParser(description="Calculate trusted financial decision factors.")
     parser.add_argument("--start-date", required=True, help="Inclusive start date, YYYY-MM-DD.")
     parser.add_argument("--end-date", required=True, help="Inclusive end date, YYYY-MM-DD.")
     parser.add_argument("--symbols", help="Optional comma-separated symbols.")

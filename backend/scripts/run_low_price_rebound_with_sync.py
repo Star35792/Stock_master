@@ -57,12 +57,17 @@ def _run_daily_loop(sync_days: int, factor_lookback_days: int) -> int:
     cmd = [
         PYTHON_EXE,
         str(DAILY_LOOP_SCRIPT),
-        "--sync-days", str(sync_days),
-        "--factor-lookback-days", str(factor_lookback_days),
-        "--sync-adjust-type", "none",
-        "--factor-adjust-type", "qfq",
+        "--sync-days",
+        str(sync_days),
+        "--factor-lookback-days",
+        str(factor_lookback_days),
+        "--sync-adjust-type",
+        "none",
+        "--factor-adjust-type",
+        "qfq",
         "--refresh-reference-data",
-        "--code-version", "local",
+        "--code-version",
+        "local",
     ]
     logger.info("启动数据采集: %s", " ".join(cmd))
     result = subprocess.run(
@@ -104,7 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="daily_loop 因子计算回溯天数。",
     )
     parser.add_argument(
-        "-h", "--help",
+        "-h",
+        "--help",
         action="store_true",
         help="显示本入口帮助；回测脚本的帮助请直接运行 low_price_rebound_backtest.py --help。",
     )

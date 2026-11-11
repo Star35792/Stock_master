@@ -41,6 +41,12 @@
 同一评估窗口的逐日画像必须来自恰好一个可审计的 ``code_version``；空值及
 ``local`` / ``unknown`` 占位不具备审计意义。混合旧、新诊断口径的均值只可
 保留为观察证据，不得据此授予核心池资格。
+
+**证据身份闸门**
+
+逐日画像还必须携带同一个可解析的 ``evidence_identity_v1``，绑定实际读取的
+因子 release、QFQ 内容快照、代码与完整交易日期集合。汇总会从数据库重读日期
+集合复核；旧自由文本、部分重算、混合输入和截取子窗口均 fail-closed。
 """
 
 from __future__ import annotations
@@ -234,6 +240,16 @@ class FactorPoolClassifierService:
                 "不得进入核心池"
             )
 
+        has_consistent_evidence_identity = summary.has_consistent_evidence_identity
+        if evidence_is_strategy_eligible and not has_consistent_evidence_identity:
+            structural_reasons.append(
+                "evidence_identity_invalid: "
+                f"eligibility_count={summary.evidence_eligibility_count}, "
+                f"identity_count={summary.evidence_identity_count}, "
+                f"release_tag={summary.evidence_identity_release_tag!r}, "
+                "输入快照或完整交易日期集合未通过一致性复核"
+            )
+
         # --- 代码版本一致性闸门（fail-closed） -------------------------
         has_consistent_code_version = summary.has_consistent_code_version
         if not has_consistent_code_version:
@@ -254,6 +270,7 @@ class FactorPoolClassifierService:
             and endpoint_ok
             and not is_retired
             and evidence_is_strategy_eligible
+            and has_consistent_evidence_identity
             and has_consistent_code_version
         ):
             pool: FactorPool = "core"

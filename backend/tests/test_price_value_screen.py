@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,14 @@ from app.data_sources.eastmoney import EastmoneyDataError
 from app.database.research_session import initialize_research_database
 from app.database.session import initialize_database
 from app.models.factor import FactorRun, FactorValue
-from app.models.market import DailyBar, Security, TradingCalendar, ValuationSnapshot
+from app.models.fundamental import FinancialStatement
+from app.models.market import (
+    AdjustmentFactor,
+    DailyBar,
+    Security,
+    TradingCalendar,
+    ValuationSnapshot,
+)
 from app.models.raw import ImportBatch, RawVendorSnapshot
 from app.models.strategy import BacktestRun
 from app.models.system import JobLog
@@ -80,6 +87,7 @@ def _database(tmp_path):
     with Session(engine) as db:
         for exchange in ("SH", "SZ", "BJ"):
             db.add(TradingCalendar(exchange=exchange, trade_date=TARGET, is_open=True))
+            db.add(TradingCalendar(exchange=exchange, trade_date=NOW.date(), is_open=True))
         for symbol, industry in (("600001.SH", "食品饮料"), ("600002.SH", "银行")):
             db.add(
                 Security(
@@ -754,6 +762,134 @@ def test_zero_reviewable_candidates_are_blocked(tmp_path):
         assert report["ready_count"] == 0
         assert report["status"] == "blocked"
         assert report["global_reason_codes"] == ["no_reviewable_candidates"]
+    engine.dispose()
+
+
+def _add_research_history(db, *, declining=False):
+    days = []
+    day = TARGET
+    while len(days) < 21:
+        if day.weekday() < 5:
+            days.append(day)
+        day -= timedelta(days=1)
+    days.sort()
+    known_calendar = {(r.exchange, r.trade_date) for r in db.scalars(select(TradingCalendar))}
+    for offset in range((NOW.date() - days[0]).days + 1):
+        day = days[0] + timedelta(days=offset)
+        for exchange in ("SH", "SZ", "BJ"):
+            if (exchange, day) not in known_calendar:
+                db.add(TradingCalendar(
+                    exchange=exchange, trade_date=day, is_open=day.weekday() < 5,
+                ))
+    for i, day in enumerate(days):
+        if day != TARGET:
+            price = Decimal(12 if declining else 8) + Decimal(i) / 10 * (-1 if declining else 1)
+            db.add(DailyBar(
+                symbol="600001.SH", security_type="stock", trade_date=day, adjust_type="none",
+                open=price, high=price, low=price, close=price, volume=Decimal(100000),
+                amount=Decimal(1000000), quality_status="trusted", is_suspect=False,
+                is_suspended=False, source_name="test", special_treatment_status="normal",
+            ))
+        db.add(AdjustmentFactor(
+            symbol="600001.SH", trade_date=day, adjust_type="qfq", factor=Decimal(1),
+            source_name="test", version="v1", quality_status="trusted",
+        ))
+    for year in (2023, 2024, 2025):
+        for kind in ("income", "cash_flow"):
+            db.add(FinancialStatement(
+                symbol="600001.SH", statement_type=kind, period="annual", fiscal_year=year,
+                fiscal_period="FY", report_date=date(year + 1, 4, 1),
+                period_end=date(year, 12, 31), currency="CNY", source_name="test",
+                metrics={"net_profit" if kind == "income" else "act_cash_flow_net": "100"},
+                created_at=NOW - timedelta(days=21), updated_at=NOW - timedelta(days=21),
+            ))
+    for year in (2025, 2026):
+        db.add(FinancialStatement(
+            symbol="600001.SH", statement_type="cash_flow", period="half_year", fiscal_year=year,
+            fiscal_period="H1", report_date=date(year, 8, 1), period_end=date(year, 6, 30),
+            currency="CNY", source_name="test", metrics={"act_cash_flow_net": "50"},
+            created_at=NOW - timedelta(days=21), updated_at=NOW - timedelta(days=21),
+        ))
+    db.commit()
+    return days
+
+
+def test_research_screen_binds_quality_trend_and_read_time_freshness(tmp_path):
+    engine = _database(tmp_path)
+    service = PriceValueScreenService(output_dir=tmp_path / "screens")
+    with Session(engine) as db:
+        _add_research_history(db)
+        report = service.run(db, now=NOW)
+        assert report["ready_count"] == 1
+        assert report["research_candidate_count"] == 1
+        assert report["rows"][0]["research_diagnostics"]["review_eligible"]
+        current = service.latest(db, now=NOW)
+        assert current["freshness"]["status"] == "current"
+        assert current["candidate_eligible"]
+        artifact = next((tmp_path / "screens").glob("*.json"))
+        saved = artifact.read_bytes()
+        # On the following Shanghai day a newer report is due; the saved
+        # snapshot and raw eligibility must not be rewritten by a GET.
+        for exchange in ("SH", "SZ", "BJ"):
+            db.add(TradingCalendar(exchange=exchange, trade_date=NOW.date() + timedelta(days=1),
+                                   is_open=True))
+        db.commit()
+        stale = service.latest(db, now=NOW + timedelta(days=1))
+        assert stale["freshness"]["status"] == "stale"
+        assert not stale["candidate_eligible"]
+        assert stale["snapshot_hash"] == report["snapshot_hash"]
+        assert stale["ready_count"] == 1
+        assert artifact.read_bytes() == saved
+        # Financial observations are part of the immutable snapshot binding.
+        row = db.scalar(select(FinancialStatement).where(
+            FinancialStatement.statement_type == "income",
+        ))
+        row.metrics = {"net_profit": "101"}
+        db.commit()
+        changed = service.scan(db, now=NOW)
+        assert changed["snapshot_hash"] != report["snapshot_hash"]
+    engine.dispose()
+
+
+def test_cheap_declining_stock_and_incomplete_adjustment_remain_outside_research_list(tmp_path):
+    engine = _database(tmp_path)
+    service = PriceValueScreenService(output_dir=tmp_path / "screens")
+    with Session(engine) as db:
+        days = _add_research_history(db, declining=True)
+        report = service.scan(db, now=NOW)
+        row = report["rows"][0]
+        assert row["status"] == "ready_for_review"
+        assert row["research_diagnostics"]["trend"]["status"] == "weak"
+        assert row["research_diagnostics"]["quality"]["status"] == "supported"
+        assert report["research_candidate_count"] == 0
+        db.execute(delete(AdjustmentFactor).where(AdjustmentFactor.trade_date == TARGET))
+        db.commit()
+        report = service.scan(db, now=NOW)
+        assert report["rows"][0]["research_diagnostics"]["trend"]["status"] == "unknown"
+        assert report["research_candidate_count"] == 0
+        inputs = service.repository.diagnostic_inputs(db, trade_date=TARGET)
+        assert len(inputs["sessions"]["SH"]) == 21
+        # A historical exchange-calendar conflict cannot silently shift the window.
+        other = db.scalar(select(TradingCalendar).where(
+            TradingCalendar.exchange == "BJ", TradingCalendar.trade_date == days[5],
+        ))
+        other.is_open = False
+        db.commit()
+        inputs = service.repository.diagnostic_inputs(db, trade_date=TARGET)
+        assert inputs["sessions"]["SH"] == []
+    engine.dispose()
+
+
+def test_legacy_report_never_inherits_new_research_eligibility(tmp_path):
+    engine = _database(tmp_path)
+    service = PriceValueScreenService(output_dir=tmp_path / "screens")
+    with Session(engine) as db:
+        legacy = service.scan(db, now=NOW)
+        legacy.pop("diagnostic_version")
+        legacy["screen_version"] = "relative_value_research_v4"
+        view = service._read_view(db, legacy, now=NOW)
+        assert view["freshness"]["status"] == "current"
+        assert not view["candidate_eligible"]
     engine.dispose()
 
 

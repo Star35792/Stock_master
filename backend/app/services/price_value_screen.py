@@ -15,10 +15,23 @@ from sqlalchemy.orm import Session
 from app.config.settings import settings
 from app.repositories.strategy.price_value_screen import PriceValueScreenRepository
 from app.services.job_logging import logged_job
+from app.services.price_value_diagnostics import VERSION as DIAGNOSTIC_VERSION, diagnose
+from app.services.price_value_freshness import report_freshness
 from app.services.price_value_reported_roe import DATASET as ROE_DATASET
+from app.services.price_value_screen_inputs import (
+    input_hash,
+    prepare_inputs,
+    prepare_shortlist_liquidity,
+)
+from app.services.price_value_shortlist import (
+    VERSION as SELECTION_VERSION,
+    analyze_ttm_rule_impact,
+    build_shortlist,
+)
+from app.services.price_value_tracking import build_cohort
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-SCREEN_VERSION = "relative_value_research_v4"
+SCREEN_VERSION = "relative_value_research_v7"
 REQUIRED_EXCHANGES = {"SH", "SZ", "BJ"}
 FINANCIAL_TOKENS = (
     "银行", "保险", "证券", "券商", "期货", "金融", "信托", "bank", "insur", "financ",
@@ -27,13 +40,18 @@ UNKNOWN_INDUSTRIES = {"", "-", "--", "—", "unknown", "n/a", "待定"}
 LIMITATIONS = [
     "仅供人工复核的相对估值初筛；东财 f9 是未核验周期的供应商 PE，"
     "不称 PE(TTM)；PB 也取供应商快照。",
-    "ROE 只取当晚可核对的供应商财报加权平均值，跨市场比较使用同一主报告期；"
+    "ROE 取实际观察时可核对的供应商财报加权平均值，跨市场比较使用同一主报告期；"
     "若已有更新报告，另列最新值供人工复核。",
     "估值快照和财报缺少完整首次可得及修订历史；不得用于历史全市场收益认证或自动交易。",
-    "页面阈值只过滤研究列表；无默认便宜阈值，金融行业需独立模型复核。",
+    "默认精选使用版本化估值、连续盈利、流动性与走势门槛；"
+    "最多10只、每行业最多2只是研究容量限制，不代表组合配置或收益排名。",
+    "固定估值阈值是研究偏好，不证明低估；周期行业及异常高ROE需专门复核，"
+    "金融行业需独立模型。页面自选过滤不能解除后台准入。",
+    "走势与现金流条件仅为版本化研究门槛，尚未经独立样本外收益验证；"
+    "不把趋势通过称作止跌或上涨预测。缺复权因子、完整窗口或财务证据时不通过。",
     "ST/特殊处理状态只覆盖**当前**：由证券简称派生（交易所改名即状态证据），"
-    "已回填控制面（个股中 200 只 ST、1 只退市整理），因此「未知即受限」的"
-    "误阻断已解除。但该状态**没有历史序列**——供应商在所有历史行上返回当前简称，"
+    "当前状态补齐保留名称和派生审计；该状态**没有历史序列**，"
+    "供应商在所有历史行上返回当前简称，"
     "倒填到历史会制造前视；ST 历史时点继续挂账。",
     "行业分类同样只有当前标签（`market.security_industry_history` 5,579 行，"
     "source=current_label_backfill_20261024），不是时点标签；"
@@ -94,13 +112,36 @@ class PriceValueScreenService:
         global_reasons: list[str] = []
         if target is None:
             global_reasons.append("trading_calendar_missing")
-        elif (local.date() - target).days > 4:
-            global_reasons.append("trading_calendar_stale")
+        elif report_freshness(
+            target_trade_date=target.isoformat(), now=instant,
+            calendar=self.repository.freshness_calendar(db, today=local.date()),
+        )["status"] != "current":
+            global_reasons.append("calendar_coverage_incomplete")
 
         bars = self.repository.bars(db, trade_date=target) if target else {}
         valuations = self.repository.valuation(db, trade_date=target) if target else {}
         prep = self.repository.completed_input_prep(db, trade_date=target) if target else None
         prep_metadata = prep.metadata_ or {} if prep else {}
+        observation_mode = prep_metadata.get("observation_mode", "same_evening")
+        catchup = observation_mode == "current_research_catchup"
+        if observation_mode not in {"same_evening", "current_research_catchup"}:
+            global_reasons.append("input_observation_mode_invalid")
+        if catchup:
+            try:
+                observed = datetime.fromisoformat(prep_metadata["observed_at"])
+                valid_observation = (
+                    observed.tzinfo is not None and observed <= instant
+                    and observed.astimezone(SHANGHAI).date() == local.date()
+                    and prep_metadata.get("price_as_of") == str(target)
+                    and prep_metadata.get("financial_as_of") == local.date().isoformat()
+                    and prep_metadata.get("pit_verified") is False
+                    and prep_metadata.get("research_only") is True
+                )
+            except (KeyError, TypeError, ValueError):
+                valid_observation = False
+            if not valid_observation:
+                global_reasons.append("current_observation_time_invalid")
+        financial_date = local.date() if catchup else target
         batch_id = prep_metadata.get("batch_id")
         raw_hashes = (
             self.repository.validated_raw_hashes(db, batch_id=batch_id)
@@ -134,6 +175,21 @@ class PriceValueScreenService:
             if not any(_vendor_reported_roe(value) is not None for value in valuations.values()):
                 global_reasons.append("roe_reported_missing_for_target")
 
+        stocks = self.repository.stocks(db)
+        diagnostic_inputs = (
+            self.repository.diagnostic_inputs(
+                db, trade_date=target,
+                **({"financial_as_of": financial_date} if catchup else {}),
+            ) if target else {
+                "sessions": {}, "prices": [], "adjustments": [], "financial_rows": [],
+            }
+        )
+        research_prices, research_financial = prepare_inputs(
+            diagnostic_inputs, {stock.symbol: stock.exchange for stock in stocks},
+        )
+        selection_liquidity = prepare_shortlist_liquidity(
+            diagnostic_inputs, {stock.symbol: stock.exchange for stock in stocks},
+        )
         rows = []
         reason_counts: Counter[str] = Counter()
         exchange_coverage_now = {
@@ -145,7 +201,7 @@ class PriceValueScreenService:
             }
             for exchange in sorted(REQUIRED_EXCHANGES)
         }
-        for security in self.repository.stocks(db):
+        for security in stocks:
             bar = bars.get(security.symbol)
             valuation = valuations.get(security.symbol)
             pe = _vendor_pe(valuation)
@@ -249,6 +305,12 @@ class PriceValueScreenService:
                 or valuation.raw_payload.get("_raw_page_hash") not in (raw_hashes or set())
             ):
                 reasons.append("valuation_lineage_unverified")
+            if catchup and (
+                payload.get("observation_mode") != observation_mode
+                or payload.get("price_as_of") != str(target)
+                or payload.get("pit_verified") is not False
+            ):
+                reasons.append("valuation_observation_mode_unverified")
 
             if reported_hash and (not roe_input_verified or reported_hash not in roe_hashes):
                 reasons.append("roe_observation_lineage_unverified")
@@ -265,6 +327,26 @@ class PriceValueScreenService:
             # A financial company still appears in the full-market report, but
             # the generic industrial-company research list excludes it.
             status = "ready_for_review" if not reasons else "needs_review"
+            sessions = diagnostic_inputs["sessions"].get(security.exchange, [])
+            price_inputs = research_prices.get(security.symbol, [])
+            financial_inputs = research_financial.get(security.symbol, [])
+            diagnostics = diagnose(
+                symbol=security.symbol, as_of=target or local.date(), sessions=sessions,
+                prices=price_inputs, financial_rows=financial_inputs,
+                financial_sector="financial_industry_separate_model" in reasons,
+                **({"financial_as_of": financial_date,
+                    "financial_available_at": instant} if catchup else {}),
+            )
+            diagnostics["input_hash"] = input_hash(
+                sessions=sessions, prices=price_inputs, financial=financial_inputs,
+            )
+            diagnostics["as_of"] = _text(target)
+            if catchup:
+                diagnostics["financial_as_of"] = financial_date.isoformat()
+                diagnostics["financial_available_at"] = local.isoformat()
+            diagnostics["review_eligible"] = (
+                status == "ready_for_review" and diagnostics["review_eligible"]
+            )
             reason_counts.update(reasons)
             rows.append(
                 {
@@ -274,6 +356,16 @@ class PriceValueScreenService:
                     "vendor_industry_hint": vendor_industry or None,
                     "status": status,
                     "reason_codes": reasons,
+                    "research_diagnostics": diagnostics,
+                    "selection_inputs": {
+                        **selection_liquidity.get(security.symbol, {}),
+                        "listed_days": (target - security.list_date).days
+                        if target and security.list_date else None,
+                        "listing_source_ref": (
+                            f"market.security:{security.symbol}:{security.source_name}:"
+                            f"{security.list_date}:{security.updated_at}"
+                        ) if security.list_date else None,
+                    },
                     "close": _text(bar.close) if bar else None,
                     "pe_vendor_unverified": _text(pe),
                     "pb_vendor": _text(valuation.pb) if valuation else None,
@@ -308,6 +400,10 @@ class PriceValueScreenService:
         if ready == 0 and not global_reasons:
             global_reasons.append("no_reviewable_candidates")
         status = "blocked" if global_reasons else "ready" if ready == len(rows) else "partial"
+        selection = build_shortlist(rows, global_reasons=global_reasons)
+        selection["rule_impact"] = analyze_ttm_rule_impact(
+            rows, global_reasons=global_reasons,
+        )
         sync_job = self.repository.latest_daily_sync_job(db)
         archive = (
             self.repository.latest_historical_archive(db, trade_date=target)
@@ -315,7 +411,18 @@ class PriceValueScreenService:
         )
         archive_metadata = archive.metadata_ or {} if archive else {}
         report = {
+            "observation_mode": observation_mode,
+            "price_as_of": _text(target),
+            "financial_as_of": _text(financial_date),
+            "analysis_at": local.isoformat() if catchup else None,
+            "observed_at": prep_metadata.get("observed_at"),
             "screen_version": SCREEN_VERSION,
+            "diagnostic_version": DIAGNOSTIC_VERSION,
+            "selection_version": SELECTION_VERSION,
+            "selection": selection,
+            "research_candidate_count": sum(
+                row["research_diagnostics"]["review_eligible"] for row in rows
+            ),
             "code_version": settings.app_code_version,
             "generated_at": local.isoformat(),
             "target_trade_date": target.isoformat() if target else None,
@@ -387,6 +494,11 @@ class PriceValueScreenService:
             if metadata.get("snapshot_hash") == report["snapshot_hash"]:
                 existing = self._load_artifact(metadata.get("artifact_name"))
                 if existing is not None:
+                    cohort_name = metadata.get("cohort_name")
+                    if self._load_artifact(cohort_name) is None:
+                        cohort_name = self._write_cohort(existing)
+                        latest_job.metadata_ = {**metadata, "cohort_name": cohort_name}
+                        db.commit()
                     existing["run_id"] = latest_job.id
                     return existing
 
@@ -397,6 +509,7 @@ class PriceValueScreenService:
             metadata={
                 "target_trade_date": report["target_trade_date"],
                 "screen_version": SCREEN_VERSION,
+                "selection_version": SELECTION_VERSION,
                 "snapshot_hash": report["snapshot_hash"],
             },
         ) as job:
@@ -413,6 +526,7 @@ class PriceValueScreenService:
                 json.dump(report, output, ensure_ascii=False, separators=(",", ":"))
                 temporary_name = output.name
             os.replace(temporary_name, self.output_dir / artifact_name)
+            cohort_name = self._write_cohort(report)
             job.rows_read = report["universe_count"]
             job.rows_failed = report["needs_review_count"]
             job.status = "failed" if report["status"] == "blocked" else (
@@ -422,12 +536,30 @@ class PriceValueScreenService:
             job.metadata_ = {
                 **(job.metadata_ or {}),
                 "artifact_name": artifact_name,
+                "cohort_name": cohort_name,
                 "status": report["status"],
                 "ready_count": report["ready_count"],
                 "needs_review_count": report["needs_review_count"],
                 "reason_counts": report["reason_counts"],
+                "selection_qualified_count": report["selection"]["qualified_count"],
+                "selection_shortlist_count": report["selection"]["shortlist_count"],
             }
         return report
+
+    def _write_cohort(self, report: dict) -> str:
+        cohort_name = (
+            f"{report['target_trade_date'] or 'no-calendar'}-"
+            f"{report['snapshot_hash'][:20]}.cohort.json"
+        )
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=self.output_dir, delete=False,
+            prefix=".price-value-cohort-", suffix=".tmp",
+        ) as output:
+            json.dump(build_cohort(report), output, ensure_ascii=False, separators=(",", ":"))
+            temporary_name = output.name
+        os.replace(temporary_name, self.output_dir / cohort_name)
+        return cohort_name
 
     def _load_artifact(self, name: str | None) -> dict | None:
         if not name or Path(name).name != name:
@@ -437,14 +569,49 @@ class PriceValueScreenService:
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def latest(self, db: Session) -> dict | None:
+    def _read_view(self, db: Session, report: dict, *, now: datetime | None = None) -> dict:
+        instant = now or datetime.now(SHANGHAI)
+        if instant.tzinfo is None:
+            raise ValueError("screen clock must include timezone")
+        freshness = report_freshness(
+            target_trade_date=report.get("target_trade_date"), now=instant,
+            calendar=self.repository.freshness_calendar(
+                db, today=instant.astimezone(SHANGHAI).date(),
+            ),
+        )
+        # These are read-time fields. Never rewrite the saved artifact or its hash.
+        observation_current = True
+        if report.get("observation_mode") == "current_research_catchup":
+            try:
+                analysis_at = datetime.fromisoformat(report["analysis_at"])
+                observation_current = (
+                    analysis_at.tzinfo is not None and analysis_at <= instant
+                    and analysis_at.astimezone(SHANGHAI).date()
+                    == instant.astimezone(SHANGHAI).date()
+                )
+            except (KeyError, TypeError, ValueError):
+                observation_current = False
+        return {**report, "freshness": freshness, "candidate_eligible": bool(
+            observation_current
+            and
+            freshness["status"] == "current"
+            and report.get("screen_version") == SCREEN_VERSION
+            and report.get("diagnostic_version") == DIAGNOSTIC_VERSION
+            and report.get("selection_version") == SELECTION_VERSION
+            and isinstance(report.get("selection"), dict)
+            and report.get("selection", {}).get("version") == SELECTION_VERSION
+            and report.get("status") != "blocked"
+            and not report.get("global_reason_codes")
+        )}
+
+    def latest(self, db: Session, *, now: datetime | None = None) -> dict | None:
         job = self.repository.latest_screen_job(db)
         if job is None:
             return None
         report = self._load_artifact((job.metadata_ or {}).get("artifact_name"))
         if report is not None:
             report["run_id"] = job.id
-            return report
+            return self._read_view(db, report, now=now)
         running = job.status == "running"
         failure_type = (job.error_message or "UnknownError").split(":", 1)[0]
         reason_code = "screen_job_running" if running else "screen_job_failed"
@@ -460,7 +627,7 @@ class PriceValueScreenService:
             if target else None
         )
         archive_metadata = archive.metadata_ or {} if archive else {}
-        return {
+        return self._read_view(db, {
             "run_id": job.id,
             "screen_version": SCREEN_VERSION,
             "code_version": settings.app_code_version,
@@ -519,10 +686,12 @@ class PriceValueScreenService:
             "limitations": LIMITATIONS,
             "rows": [],
             "snapshot_hash": sha256(f"screen-failed:{job.id}".encode()).hexdigest(),
-        }
+        }, now=now)
 
-    def profit_status(self, db: Session) -> dict:
-        run = self.repository.latest_price_value_backtest(db)
+    def profit_status(self, db: Session, *, research_db: Session | None = None) -> dict:
+        run = self.repository.latest_price_value_backtest(
+            research_db if research_db is not None else db
+        )
         accounts = self.repository.paper_accounts(db)
         paper = []
         for account in accounts:

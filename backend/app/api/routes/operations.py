@@ -82,9 +82,11 @@ def get_operations_failure_rerun_plan(
     ],
     failure_id: int,
     db: DatabaseSession,
+    research_db: ResearchDatabaseSession,
 ) -> OperationsRerunPlan:
     plan = service.get_rerun_plan(
         db,
+        research_db=research_db,
         failure_type=failure_type,
         failure_id=failure_id,
     )

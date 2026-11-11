@@ -72,7 +72,8 @@ class ResearchValuationReadRepository:
                 )
             )
         statement = statement.order_by(
-            ValuationSnapshot.trade_date, ValuationSnapshot.symbol
+            ValuationSnapshot.trade_date, ValuationSnapshot.symbol,
+            ValuationSnapshot.source_name,
         )
         return [
             SimpleNamespace(
@@ -93,13 +94,12 @@ class ResearchValuationReadRepository:
                 free_shares_a=row.float_shares,
                 float_market_cap=row.float_market_cap,
                 change_rate=None,
-                # The control plane rows were captured live, so they are
-                # point-in-time observations of that evening's snapshot.  The
-                # warm layer's backfilled rows are not, and the flag makes the
-                # difference visible to a consumer.
-                pit_verified=True,
+                # Presence in the control plane does not certify first availability.
+                pit_verified=False,
+                source_name=row.source_name,
             )
             for row in self._db.scalars(statement)
+            if not self._is_research_observation(row.raw_payload)
         ]
 
     def valuation_history_coverage(
@@ -108,16 +108,18 @@ class ResearchValuationReadRepository:
         start_date: date,
         end_date: date,
     ) -> dict[str, Any]:
-        """Return the coverage facts of the control-plane valuation history."""
+        """Report coverage after applying the same research-observation isolation."""
         rows = self._db.execute(
             select(
                 ValuationSnapshot.trade_date,
                 ValuationSnapshot.symbol,
+                ValuationSnapshot.raw_payload,
             ).where(
                 ValuationSnapshot.trade_date >= start_date,
                 ValuationSnapshot.trade_date <= end_date,
             )
         ).fetchall()
+        rows = [row for row in rows if not self._is_research_observation(row[2])]
         if not rows:
             return {
                 "row_count": 0,
@@ -135,6 +137,10 @@ class ResearchValuationReadRepository:
             "min_date": min(trade_dates),
             "max_date": max(trade_dates),
         }
+
+    @staticmethod
+    def _is_research_observation(payload: Any) -> bool:
+        return isinstance(payload, dict) and payload.get("_research_batch_id") is not None
 
 
 __all__ = ["ResearchValuationReadRepository"]

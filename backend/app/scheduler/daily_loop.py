@@ -234,11 +234,30 @@ def run_daily_loop(
                     job_log_repository=repo,
                 )
                 result.sync_result = sync_result
+                intraday_dates = sync_result.market_build.intraday_snapshot_dates
                 job.metadata_ = {
                     **(job.metadata_ or {}),
                     "sync_batch_no": sync_result.collection.batch_no,
                     "sync_status": sync_result.collection.status,
+                    # A sync started before the close stores partial bars as
+                    # suspect, so nothing downstream silently reads a 11:00
+                    # price as the day's close.  Recorded here because the fix
+                    # is an operator action: re-sync after 15:30.
+                    "intraday_snapshot_count": (
+                        sync_result.market_build.intraday_snapshot_count
+                    ),
+                    "intraday_snapshot_dates": [
+                        trade_date.isoformat() for trade_date in intraday_dates
+                    ],
                 }
+                if intraday_dates:
+                    logger.warning(
+                        "daily_loop captured %s bars before their session settled "
+                        "(dates=%s); they are stored as suspect. Re-sync after "
+                        "15:30 Asia/Shanghai to publish final closes.",
+                        sync_result.market_build.intraday_snapshot_count,
+                        ", ".join(trade_date.isoformat() for trade_date in intraday_dates),
+                    )
             except Exception as exc:  # noqa: BLE001 - log and surface
                 error_message = f"sync failed: {type(exc).__name__}: {exc}"
                 result.sync_error = error_message
@@ -463,15 +482,33 @@ def run_daily_loop(
                     **(job.metadata_ or {}),
                     **cert_meta,
                 }
-                has_gate_failure = bool(factor_result.failed) or any(
-                    cert_meta.get(key) for key in [
-                        "gate_market_date_missing",
-                        "gate_market_coverage_incomplete",
-                        "gate_duplicate_keys",
-                        "gate_qfq_coverage_anomaly",
-                        "gate_core_factor_partial",
-                        "gate_query_error",
+                # A partial session on the target date is a certification
+                # failure with its own cause.  The coverage gate would catch it
+                # anyway (it counts trusted bars only), but reporting
+                # "MARKET_CROSS_SECTION_INCOMPLETE" would send the operator
+                # looking for a vendor outage instead of an early start.
+                intraday_target_hit = today.isoformat() in (
+                    job.metadata_.get("intraday_snapshot_dates") or []
+                )
+                if intraday_target_hit:
+                    job.metadata_["reason_codes"] = [
+                        *job.metadata_.get("reason_codes", []),
+                        "INTRADAY_SNAPSHOT",
                     ]
+                has_gate_failure = (
+                    bool(factor_result.failed)
+                    or intraday_target_hit
+                    or any(
+                        cert_meta.get(key)
+                        for key in [
+                            "gate_market_date_missing",
+                            "gate_market_coverage_incomplete",
+                            "gate_duplicate_keys",
+                            "gate_qfq_coverage_anomaly",
+                            "gate_core_factor_partial",
+                            "gate_query_error",
+                        ]
+                    )
                 )
                 if has_gate_failure:
                     job.metadata_["gate_status"] = "blocked"

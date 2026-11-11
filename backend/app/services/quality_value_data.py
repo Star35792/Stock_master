@@ -6,6 +6,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from app.repositories.strategy.quality_value_data import QualityValueDataRepository
+from app.services.financial_sector import is_financial_industry
 from app.services.quality_value_financial import financial_metrics
 from app.strategies.quality_value_attention import (
     ATTENTION,
@@ -41,7 +42,9 @@ class QualityValueDataService:
         candidates, readiness = [], []
         for stock in stocks:
             symbol = stock['symbol']
-            metrics: dict[str, Evidence] = financial_metrics(financial_rows[symbol], as_of)
+            financial_sector = is_financial_industry(stock['industry'])
+            metrics: dict[str, Evidence] = (
+                {} if financial_sector else financial_metrics(financial_rows[symbol], as_of))
 
             def add(name, value, source, updated, destination=metrics):
                 if updated is None or not source:
@@ -66,7 +69,8 @@ class QualityValueDataService:
 
             candidate = Candidate(
                 symbol=symbol, industry=stock['industry'] or 'unknown',
-                model='unclassified', attribution='unknown', metrics=metrics,
+                model='financial' if financial_sector else 'unclassified',
+                attribution='unknown', metrics=metrics,
             )
             candidates.append(candidate)
             bar = bars.get(symbol)

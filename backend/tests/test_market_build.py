@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -8,7 +9,13 @@ from sqlalchemy.orm import Session
 from app.data_sources.hithink import HithinkFinanceDataSource
 from app.models.market import DailyBar
 from app.repositories.market import DailyBarRepository
-from app.services.daily_bar_market_builder import DailyBarMarketBuildService, _validate_candidate
+from app.services.daily_bar_market_builder import (
+    DailyBarMarketBuildService,
+    MarketBuildResult,
+    _validate_candidate,
+)
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _raw_bar(**overrides):
@@ -34,6 +41,8 @@ def _raw_bar(**overrides):
         "limit_down": None,
         "is_suspended": False,
         "special_treatment_status": None,
+        # No provenance: the capture-time guard must stay silent about it.
+        "imported_at": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -311,3 +320,86 @@ def test_market_build_rejects_suspended_raw_bar() -> None:
     assert market_repository.calls == []
     assert issue_repository.calls[0]["issue_type"] == "SUSPENDED_BAR_REJECTED"
     assert db.committed is True
+
+
+def _build(
+    row: SimpleNamespace,
+) -> tuple[MarketBuildResult, FakeMarketRepository, FakeIssueRepository]:
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    issue_repository = FakeIssueRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([row], row),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=issue_repository,  # type: ignore[arg-type]
+    )
+    return service.build_from_raw(db), market_repository, issue_repository  # type: ignore[arg-type]
+
+
+def test_market_build_demotes_a_bar_captured_inside_the_session() -> None:
+    """A clean-looking bar captured at 11:02 must not become trusted.
+
+    The numbers in ``_raw_bar`` pass every sanity check, which is exactly the
+    2026-11-10 failure mode: an intraday snapshot is internally consistent, so
+    only its provenance can disqualify it.
+    """
+    row = _raw_bar(imported_at=datetime(2026, 7, 17, 11, 2, tzinfo=SHANGHAI))
+
+    result, market_repository, issue_repository = _build(row)
+
+    assert result.trusted_count == 0
+    assert result.suspect_count == 1
+    assert result.rejected_count == 0
+    assert result.intraday_snapshot_count == 1
+    assert result.intraday_snapshot_dates == (date(2026, 7, 17),)
+    assert market_repository.calls[0]["quality_status"] == "suspect"
+    assert market_repository.calls[0]["is_suspect"] is True
+    assert market_repository.calls[0]["quality_score"] == Decimal("40.00")
+    assert issue_repository.calls[-1]["issue_type"] == "INTRADAY_SNAPSHOT_BATCH"
+    assert issue_repository.calls[-1]["actual_value"] == {"bar_count": 1}
+    assert issue_repository.calls[-1]["trade_date"] == date(2026, 7, 17)
+    # The per-bar row keeps the provenance; the batch row carries the remedy.
+    assert [call["issue_type"] for call in issue_repository.calls] == [
+        "INTRADAY_SNAPSHOT",
+        "INTRADAY_SNAPSHOT_BATCH",
+    ]
+
+
+def test_market_build_keeps_a_bar_captured_after_the_close_trusted() -> None:
+    row = _raw_bar(imported_at=datetime(2026, 7, 17, 18, 40, tzinfo=SHANGHAI))
+
+    result, market_repository, issue_repository = _build(row)
+
+    assert result.trusted_count == 1
+    assert result.suspect_count == 0
+    assert result.intraday_snapshot_count == 0
+    assert result.intraday_snapshot_dates == ()
+    assert market_repository.calls[0]["quality_status"] == "trusted"
+    assert issue_repository.calls == []
+
+
+def test_market_build_does_not_blame_a_honest_backfill() -> None:
+    """A next-morning refetch of a completed session stays trusted."""
+    row = _raw_bar(imported_at=datetime(2026, 7, 18, 9, 15, tzinfo=SHANGHAI))
+
+    result, market_repository, _ = _build(row)
+
+    assert result.trusted_count == 1
+    assert result.intraday_snapshot_count == 0
+    assert market_repository.calls[0]["quality_status"] == "trusted"
+
+
+def test_market_build_still_rejects_a_pre_close_bar_with_broken_prices() -> None:
+    row = _raw_bar(
+        high=Decimal("1180.00"),
+        imported_at=datetime(2026, 7, 17, 11, 2, tzinfo=SHANGHAI),
+    )
+
+    result, market_repository, issue_repository = _build(row)
+
+    assert result.rejected_count == 1
+    assert result.intraday_snapshot_count == 0
+    assert market_repository.calls == []
+    assert {call["issue_type"] for call in issue_repository.calls} == {"PRICE_INVALID"}

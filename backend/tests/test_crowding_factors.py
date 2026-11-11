@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import CrowdingFactorService
+from app.services.crowding_factors import _percentile_ranks
 
 
 class FakeDailyBarRepository:
@@ -180,6 +181,7 @@ def test_crowding_factor_service_blends_price_pressure_and_sentiment() -> None:
     )
     assert len(definition_repository.definitions) == 1
     assert definition_repository.definitions[0].name == "crowding_score"
+    assert definition_repository.definitions[0].version == "v2-average-rank-qfq"
     assert definition_repository.definitions[0].inputs == [
         "factor.turnover_percentile_120:v1-qfq",
         "factor.abnormal_volume_pressure:v1-qfq",
@@ -188,6 +190,14 @@ def test_crowding_factor_service_blends_price_pressure_and_sentiment() -> None:
     assert all(run["status"] == "success" for run in run_repository.finished)
     assert daily_bar_repository.kwargs is not None
     assert daily_bar_repository.kwargs["adjust_type"] == "qfq"
+    assert {
+        (query["factor_name"], query["factor_version"])
+        for query in value_repository.queries
+    } == {
+        ("turnover_percentile_120", "v1-qfq"),
+        ("abnormal_volume_pressure", "v1-qfq"),
+        ("market_sentiment_score", "v1"),
+    }
 
     values = {
         (item["trade_date"], item["symbol"]): item["value"]
@@ -200,6 +210,37 @@ def test_crowding_factor_service_blends_price_pressure_and_sentiment() -> None:
     assert values[(target_dates[1], "B")] == Decimal("0.3888888889")
     assert values[(target_dates[3], "A")] == Decimal("0.8666666667")
     assert values[(target_dates[3], "B")] == Decimal("0.2000000000")
+
+
+def test_crowding_cross_section_ranks_use_average_ranks_for_ties() -> None:
+    values = {
+        "AAA": Decimal("1"),
+        "BBB": Decimal("1"),
+        "CCC": Decimal("3"),
+    }
+
+    higher = _percentile_ranks(values, higher_is_better=True)
+    lower = _percentile_ranks(values, higher_is_better=False)
+
+    assert higher == {
+        "AAA": Decimal("0.25"),
+        "BBB": Decimal("0.25"),
+        "CCC": Decimal("1"),
+    }
+    assert lower == {
+        symbol: Decimal(1) - rank for symbol, rank in higher.items()
+    }
+
+
+def test_crowding_cross_section_rank_is_neutral_without_dispersion() -> None:
+    assert _percentile_ranks(
+        {"AAA": Decimal("1"), "BBB": Decimal("1")},
+        higher_is_better=True,
+    ) == {"AAA": Decimal("0.5"), "BBB": Decimal("0.5")}
+    assert _percentile_ranks(
+        {"AAA": Decimal("1")},
+        higher_is_better=True,
+    ) == {"AAA": Decimal("0.5")}
 
 
 def test_crowding_factor_service_validates_inputs() -> None:

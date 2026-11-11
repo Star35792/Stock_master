@@ -79,7 +79,10 @@ class TrainingSelectionPolicy:
             "weighting": self.weighting,
             "allow_flip_min_training_days": self.allow_flip_min_training_days,
             "candidates": sorted(
-                {f"{spec.factor_name}@{spec.factor_version}" for spec in candidates}
+                {
+                    f"{spec.factor_name}@{spec.factor_version}:higher={spec.higher_is_better}"
+                    for spec in candidates
+                }
             ),
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))

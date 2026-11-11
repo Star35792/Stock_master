@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeftRight, BookOpen, CircleAlert, Pencil, Plus, RefreshCw, Trash2, Wallet } from "@lucide/vue";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
   createPositionBook,
@@ -28,6 +28,7 @@ const newBookCash = ref("0");
 const creatingBook = ref(false);
 
 const editingBook = ref(false);
+const editingBookId = ref<number | null>(null);
 const editForm = reactive({ name: "", cash: "", note: "" });
 const savingBook = ref(false);
 
@@ -69,14 +70,16 @@ function toggleSort(key: typeof sortKey.value) {
 function startEditBook() {
   const book = selectedBook.value;
   if (!book) return;
+  editingBookId.value = book.id;
   editForm.name = book.name;
-  editForm.cash = String(Number(book.cash));
+  editForm.cash = book.cash;
   editForm.note = book.note ?? "";
   editingBook.value = true;
 }
 
 async function saveBookEdit() {
-  if (selectedBookId.value === null) return;
+  const bookId = editingBookId.value;
+  if (!editingBook.value || bookId === null || bookId !== selectedBookId.value || savingBook.value) return;
   const name = editForm.name.trim();
   if (!name) {
     actionError.value = "账本名称不能为空。";
@@ -85,14 +88,14 @@ async function saveBookEdit() {
   savingBook.value = true;
   actionError.value = null;
   try {
-    await updatePositionBook(selectedBookId.value, {
+    await updatePositionBook(bookId, {
       name,
       cash: editForm.cash,
       note: editForm.note || null,
     });
     editingBook.value = false;
     notice.value = "账本已更新。";
-    await loadBooks(selectedBookId.value);
+    await loadBooks(bookId);
   } catch (error) {
     actionError.value = error instanceof Error ? error.message : "账本更新失败";
   } finally {
@@ -116,6 +119,29 @@ const drift = ref<PortfolioPlanDrift | null>(null);
 const driftLoading = ref(false);
 
 let tradeIdempotencyKey: string | null = null;
+let tradeRequestFingerprint: string | null = null;
+let bookRequestGeneration = 0;
+let driftRequestGeneration = 0;
+
+watch(selectedBookId, () => {
+  bookRequestGeneration += 1;
+  driftRequestGeneration += 1;
+  editingBook.value = false;
+  editingBookId.value = null;
+  holdings.value = null;
+  trades.value = [];
+  drift.value = null;
+  loading.value = false;
+  driftLoading.value = false;
+  actionError.value = null;
+  notice.value = null;
+  industryFilter.value = "";
+}, { flush: "sync" });
+
+onBeforeUnmount(() => {
+  bookRequestGeneration += 1;
+  driftRequestGeneration += 1;
+});
 
 const selectedBook = computed(() => books.value.find((book) => book.id === selectedBookId.value) ?? null);
 
@@ -138,20 +164,26 @@ async function loadBooks(preferredId?: number) {
 }
 
 async function refreshBookData() {
-  if (selectedBookId.value === null) return;
+  const bookId = selectedBookId.value;
+  const generation = ++bookRequestGeneration;
+  holdings.value = null;
+  trades.value = [];
+  if (bookId === null) return;
   loading.value = true;
   actionError.value = null;
   try {
     const [holdingsResult, tradesResult] = await Promise.all([
-      fetchPositionBookHoldings(selectedBookId.value),
-      fetchPositionTrades(selectedBookId.value),
+      fetchPositionBookHoldings(bookId),
+      fetchPositionTrades(bookId),
     ]);
+    if (generation !== bookRequestGeneration || bookId !== selectedBookId.value) return;
     holdings.value = holdingsResult;
     trades.value = tradesResult;
   } catch (error) {
+    if (generation !== bookRequestGeneration) return;
     actionError.value = error instanceof Error ? error.message : "持仓读取失败";
   } finally {
-    loading.value = false;
+    if (generation === bookRequestGeneration) loading.value = false;
   }
 }
 
@@ -177,38 +209,48 @@ async function handleCreateBook() {
 }
 
 async function handleRecordTrade() {
-  if (selectedBookId.value === null) return;
+  const bookId = selectedBookId.value;
+  if (bookId === null || recordingTrade.value) return;
   const symbol = tradeForm.symbol.trim();
   const quantity = Number(tradeForm.quantity);
-  if (!symbol || !Number.isFinite(quantity) || quantity <= 0 || !tradeForm.price) {
+  if (!symbol || !Number.isSafeInteger(quantity) || quantity <= 0 || !tradeForm.price) {
     actionError.value = "请完整填写代码、数量（正整数）和价格。";
     return;
   }
   recordingTrade.value = true;
   actionError.value = null;
+  const payload = {
+    side: tradeForm.side,
+    symbol,
+    quantity,
+    price: tradeForm.price,
+    fee: tradeForm.fee || "0",
+    trade_date: tradeForm.trade_date,
+  };
+  const fingerprint = JSON.stringify({ bookId, ...payload });
+  if (fingerprint !== tradeRequestFingerprint) {
+    tradeIdempotencyKey = null;
+    tradeRequestFingerprint = fingerprint;
+  }
   try {
     tradeIdempotencyKey = tradeIdempotencyKey ?? crypto.randomUUID();
     await createPositionTrade(
-      selectedBookId.value,
-      {
-        side: tradeForm.side,
-        symbol,
-        quantity,
-        price: tradeForm.price,
-        fee: tradeForm.fee || "0",
-        trade_date: tradeForm.trade_date,
-      },
+      bookId,
+      payload,
       tradeIdempotencyKey,
     );
     tradeIdempotencyKey = null;
-    notice.value = `已记录${tradeForm.side === "buy" ? "买入" : "卖出"} ${symbol} ${quantity} 股。`;
+    tradeRequestFingerprint = null;
+    if (bookId !== selectedBookId.value) return;
+    notice.value = `已记录${payload.side === "buy" ? "买入" : "卖出"} ${symbol} ${quantity} 股。`;
     tradeForm.symbol = "";
     tradeForm.price = "";
     await refreshBookData();
   } catch (error) {
-    // 请求失败后换新幂等键：用户修改表单重试时不应撞上同键不同请求的 409。
-    tradeIdempotencyKey = null;
-    actionError.value = error instanceof Error ? error.message : "记账失败";
+    // 响应丢失时提交结果未知；相同账本和请求重试必须继续使用原键。
+    if (bookId === selectedBookId.value) {
+      actionError.value = error instanceof Error ? error.message : "记账失败";
+    }
   } finally {
     recordingTrade.value = false;
   }
@@ -228,23 +270,27 @@ async function handleDeleteTrade(tradeId: number) {
 }
 
 async function handleFetchDrift() {
+  const bookId = selectedBookId.value;
+  const generation = ++driftRequestGeneration;
   const planId = Number(driftPlanId.value);
-  if (!Number.isFinite(planId) || planId <= 0 || selectedBookId.value === null) {
+  if (!Number.isFinite(planId) || planId <= 0 || bookId === null) {
     actionError.value = "偏离检测需要组合草案 ID 和已选账本。";
     return;
   }
   driftLoading.value = true;
   actionError.value = null;
   try {
-    drift.value = await fetchPortfolioPlanDrift(planId, {
-      positionBookId: selectedBookId.value,
+    const result = await fetchPortfolioPlanDrift(planId, {
+      positionBookId: bookId,
       threshold: driftThreshold.value || "0.02",
     });
+    if (generation === driftRequestGeneration) drift.value = result;
   } catch (error) {
+    if (generation !== driftRequestGeneration) return;
     drift.value = null;
     actionError.value = error instanceof Error ? error.message : "偏离检测失败";
   } finally {
-    driftLoading.value = false;
+    if (generation === driftRequestGeneration) driftLoading.value = false;
   }
 }
 
@@ -291,7 +337,7 @@ onMounted(() => {
     <div class="lookup-row book-bar">
       <div class="book-select">
         <label>持仓账本</label>
-        <select v-model="selectedBookId" :disabled="books.length === 0" @change="refreshBookData">
+        <select v-model="selectedBookId" :disabled="books.length === 0 || savingBook || recordingTrade" @change="refreshBookData">
           <option v-if="books.length === 0" :value="null">暂无账本</option>
           <option v-for="book in books" :key="book.id" :value="book.id">
             #{{ book.id }} {{ book.name }}（现金 {{ formatNumber(book.cash) }}）

@@ -1,12 +1,19 @@
 """Bulk reads for the read-only price/value research screen."""
 
-from datetime import date
+from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 from sqlalchemy.orm import Session
 
 from app.models.factor import FactorRun, FactorValue
-from app.models.market import DailyBar, Security, TradingCalendar, ValuationSnapshot
+from app.models.fundamental import FinancialStatement
+from app.models.market import (
+    AdjustmentFactor,
+    DailyBar,
+    Security,
+    TradingCalendar,
+    ValuationSnapshot,
+)
 from app.models.raw import ImportBatch, RawVendorSnapshot
 from app.models.strategy import BacktestRun
 from app.models.system import JobLog
@@ -14,6 +21,74 @@ from app.models.trade import PaperAccount, PaperAccountEquitySnapshot
 
 
 class PriceValueScreenRepository:
+    def freshness_calendar(self, db: Session, *, today: date) -> list[dict]:
+        return [dict(row._mapping) for row in db.execute(
+            select(TradingCalendar.exchange, TradingCalendar.trade_date, TradingCalendar.is_open)
+            .where(TradingCalendar.trade_date.between(today - timedelta(days=32), today))
+        )]
+
+    def diagnostic_inputs(
+        self, db: Session, *, trade_date: date, financial_as_of: date | None = None,
+    ) -> dict:
+        financial_date = financial_as_of or trade_date
+        sessions = {}
+        for exchange in ("SH", "SZ", "BJ"):
+            sessions[exchange] = sorted(db.scalars(
+                select(TradingCalendar.trade_date).where(
+                    TradingCalendar.exchange == exchange,
+                    TradingCalendar.trade_date <= trade_date,
+                    TradingCalendar.is_open.is_(True),
+                ).order_by(TradingCalendar.trade_date.desc()).limit(21)
+            ))
+        start = min((days[0] for days in sessions.values() if days), default=trade_date)
+        calendar = {(r.exchange, r.trade_date): r.is_open for r in db.execute(
+            select(TradingCalendar.exchange, TradingCalendar.trade_date, TradingCalendar.is_open)
+            .where(TradingCalendar.trade_date.between(start, trade_date))
+        )}
+        for exchange, days in sessions.items():
+            if not days or any(
+                len({calendar.get((venue, days[0] + timedelta(days=offset)))
+                     for venue in ("SH", "SZ", "BJ")}) != 1
+                or calendar.get((exchange, days[0] + timedelta(days=offset))) is None
+                for offset in range((trade_date - days[0]).days + 1)
+            ):
+                sessions[exchange] = []
+        price_columns = (
+            DailyBar.id, DailyBar.symbol, DailyBar.trade_date, DailyBar.close, DailyBar.amount,
+            DailyBar.adjust_type, DailyBar.source_name, DailyBar.quality_status,
+            DailyBar.is_suspect, DailyBar.is_suspended, DailyBar.updated_at,
+        )
+        prices = [dict(row._mapping) for row in db.execute(select(*price_columns).where(
+            DailyBar.trade_date.between(start, trade_date),
+            DailyBar.adjust_type.in_(("none", "qfq")), DailyBar.security_type == "stock",
+        ))]
+        factors = [dict(row._mapping) for row in db.execute(select(
+            AdjustmentFactor.id, AdjustmentFactor.symbol, AdjustmentFactor.trade_date,
+            AdjustmentFactor.factor, AdjustmentFactor.source_name, AdjustmentFactor.version,
+            AdjustmentFactor.release_id, AdjustmentFactor.quality_status,
+            AdjustmentFactor.updated_at,
+        ).where(AdjustmentFactor.trade_date.between(start, trade_date),
+                AdjustmentFactor.adjust_type == "qfq"))]
+        financial = [dict(row._mapping) for row in db.execute(select(
+            FinancialStatement.id, FinancialStatement.symbol, FinancialStatement.statement_type,
+            FinancialStatement.period_end, FinancialStatement.report_date,
+            FinancialStatement.currency, FinancialStatement.source_name,
+            # Preserve JSON decimal tokens: the ORM JSON loader creates binary
+            # floats, which the exact financial evidence contract rejects.
+            cast(FinancialStatement.metrics, String).label("metrics"),
+            FinancialStatement.created_at,
+            FinancialStatement.updated_at,
+        ).where(
+            FinancialStatement.report_date <= financial_date,
+            FinancialStatement.period_end.between(
+                date(financial_date.year - 3, 1, 1), financial_date,
+            ),
+            FinancialStatement.currency == "CNY",
+            FinancialStatement.statement_type.in_(("income", "cash_flow")),
+        ))]
+        return {"sessions": sessions, "prices": prices, "adjustments": factors,
+                "financial_rows": financial}
+
     def validated_raw_hashes(
         self, db: Session, *, batch_id: int,
         dataset: str = "price_value_valuation_observation",

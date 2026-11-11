@@ -34,7 +34,8 @@ def test_exact_three_year_totals_but_old_annual_is_not_october_ttm():
     assert result["ocf_profit_3y"].known_on == date(2026, 10, 2)
     assert result["ocf_profit_3y"].valid_through == DAY
     assert len(json.loads(result["ocf_profit_3y"].source_ref)) == 6
-    assert set(result) == {"net_income_sum_3y", "ocf_profit_3y"}
+    assert set(result) == {"net_income_sum_3y", "ocf_profit_3y",
+                           "net_income_positive_years_3y", "net_income_min_3y"}
 
 
 def test_cumulative_ttm_and_decimal_json_precision():
@@ -42,6 +43,35 @@ def test_cumulative_ttm_and_decimal_json_precision():
                         row(2025, "cash_flow", "50", month=6)]
     rows[-2]["metrics"] = '{"act_cash_flow_net":80.123456789123}'
     assert financial_metrics(rows, DAY)["ocf_ttm"].value == Decimal("150.123456789123")
+
+
+@pytest.mark.parametrize("latest,expected_positive", [("-1", 2), ("0", 2), ("1", 3)])
+def test_annual_profit_continuity_does_not_hide_one_bad_year(latest, expected_positive):
+    rows = annuals()
+    for item in rows:
+        if item["statement_type"] == "income" and item["period_end"].year == 2025:
+            item["metrics"] = {"net_profit": latest}
+    result = financial_metrics(rows, DAY)
+    assert result["net_income_sum_3y"].value > 0
+    assert result["net_income_positive_years_3y"].value == expected_positive
+    assert result["net_income_min_3y"].value == Decimal(latest)
+    assert len(json.loads(result["net_income_min_3y"].source_ref)) == 3
+
+
+def test_annual_profit_continuity_requires_all_fixed_years_and_exact_values():
+    rows = annuals()
+    rows[0]["metrics"] = '{"net_profit":0.000000000000123456789}'
+    result = financial_metrics(rows, DAY)
+    assert result["net_income_positive_years_3y"].value == 3
+    assert result["net_income_min_3y"].value == Decimal("0.000000000000123456789")
+    for bad_rows in (
+        rows[1:],
+        [dict(r, updated_at=date(2026, 10, 29)) if r is rows[0] else r for r in rows],
+        rows + [dict(rows[0], id="conflict", metrics={"net_profit": "2"})],
+    ):
+        bad = financial_metrics(bad_rows, DAY)
+        assert "net_income_positive_years_3y" not in bad
+        assert "net_income_min_3y" not in bad
 
 
 def test_no_missing_year_backfill_or_incomplete_ttm_fallback():
@@ -133,3 +163,58 @@ def test_nonpositive_profit_no_ratio_and_multiple_symbols_rejected():
     assert "ocf_profit_3y" not in result
     with pytest.raises(ValueError, match="one nonblank symbol"):
         financial_metrics(rows + [dict(rows[0], symbol="BBB")], DAY)
+
+
+def test_profit_ttm_exact_formula_and_three_contributing_sources():
+    rows = annuals() + [row(2026, "income", "60.123456789123", month=6),
+                        row(2025, "income", "80", month=6)]
+    result = financial_metrics(rows, DAY)["net_income_ttm"]
+    assert result.value == Decimal("80.123456789123")
+    assert len(json.loads(result.source_ref)) == 3
+    assert result.known_on == date(2026, 10, 2)
+    assert result.valid_through == DAY
+
+
+@pytest.mark.parametrize("bad", [None, True, 1.0, "NaN", "Infinity", "bad"])
+def test_latest_disclosed_income_missing_profit_never_uses_older_quarter(bad):
+    rows = annuals() + [row(2026, "income", "80", month=6),
+                        row(2025, "income", "50", month=6),
+                        row(2026, "income", bad, month=9),
+                        row(2025, "income", "60", month=9)]
+    assert "net_income_ttm" not in financial_metrics(rows, DAY)
+
+
+def test_latest_income_missing_comparable_conflicting_or_future_is_not_certified():
+    rows = annuals() + [row(2026, "income", "80", month=6),
+                        row(2025, "income", "50", month=6),
+                        row(2026, "income", "90", month=9)]
+    assert "net_income_ttm" not in financial_metrics(rows, DAY)
+    rows.append(row(2025, "income", "60", month=9))
+    result = financial_metrics(rows, DAY)["net_income_ttm"]
+    assert result.value == 130
+    assert any("income-2026-09-30" in ref for ref in json.loads(result.source_ref))
+    for change in ({"metrics": {"net_profit": "91"}, "id": "conflict"},
+                   {"metrics": {}, "id": "missing-version"}):
+        assert "net_income_ttm" not in financial_metrics(rows + [dict(rows[-2], **change)], DAY)
+    rows[-2]["updated_at"] = date(2026, 10, 29)
+    # Future revision cannot be used; an observed H1 remains available today.
+    result = financial_metrics(rows, DAY)["net_income_ttm"]
+    assert result.value == 130
+    assert all("income-2026-09-30" not in ref for ref in json.loads(result.source_ref))
+
+
+@pytest.mark.parametrize("day,month,expected", [
+    (date(2026, 4, 29), None, True), (date(2026, 4, 30), None, False),
+    (date(2026, 4, 30), 3, True), (date(2026, 8, 30), 3, True),
+    (date(2026, 8, 31), 3, False), (date(2026, 8, 31), 6, True),
+    (date(2026, 10, 30), 6, True), (date(2026, 10, 31), 6, False),
+    (date(2026, 10, 31), 9, True),
+])
+def test_profit_ttm_disclosure_cutoffs(day, month, expected):
+    rows = [row(2025, "income", "100")]
+    if month:
+        rows += [row(2026, "income", "60", month=month),
+                 row(2025, "income", "50", month=month)]
+    for item in rows:
+        item["created_at"] = item["updated_at"] = item["report_date"]
+    assert ("net_income_ttm" in financial_metrics(rows, day)) == expected

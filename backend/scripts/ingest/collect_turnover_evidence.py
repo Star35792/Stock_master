@@ -24,11 +24,12 @@ def main() -> int:
         with SessionLocal() as db:
             service = TurnoverEvidenceService()
             result = (
-                service.collect_with_fallback(
-                    db, trade_date=args.trade_date, symbol=args.symbol
-                ) if args.source == "auto" else
-                service.collect_day(
-                    db, source=args.source, trade_date=args.trade_date,
+                service.collect_with_fallback(db, trade_date=args.trade_date, symbol=args.symbol)
+                if args.source == "auto"
+                else service.collect_day(
+                    db,
+                    source=args.source,
+                    trade_date=args.trade_date,
                     symbol=args.symbol,
                 )
             )

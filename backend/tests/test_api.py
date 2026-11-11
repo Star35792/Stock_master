@@ -99,6 +99,7 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/strategy-research/factor-selection/backtests" in paths
     assert "/api/v1/strategy-research/factor-selection/backtests/batch" in paths
     assert "/api/v1/strategy-research/rolling-windows" in paths
+    assert "/api/v1/strategy-research/price-value/screen/tracking" in paths
     assert "/api/v1/backtests/runs/drift" in paths
     assert "/api/v1/operations/overview" in paths
     assert "/api/v1/operations/alerts" in paths
@@ -118,6 +119,23 @@ def test_openapi_contains_v1_routes() -> None:
     assert "/api/v1/paper-execution-approvals/{approval_id}/executions" in paths
     assert "/api/v1/paper-execution-approvals/{approval_id}/execution" in paths
     assert "/api/v1/paper-executions/{execution_id}" in paths
+
+
+def test_price_value_tracking_returns_frozen_observation(monkeypatch) -> None:
+    expected = {
+        "version": "price_value_forward_observation_v1",
+        "status": "pending",
+        "reason_codes": ["entry_session_pending"],
+        "pools": {},
+    }
+    monkeypatch.setattr(
+        strategy_research_module.price_value_tracking_service,
+        "latest",
+        lambda db: expected,
+    )
+    response = client.get("/api/v1/strategy-research/price-value/screen/tracking")
+    assert response.status_code == 200
+    assert response.json() == expected
 
 
 def test_list_chart_daily_bars_uses_latest_consumable_contract(monkeypatch) -> None:
@@ -947,7 +965,9 @@ def test_operations_failure_rerun_plan_forwards_type_and_id(monkeypatch) -> None
     response = client.get("/api/v1/operations/failures/data_quality_issue/2/rerun-plan")
 
     assert response.status_code == 200
-    assert captured == {"failure_type": "data_quality_issue", "failure_id": 2}
+    assert captured["failure_type"] == "data_quality_issue"
+    assert captured["failure_id"] == 2
+    assert captured["research_db"] is not None
 
 
 def test_operations_failure_rerun_plan_maps_missing_to_404(monkeypatch) -> None:
@@ -1468,9 +1488,25 @@ def test_list_factor_profile_summaries_forwards_filters(monkeypatch) -> None:
 
 
 def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
+    from app.factors.profile_evidence import build_profile_evidence_identity
     from app.services.factor_batch_profiler import FactorProfileSummary
 
     captured_query: dict = {}
+    trade_date_sha256 = "d" * 64
+    identity = build_profile_evidence_identity(
+        release_tag="release-a",
+        factor_snapshot_sha256="f" * 64,
+        price_snapshot_sha256="e" * 64,
+        trade_date_sha256=trade_date_sha256,
+        requested_start_date=date(2024, 1, 2),
+        requested_end_date=date(2025, 12, 31),
+        start_date=date(2024, 1, 2),
+        end_date=date(2025, 12, 31),
+        trade_date_count=250,
+        factor_name="ret_1d",
+        factor_version="v1-qfq",
+        code_version="code-a",
+    )
 
     def fake_summarize(db, **kwargs):
         captured_query.update(kwargs)
@@ -1496,7 +1532,10 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
                     endpoint_observation_count=250,
                     pit_status="point_in_time",
                     evidence_eligibility="strategy_eligible",
-                    evidence_eligibility_reason="verified PIT evidence",
+                    evidence_eligibility_reason=identity,
+                    evidence_eligibility_count=1,
+                    evidence_identity_count=1,
+                    trade_date_sha256=trade_date_sha256,
                 )
             ],
             1,
@@ -1523,6 +1562,8 @@ def test_classify_factor_pool_forwards_thresholds(monkeypatch) -> None:
     assert body[0]["pool"] == "core"
     assert body[0]["category"] == "price_volume_risk"
     assert body[0]["summary"]["rank_ic_1d_observation_count"] == 250
+    assert body[0]["summary"]["evidence_identity_valid"] is True
+    assert body[0]["summary"]["evidence_identity_release_tag"] == "release-a"
     assert body[0]["summary"]["rank_ic_5d_observation_count"] == 250
     assert body[0]["summary"]["rank_ic_20d_observation_count"] == 250
     assert captured_query["start_date"] == date(2024, 1, 2)

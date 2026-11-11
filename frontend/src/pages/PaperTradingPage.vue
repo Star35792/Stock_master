@@ -8,7 +8,7 @@ import {
   LockKeyhole,
   ShieldCheck,
 } from "@lucide/vue";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import {
   fetchPaperAccountPerformance,
@@ -82,9 +82,16 @@ const paperPositions = ref<PaperPositions | null>(null);
 const paperPerformance = ref<PaperPerformance | null>(null);
 const positionsLoading = ref(false);
 const positionsError = ref<string | null>(null);
+let analysisGeneration = 0;
+onBeforeUnmount(() => { analysisGeneration += 1; });
 
 async function loadPaperAnalysis() {
+  const generation = ++analysisGeneration;
   const id = Number(accountId.value);
+  paperPositions.value = null;
+  paperPerformance.value = null;
+  positionsError.value = null;
+  positionsLoading.value = false;
   if (!Number.isFinite(id) || id <= 0) {
     paperPositions.value = null;
     paperPerformance.value = null;
@@ -93,18 +100,22 @@ async function loadPaperAnalysis() {
   positionsLoading.value = true;
   positionsError.value = null;
   try {
-    [paperPositions.value, paperPerformance.value] = await Promise.all([
+    const [positions, performance] = await Promise.all([
       fetchPaperAccountPositions(id),
       fetchPaperAccountPerformance(id),
     ]);
+    if (generation !== analysisGeneration) return;
+    paperPositions.value = positions;
+    paperPerformance.value = performance;
   } catch (error) {
+    if (generation !== analysisGeneration) return;
     positionsError.value = error instanceof Error ? error.message : "模拟盘持仓读取失败";
   } finally {
-    positionsLoading.value = false;
+    if (generation === analysisGeneration) positionsLoading.value = false;
   }
 }
 
-watch(accountId, () => void loadPaperAnalysis());
+watch(accountId, () => void loadPaperAnalysis(), { flush: "sync" });
 
 function pnlTone(value: string | null): string {
   if (value === null) return "";

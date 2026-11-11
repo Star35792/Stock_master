@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -12,6 +14,7 @@ from scripts.ingest.prepare_quality_value_financials import (
     fetch_symbol,
     replay_phase,
     required_periods,
+    save_report,
 )
 
 
@@ -92,3 +95,21 @@ def test_empty_or_old_rows_are_not_complete(db):
         date(2025, 12, 31),
     }
     assert len(required_periods(date(2026, 10, 28), "quarterly")) == 7
+
+
+def test_report_retries_transient_windows_reader_lock(tmp_path, monkeypatch):
+    output = tmp_path / 'report.json'
+    original = Path.replace
+    attempts = []
+
+    def replace(path, target):
+        attempts.append(path)
+        if len(attempts) == 1:
+            raise PermissionError('transient reader handle')
+        return original(path, target)
+
+    monkeypatch.setattr(Path, 'replace', replace)
+    report = {'status': 'running', 'symbols': []}
+    save_report(output, report)
+    assert len(attempts) == 2
+    assert json.loads(output.read_text(encoding='utf-8'))['status'] == 'running'

@@ -390,7 +390,7 @@ def _metrics_sql(factors: list[str]) -> str:
             {avp},
             {"beta_60" if "beta_60" in wanted else _NULL_DOUBLE + " AS beta_60"},
             {residual_expr} AS residual_volatility_60
-        FROM {'scored' if needs_market else 'numbered'}
+        FROM {"scored" if needs_market else "numbered"}
         {_WINDOW_CLAUSE}
     """
 

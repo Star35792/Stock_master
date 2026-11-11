@@ -60,8 +60,14 @@ import duckdb
 
 from app.config.settings import settings
 from app.database.session import SessionLocal
+from app.factors.profile_evidence import (
+    build_parquet_content_snapshot,
+    build_profile_evidence_identity,
+    hash_trade_dates,
+)
 from app.factors.quantile_diagnostics import prepare_tie_aware_quantiles
 from app.repositories.factor import FactorProfileRepository
+from app.repositories.lake import ReleaseRepository
 from app.repositories.warm_layer import WarmLayerStore
 
 HORIZONS = (1, 5, 20)
@@ -88,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--warm-root", default=None)
     parser.add_argument("--curated-root", default="data/warm/curated")
-    parser.add_argument("--code-version", default="local")
+    parser.add_argument("--code-version", default=settings.app_code_version)
     parser.add_argument("--out", help="聚合证据表落盘路径")
     parser.add_argument("--no-persist", action="store_true", help="只出报告不落库")
     return parser
@@ -219,13 +225,31 @@ def _load_daily_ic(
         """
     ).fetchall()
     keys = [
-        "factor_name", "trade_date", "universe_size", "observation_count",
-        "ic_1d", "rank_ic_1d", "ic_5d", "rank_ic_5d", "ic_20d", "rank_ic_20d",
-        "mean_value", "sd_value", "min_value", "max_value",
-        "p01_value", "p99_value", "extreme_count",
-        "top_q_1d", "bottom_q_1d", "top_q_5d", "bottom_q_5d",
-        "top_q_20d", "bottom_q_20d",
-        "monotonicity_1d", "top_quantile_turnover",
+        "factor_name",
+        "trade_date",
+        "universe_size",
+        "observation_count",
+        "ic_1d",
+        "rank_ic_1d",
+        "ic_5d",
+        "rank_ic_5d",
+        "ic_20d",
+        "rank_ic_20d",
+        "mean_value",
+        "sd_value",
+        "min_value",
+        "max_value",
+        "p01_value",
+        "p99_value",
+        "extreme_count",
+        "top_q_1d",
+        "bottom_q_1d",
+        "top_q_5d",
+        "bottom_q_5d",
+        "top_q_20d",
+        "bottom_q_20d",
+        "monotonicity_1d",
+        "top_quantile_turnover",
     ]
     return [dict(zip(keys, row, strict=True)) for row in rows]
 
@@ -265,9 +289,7 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
             for kind in ("ic", "rank_ic"):
                 values = [
                     cleaned
-                    for cleaned in (
-                        _clean(r.get(f"{kind}_{horizon}")) for r in rows
-                    )
+                    for cleaned in (_clean(r.get(f"{kind}_{horizon}")) for r in rows)
                     if cleaned is not None
                 ]
                 if not values:
@@ -294,9 +316,7 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
                 round(sum(spreads) / len(spreads), 6) if spreads else None
             )
             entry[f"top_minus_bottom_{horizon}_positive_rate"] = (
-                round(sum(1 for s in spreads if s > 0) / len(spreads), 4)
-                if spreads
-                else None
+                round(sum(1 for s in spreads if s > 0) / len(spreads), 4) if spreads else None
             )
         monotonicity = [
             cleaned
@@ -314,9 +334,7 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
         entry["mean_top_quantile_turnover"] = (
             round(sum(turnover) / len(turnover), 6) if turnover else None
         )
-        entry["avg_universe"] = round(
-            sum(int(r["universe_size"]) for r in rows) / len(rows), 1
-        )
+        entry["avg_universe"] = round(sum(int(r["universe_size"]) for r in rows) / len(rows), 1)
         summary.append(entry)
     return summary
 
@@ -330,7 +348,13 @@ def _spread(row: dict[str, object], horizon: str) -> Decimal | None:
     return _quantize(top - bottom)
 
 
-def _persist(session, daily: list[dict[str, object]], version: str, code_version: str) -> int:
+def _persist(
+    session,
+    daily: list[dict[str, object]],
+    version: str,
+    code_version: str,
+    evidence_identities: dict[str, str],
+) -> int:
     """Persist the daily evidence into ``factor.factor_profile``.
 
     Uses :meth:`FactorProfileRepository.upsert` rather than ``session.merge``:
@@ -341,12 +365,14 @@ def _persist(session, daily: list[dict[str, object]], version: str, code_version
     repository = FactorProfileRepository()
     written = 0
     for row in daily:
+        factor_name = str(row["factor_name"])
+        identity = evidence_identities.get(factor_name)
         universe = int(row["universe_size"])
         observed = int(row["observation_count"])
         coverage = Decimal(observed) / Decimal(universe) if universe else Decimal("0")
         repository.upsert(
             session,
-            factor_name=str(row["factor_name"]),
+            factor_name=factor_name,
             factor_version=version,
             trade_date=row["trade_date"],
             universe_size=universe,
@@ -376,36 +402,143 @@ def _persist(session, daily: list[dict[str, object]], version: str, code_version
             top_quantile_turnover=_quantize(row.get("top_quantile_turnover")),
             # This flag certifies the input provenance, not the strategy's
             # out-of-sample performance or the backtest universe.
-            evidence_eligibility="strategy_eligible",
+            evidence_eligibility=(
+                "strategy_eligible" if identity is not None else "research_only"
+            ),
             evidence_eligibility_reason=(
-                "warm price-volume inputs use only trusted historical market observations"
+                identity
+                or "incomplete_profile_dates: expected QFQ date set was not fully profiled"
             ),
             code_version=code_version,
         )
         written += 1
-    session.commit()
     return written
+
+
+def _capture_source_snapshots(
+    store: WarmLayerStore,
+    *,
+    release_tag: str,
+    curated_prices: Path,
+    expected_price_checksum: str,
+) -> dict[str, object]:
+    factor_roots = store.table_globs("factor", "factor_value", release_tag)
+    factor_sources: list[tuple[str, Path]] = []
+    exported_root = (store.warm_root / "exported").resolve()
+    for index, root in enumerate(factor_roots):
+        resolved = root.resolve()
+        try:
+            source_release = resolved.relative_to(exported_root).parts[0]
+        except (ValueError, IndexError):
+            source_release = resolved.parent.parent.name
+        factor_sources.append((f"{index}:{source_release}", resolved))
+    factor_snapshot = build_parquet_content_snapshot(factor_sources)
+    price_snapshot = build_parquet_content_snapshot(
+        [("prices_qfq", curated_prices.resolve())]
+    )
+    actual_price_checksum = str(price_snapshot.source_checksums[0]["sha256"])
+    if actual_price_checksum != expected_price_checksum:
+        raise ValueError(
+            "curated prices_qfq content does not match the active trusted release: "
+            f"actual={actual_price_checksum}, expected={expected_price_checksum}"
+        )
+    return {
+        "factor": factor_snapshot,
+        "prices_qfq": price_snapshot,
+    }
+
+
+def _build_evidence_identities(
+    daily: list[dict[str, object]],
+    *,
+    expected_trade_dates: list[date],
+    requested_start_date: date,
+    requested_end_date: date,
+    release_tag: str,
+    factor_version: str,
+    code_version: str,
+    factor_snapshot_sha256: str,
+    price_snapshot_sha256: str,
+) -> dict[str, str]:
+    expected = sorted(set(expected_trade_dates))
+    if not expected:
+        return {}
+    actual_by_factor: dict[str, set[date]] = {}
+    for row in daily:
+        actual_by_factor.setdefault(str(row["factor_name"]), set()).add(row["trade_date"])
+    expected_set = set(expected)
+    identities: dict[str, str] = {}
+    for factor_name, actual_dates in actual_by_factor.items():
+        if actual_dates != expected_set:
+            continue
+        identities[factor_name] = build_profile_evidence_identity(
+            release_tag=release_tag,
+            factor_snapshot_sha256=factor_snapshot_sha256,
+            price_snapshot_sha256=price_snapshot_sha256,
+            trade_date_sha256=hash_trade_dates(actual_dates),
+            requested_start_date=requested_start_date,
+            requested_end_date=requested_end_date,
+            start_date=expected[0],
+            end_date=expected[-1],
+            trade_date_count=len(expected),
+            factor_name=factor_name,
+            factor_version=factor_version,
+            code_version=code_version,
+        )
+    return identities
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    store = (
-        WarmLayerStore(args.warm_root) if args.warm_root else WarmLayerStore()
-    )
+    store = WarmLayerStore(args.warm_root) if args.warm_root else WarmLayerStore()
     tag = args.release_tag or settings.research_release_tag or store.latest_release_tag
+    if not tag:
+        print("no complete warm-layer release; aborting")
+        return 1
     base = store.base_release_tag_for(tag) if tag else None
     if base:
-        store = WarmLayerStore(
-            args.warm_root or store.warm_root, base_release_tag=base
+        store = WarmLayerStore(args.warm_root or store.warm_root, base_release_tag=base)
+    curated = (Path(args.curated_root) / "prices_qfq").resolve()
+    with SessionLocal() as db:
+        active_price_release = ReleaseRepository().get_active(
+            db, dataset="prices_qfq"
         )
+    if (
+        active_price_release is None
+        or active_price_release.quality_status != "trusted"
+        or not active_price_release.is_active
+    ):
+        print("active trusted prices_qfq release missing; aborting")
+        return 1
+    price_release = {
+        "release_id": active_price_release.release_id,
+        "checksum": active_price_release.checksum,
+        "quality_status": active_price_release.quality_status,
+    }
+    try:
+        source_snapshot_before = _capture_source_snapshots(
+            store,
+            release_tag=tag,
+            curated_prices=curated,
+            expected_price_checksum=str(price_release["checksum"]),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"source snapshot rejected: {exc}")
+        return 1
+
     # Parquet-only: leaves the control-plane file handle free for ORM writes.
     con = store.connect(release_tag=tag, read_only=True, attach_control=False)
-    curated = Path(args.curated_root) / "prices_qfq"
     prices_glob = f"{curated.as_posix()}/**/*.parquet"
     try:
         daily = _load_daily_ic(
             con, prices_glob, args.start_date, args.end_date, args.factor_version
         )
+        expected_trade_dates = [
+            row[0]
+            for row in con.execute(
+                "SELECT DISTINCT trade_date FROM px ORDER BY trade_date"
+            ).fetchall()
+        ]
     finally:
         con.close()
 
@@ -413,12 +546,71 @@ def main(argv: list[str] | None = None) -> int:
         print("no observations; aborting")
         return 1
 
+    try:
+        source_snapshot_after = _capture_source_snapshots(
+            store,
+            release_tag=tag,
+            curated_prices=curated,
+            expected_price_checksum=str(price_release["checksum"]),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"post-compute source snapshot rejected: {exc}")
+        return 1
+    with SessionLocal() as db:
+        active_price_release_after = ReleaseRepository().get_active(
+            db, dataset="prices_qfq"
+        )
+    if (
+        active_price_release_after is None
+        or active_price_release_after.release_id != price_release["release_id"]
+        or active_price_release_after.checksum != price_release["checksum"]
+        or active_price_release_after.quality_status != "trusted"
+        or not active_price_release_after.is_active
+    ):
+        print("active prices_qfq release changed during computation; aborting")
+        return 1
+    before_factor = source_snapshot_before["factor"]
+    before_prices = source_snapshot_before["prices_qfq"]
+    after_factor = source_snapshot_after["factor"]
+    after_prices = source_snapshot_after["prices_qfq"]
+    if (
+        before_factor.sha256 != after_factor.sha256
+        or before_prices.sha256 != after_prices.sha256
+    ):
+        print("input Parquet content changed during computation; aborting without writes")
+        return 1
+
+    evidence_identities = _build_evidence_identities(
+        daily,
+        expected_trade_dates=expected_trade_dates,
+        requested_start_date=args.start_date,
+        requested_end_date=args.end_date,
+        release_tag=tag,
+        factor_version=args.factor_version,
+        code_version=args.code_version,
+        factor_snapshot_sha256=before_factor.sha256,
+        price_snapshot_sha256=before_prices.sha256,
+    )
+
     summary = _aggregate(daily)
     payload = {
         "generated_at": datetime.now(UTC).isoformat(),
         "window": [str(args.start_date), str(args.end_date)],
         "factor_version": args.factor_version,
         "release_tag": tag,
+        "price_release": price_release,
+        "source_snapshots": {
+            "factor": before_factor.as_dict(),
+            "prices_qfq": before_prices.as_dict(),
+            "post_compute_verified": True,
+        },
+        "expected_trade_dates": {
+            "count": len(expected_trade_dates),
+            "first": expected_trade_dates[0].isoformat(),
+            "last": expected_trade_dates[-1].isoformat(),
+            "sha256": hash_trade_dates(expected_trade_dates),
+        },
+        "evidence_identities": evidence_identities,
         "daily_rows": len(daily),
         "caveats": [
             "universe excludes symbols with corporate actions in the window",
@@ -463,15 +655,28 @@ def main(argv: list[str] | None = None) -> int:
             f"{_fmt(item['mean_top_quantile_turnover']):>10}"
         )
 
+    report_path = Path(args.out) if args.out else Path("outputs") / (
+        "factor_evidence_"
+        f"{args.factor_version}_{args.start_date}_{args.end_date}_"
+        f"{before_factor.sha256[:12]}.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"已落盘: {report_path}")
+
     if not args.no_persist:
         with SessionLocal() as db:
-            written = _persist(db, daily, args.factor_version, args.code_version)
+            written = _persist(
+                db,
+                daily,
+                args.factor_version,
+                args.code_version,
+                evidence_identities,
+            )
+            db.commit()
         print(f"\n已写入 factor.factor_profile: {written:,} 行")
-    if args.out:
-        Path(args.out).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        print(f"已落盘: {args.out}")
     return 0
 
 

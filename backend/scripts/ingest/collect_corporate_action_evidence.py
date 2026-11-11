@@ -24,9 +24,14 @@ def main() -> int:
         initialize_database()
         with SessionLocal() as db:
             service = CorporateActionEvidenceService()
-            symbols = [args.symbol] if args.symbol else service.pending_symbols(
-                db, source="akshare" if args.source == "auto" else args.source,
-                limit=args.limit,
+            symbols = (
+                [args.symbol]
+                if args.symbol
+                else service.pending_symbols(
+                    db,
+                    source="akshare" if args.source == "auto" else args.source,
+                    limit=args.limit,
+                )
             )
             outcomes = []
             for symbol in symbols:

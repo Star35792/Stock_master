@@ -6,6 +6,8 @@ from app.models.strategy.backtest import (
     BacktestTradeRecord,
     TrainingArtifact,
 )
+from app.models.strategy.definition import StrategyDefinition
+from app.models.strategy.external_observation import ExternalObservation
 
 __all__ = [
     "BacktestEquity",
@@ -13,5 +15,7 @@ __all__ = [
     "BacktestPerformance",
     "BacktestRun",
     "BacktestTradeRecord",
+    "ExternalObservation",
+    "StrategyDefinition",
     "TrainingArtifact",
 ]

@@ -134,6 +134,17 @@ def main() -> int:
                     "pit_status": c.summary.pit_status,
                     "evidence_eligibility": c.summary.evidence_eligibility,
                     "evidence_eligibility_reason": c.summary.evidence_eligibility_reason,
+                    "evidence_eligibility_count": (
+                        c.summary.evidence_eligibility_count
+                    ),
+                    "evidence_identity_count": c.summary.evidence_identity_count,
+                    "evidence_identity_valid": (
+                        c.summary.has_consistent_evidence_identity
+                    ),
+                    "evidence_identity_release_tag": (
+                        c.summary.evidence_identity_release_tag
+                    ),
+                    "trade_date_sha256": c.summary.trade_date_sha256,
                 },
             }
             for c in classifications

@@ -7,6 +7,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.database.base import Base
+from app.factors.profile_evidence import (
+    build_profile_evidence_identity,
+    hash_trade_dates,
+)
 from app.models.factor import FactorProfile
 from app.services import FactorBatchProfilerService, FactorCrossSectionService
 from app.services.factor_cross_section import CrossSectionRunResult
@@ -320,6 +324,9 @@ def test_profile_repository_summarize_aggregates_across_dates() -> None:
     assert summary.rank_ic_20d_observation_count == 0
     assert summary.evidence_eligibility == "research_only"
     assert summary.evidence_eligibility_reason == "late history"
+    assert summary.evidence_eligibility_count == 2
+    assert summary.evidence_identity_count == 2
+    assert summary.has_consistent_evidence_identity is False
     assert summary.has_ic_evidence is True
 
 
@@ -362,3 +369,52 @@ def test_profile_repository_summarize_flags_mixed_code_versions() -> None:
     assert single_day.code_version == "code-a"
     assert single_day.code_version_count == 1
     assert single_day.has_consistent_code_version is True
+
+
+def test_profile_summary_revalidates_exact_database_dates() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE SCHEMA IF NOT EXISTS factor"))
+    Base.metadata.create_all(engine, tables=[FactorProfile.__table__])
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    dates = [date(2026, 7, 1), date(2026, 7, 2)]
+    identity = build_profile_evidence_identity(
+        release_tag="release-a",
+        factor_snapshot_sha256="f" * 64,
+        price_snapshot_sha256="e" * 64,
+        trade_date_sha256=hash_trade_dates(dates),
+        requested_start_date=dates[0],
+        requested_end_date=dates[-1],
+        start_date=dates[0],
+        end_date=dates[-1],
+        trade_date_count=2,
+        factor_name="ret_1d",
+        factor_version="v1-qfq",
+        code_version="code-a",
+    )
+    with factory() as db:
+        db.execute(
+            text(
+                "INSERT INTO factor.factor_profile ("
+                "id, factor_name, factor_version, trade_date, universe_size, "
+                "observation_count, missing_count, coverage_rate, missing_rate, "
+                "extreme_count, evidence_eligibility, "
+                "evidence_eligibility_reason, code_version"
+                ") VALUES "
+                "(1, 'ret_1d', 'v1-qfq', DATE '2026-07-01', 100, 90, 10, "
+                "0.9, 0.1, 0, 'strategy_eligible', :identity, 'code-a'), "
+                "(2, 'ret_1d', 'v1-qfq', DATE '2026-07-02', 100, 90, 10, "
+                "0.9, 0.1, 0, 'strategy_eligible', :identity, 'code-a')"
+            ),
+            {"identity": identity},
+        )
+        db.commit()
+        summary = FactorBatchProfilerService().summarize(db)[0][0]
+        subwindow = FactorBatchProfilerService().summarize(
+            db, end_date=dates[0]
+        )[0][0]
+
+    assert summary.evidence_eligibility_count == 1
+    assert summary.evidence_identity_count == 1
+    assert summary.has_consistent_evidence_identity is True
+    assert subwindow.has_consistent_evidence_identity is False

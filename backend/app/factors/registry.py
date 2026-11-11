@@ -29,6 +29,7 @@ from app.services.capital_flow_factors import (
 )
 from app.services.crowding_factors import (
     ABNORMAL_VOLUME_FACTOR_NAME,
+    COMPONENT_FACTOR_VERSION as CROWDING_COMPONENT_VERSION,
     FACTOR_NAME as CROWDING_NAME,
     FACTOR_VERSION as CROWDING_VERSION,
     SENTIMENT_FACTOR_NAME,
@@ -184,9 +185,9 @@ def register_all_factor_definitions(db: Session) -> dict[str, int]:
 
     # crowding: 固定复合因子
     component_inputs = [
-        f"factor.{TURNOVER_FACTOR_NAME}:{CROWDING_VERSION}",
-        f"factor.{ABNORMAL_VOLUME_FACTOR_NAME}:{CROWDING_VERSION}",
-        f"factor.{SENTIMENT_FACTOR_NAME}:{CROWDING_VERSION}",
+        f"factor.{TURNOVER_FACTOR_NAME}:{CROWDING_COMPONENT_VERSION}",
+        f"factor.{ABNORMAL_VOLUME_FACTOR_NAME}:{CROWDING_COMPONENT_VERSION}",
+        f"factor.{SENTIMENT_FACTOR_NAME}:{CROWDING_COMPONENT_VERSION}",
     ]
     repo.ensure(
         db,
@@ -203,7 +204,7 @@ def register_all_factor_definitions(db: Session) -> dict[str, int]:
         window_days=None,
         version=CROWDING_VERSION,
         dependencies=component_inputs,
-        parameters_schema={},
+        parameters_schema={"cross_section_rank_method": "average_rank"},
     )
     counts["crowding"] = 1
 

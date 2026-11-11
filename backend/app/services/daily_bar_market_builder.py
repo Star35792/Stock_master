@@ -14,6 +14,12 @@ from app.repositories.market import (
 )
 from app.repositories.raw import RawDailyBarRepository
 from app.repositories.system import DataQualityIssueRepository
+from app.services.reconciliation_rules import compare_daily_bar_fields, compare_ohlc
+from app.utils.trading_session import is_pre_close_capture, session_settle_at
+
+#: A bar captured inside the session is never final, however clean its numbers
+#: look, so it gets a fixed low score instead of the usual per-warning step-down.
+INTRADAY_SNAPSHOT_SCORE = Decimal("40.00")
 
 
 @dataclass(frozen=True)
@@ -24,6 +30,11 @@ class MarketBuildResult:
     issue_count: int
     suspect_count: int = 0
     conflict_count: int = 0
+    #: Bars captured before their own session settled.  They are written as
+    #: ``suspect`` (so every trusted read path skips them) and a later
+    #: post-close sync overwrites them; this counter makes the window visible.
+    intraday_snapshot_count: int = 0
+    intraday_snapshot_dates: tuple[date, ...] = ()
 
 
 class DailyBarMarketBuildService:
@@ -56,6 +67,18 @@ class DailyBarMarketBuildService:
         adjust_type: str = "none",
         source_name: str | None = None,
     ) -> MarketBuildResult:
+        """Promote raw bars into ``market.daily_bar``.
+
+        ``source_name`` selects **which source's rows are eligible**, not
+        which sources are compared.  The comparison set always spans every
+        source that has a row for the same key, because a cross-source
+        reconciliation that only ever sees one source cannot detect anything.
+
+        That distinction is the whole point: passing the collecting source's
+        name used to narrow the comparison set to a single source, so
+        ``market.daily_bar_source_compare`` stayed empty and every bar was
+        published on a single vendor's word alone.
+        """
         candidates = self.raw_repository.latest_candidates(
             db,
             symbols=symbols,
@@ -70,7 +93,7 @@ class DailyBarMarketBuildService:
             start_date=start_date,
             end_date=end_date,
             adjust_type=adjust_type,
-            source_name=source_name,
+            source_name=None,
         )
         reconciliation = self._reconcile_sources(db, raw_groups)
         existing_symbols = self.security_repository.get_symbols(
@@ -103,6 +126,7 @@ class DailyBarMarketBuildService:
         rejected_count = 0
         issue_count = 0
         conflict_count = 0
+        intraday_counts: dict[date, int] = {}
         for candidate in candidates:
             key = (candidate.symbol, candidate.trade_date, candidate.adjust_type)
             if key in reconciliation.conflict_issues:
@@ -142,6 +166,32 @@ class DailyBarMarketBuildService:
                 trusted_count += 1
             else:
                 suspect_count += 1
+            if assessment.captured_pre_close:
+                intraday_counts[candidate.trade_date] = (
+                    intraday_counts.get(candidate.trade_date, 0) + 1
+                )
+
+        # Each affected bar already carries its own ``INTRADAY_SNAPSHOT`` issue;
+        # this one row per session states the remedy, which a per-bar row buried
+        # among thousands of identical descriptions cannot do.
+        for trade_date, bar_count in sorted(intraday_counts.items()):
+            self.issue_repository.create(
+                db,
+                dataset="daily_bar",
+                trade_date=trade_date,
+                issue_type="INTRADAY_SNAPSHOT_BATCH",
+                severity="warning",
+                description=(
+                    f"{bar_count} bars for {trade_date} were captured before the "
+                    "session settled; they are stored as suspect and stay out of "
+                    "every trusted read path until a post-close sync replaces them"
+                ),
+                expected_value={
+                    "captured_at_or_after": session_settle_at(trade_date).isoformat()
+                },
+                actual_value={"bar_count": bar_count},
+            )
+            issue_count += 1
 
         db.commit()
         return MarketBuildResult(
@@ -151,6 +201,8 @@ class DailyBarMarketBuildService:
             rejected_count=rejected_count,
             issue_count=issue_count,
             conflict_count=conflict_count,
+            intraday_snapshot_count=sum(intraday_counts.values()),
+            intraday_snapshot_dates=tuple(sorted(intraday_counts)),
         )
 
     def _reconcile_sources(
@@ -194,6 +246,7 @@ class _QualityAssessment:
     quality_status: str
     is_suspect: bool
     issues: list[dict]
+    captured_pre_close: bool = False
 
 
 def _assess_candidate_quality(
@@ -217,12 +270,50 @@ def _assess_candidate_quality(
 
     warning_issues = _warning_issues(candidate)
     score = max(Decimal("0.00"), Decimal("100.00") - Decimal("20.00") * len(warning_issues))
+
+    # A bar captured inside its own session is an incomplete day: its close is
+    # the price at the capture moment and its volume is partial.  The numbers can
+    # pass every sanity check and still be wrong for research, so this guard
+    # demotes the bar on provenance alone.  ``suspect`` is reused deliberately --
+    # the trusted read paths already exclude it, and a new ``quality_status``
+    # value would need a ``market.daily_bar`` table rebuild (DuckDB 1.5 cannot
+    # add or drop a CHECK constraint in place).
+    captured_pre_close = is_pre_close_capture(
+        getattr(candidate, "imported_at", None), candidate.trade_date
+    )
+    if captured_pre_close:
+        warning_issues = warning_issues + [_intraday_snapshot_issue(candidate)]
+        score = min(score, INTRADAY_SNAPSHOT_SCORE)
+
     return _QualityAssessment(
         quality_score=score,
         quality_status="suspect" if warning_issues else "trusted",
         is_suspect=bool(warning_issues),
         issues=warning_issues,
+        captured_pre_close=captured_pre_close,
     )
+
+
+def _intraday_snapshot_issue(candidate: RawDailyBar) -> dict:
+    captured_at = getattr(candidate, "imported_at", None)
+    return {
+        "dataset": "daily_bar",
+        "symbol": candidate.symbol,
+        "trade_date": candidate.trade_date,
+        "adjust_type": candidate.adjust_type,
+        "source_name": candidate.source_name,
+        "raw_id": candidate.id,
+        "issue_type": "INTRADAY_SNAPSHOT",
+        "severity": "warning",
+        "description": (
+            "bar was captured before the session settled, so close/volume cover "
+            "only part of the trading day; re-sync after the close"
+        ),
+        "expected_value": {
+            "captured_at_or_after": session_settle_at(candidate.trade_date).isoformat()
+        },
+        "actual_value": {"captured_at": captured_at.isoformat() if captured_at else None},
+    }
 
 
 def _validate_candidate(
@@ -429,19 +520,63 @@ def _warning_issues(candidate: RawDailyBar) -> list[dict]:
 
 
 def _compare_candidates(left: RawDailyBar, right: RawDailyBar) -> dict:
+    """比较同一标的同一交易日的两个来源。
+
+    冲突判据来自 :mod:`app.services.reconciliation_rules` —— 那里固化了跨源
+    对账的口径知识（舍入容差、成交量单位差归一、成交额优先）。这里只负责把
+    规则应用到具体的两行上，并产出可落库的对比记录。
+    """
     if left.id > right.id:
         left, right = right, left
 
-    price_fields = ("open", "high", "low", "close")
-    different_price_fields = [
-        field
-        for field in price_fields
-        if getattr(left, field) is not None
-        and getattr(right, field) is not None
-        and getattr(left, field) != getattr(right, field)
-    ]
-    close_diff = _diff(left.close, right.close)
-    is_conflict = bool(different_price_fields)
+    fields = compare_daily_bar_fields(
+        left.close,
+        right.close,
+        left.volume,
+        right.volume,
+        left.amount,
+        right.amount,
+    )
+    close_cmp = fields["close"]
+    volume_cmp = fields["volume"]
+    amount_cmp = fields["amount"]
+
+    # OHLC 用与收盘价相同的可比性口径：成交额一致 ⇒ 均价一致 ⇒ 价格必须
+    # 一致（只允许舍入容差）；成交额因份额折算不可比时改用相对容差。
+    amount_comparable = not volume_cmp.is_unit_adjusted
+    price_comparable = amount_comparable and not amount_cmp.is_conflict
+
+    ohlc = compare_ohlc(
+        {
+            "open": getattr(left, "open", None),
+            "high": getattr(left, "high", None),
+            "low": getattr(left, "low", None),
+            "close": getattr(left, "close", None),
+        },
+        {
+            "open": getattr(right, "open", None),
+            "high": getattr(right, "high", None),
+            "low": getattr(right, "low", None),
+            "close": getattr(right, "close", None),
+        },
+        comparable=price_comparable,
+    )
+
+    conflicts: list[str] = []
+    if ohlc.is_conflict:
+        conflicts.append(ohlc.note or "price fields differ")
+    if amount_cmp.is_conflict:
+        conflicts.append(amount_cmp.note or "amount differs")
+
+    unit_adjusted = [cmp for cmp in fields.values() if cmp.is_unit_adjusted]
+
+    if conflicts:
+        conflict_reason = "; ".join(conflicts)
+    elif unit_adjusted:
+        conflict_reason = "; ".join(cmp.note or "unit differs" for cmp in unit_adjusted)
+    else:
+        conflict_reason = None
+
     return {
         "symbol": left.symbol,
         "trade_date": left.trade_date,
@@ -450,16 +585,12 @@ def _compare_candidates(left: RawDailyBar, right: RawDailyBar) -> dict:
         "source_b": right.source_name,
         "raw_id_a": left.id,
         "raw_id_b": right.id,
-        "close_diff": close_diff,
-        "close_diff_pct": _pct_diff(left.close, right.close),
-        "volume_diff_pct": _pct_diff(left.volume, right.volume),
-        "amount_diff_pct": _pct_diff(left.amount, right.amount),
-        "is_conflict": is_conflict,
-        "conflict_reason": (
-            f"price fields differ: {', '.join(different_price_fields)}"
-            if different_price_fields
-            else None
-        ),
+        "close_diff": _diff(left.close, right.close),
+        "close_diff_pct": close_cmp.raw_rel_diff,
+        "volume_diff_pct": volume_cmp.raw_rel_diff,
+        "amount_diff_pct": amount_cmp.raw_rel_diff,
+        "is_conflict": bool(conflicts),
+        "conflict_reason": conflict_reason,
     }
 
 

@@ -236,6 +236,10 @@ def test_config_hash_ignores_weights_and_binds_thresholds() -> None:
     ]
     policy = _policy()
     assert policy.config_hash(base) == policy.config_hash(reweighted)
+    reversed_prior = [
+        FactorScoreSpec("alpha_1", "v1-qfq", higher_is_better=False), base[1],
+    ]
+    assert policy.config_hash(base) != policy.config_hash(reversed_prior)
     tighter = _policy(min_abs_ic_ir=Decimal("0.35"))
     assert policy.config_hash(base) != tighter.config_hash(base)
     assert len(policy.config_hash(base)) == 8

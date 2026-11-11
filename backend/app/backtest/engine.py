@@ -13,7 +13,7 @@ from app.backtest.fees import (
 from app.backtest.tradability import AShareTradabilityPolicy
 from app.portfolio import PortfolioAsset, PortfolioBuilder, PortfolioConstraints
 
-ENGINE_VERSION = "daily_event_v2"
+ENGINE_VERSION = "daily_event_v3"
 
 
 @dataclass(frozen=True)
@@ -175,6 +175,17 @@ class DailyEventBacktestEngine:
 
         for trade_date in timeline:
             daily_bars = bars_by_date[trade_date]
+            missing_held_bars = sorted(
+                symbol for symbol, quantity in quantities.items()
+                if quantity > 0
+                and trade_date in calendars[symbol]
+                and symbol not in daily_bars
+            )
+            if missing_held_bars:
+                raise ValueError(
+                    "missing trusted held-position bar on open date "
+                    f"{trade_date.isoformat()}: {', '.join(missing_held_bars)}"
+                )
             open_prices = {
                 symbol: bar.open for symbol, bar in daily_bars.items()
             }

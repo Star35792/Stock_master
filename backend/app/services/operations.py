@@ -283,9 +283,11 @@ class OperationsOverviewService:
         *,
         failure_type: str,
         failure_id: int,
+        research_db: Session | None = None,
     ) -> OperationsRerunPlan | None:
         detail = self.get_failure_detail(
             db,
+            research_db=research_db,
             failure_type=failure_type,
             failure_id=failure_id,
         )

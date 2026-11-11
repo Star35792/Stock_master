@@ -28,7 +28,25 @@ def check_steps(scope: str) -> list[tuple[Path, list[str]]]:
                         "../scripts/ci_check.py",
                     ],
                 ),
-                (REPO_ROOT / "backend", ["uv", "run", "--extra", "dev", "pytest", "-q"]),
+                (
+                    REPO_ROOT / "backend",
+                    [
+                        "uv",
+                        "run",
+                        "--extra",
+                        "dev",
+                        "pytest",
+                        "-q",
+                        # Keep pytest's temporary directory inside the repo.
+                        # The host environment's bulk-delete guard counts
+                        # unlink calls per turn and aborts the process with
+                        # SystemExit(1) once the threshold is crossed, which
+                        # shows up as a batch of failures that are not
+                        # assertion failures at all.  A repo-local basetemp
+                        # keeps the run reproducible and out of that path.
+                        f"--basetemp={REPO_ROOT / 'backend' / '.pytest_tmp' / 'ci'}",
+                    ],
+                ),
             ]
         )
     if scope in {"all", "frontend"}:

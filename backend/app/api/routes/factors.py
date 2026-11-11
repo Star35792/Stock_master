@@ -39,6 +39,8 @@ def _summary_to_read(
     return FactorProfileSummaryRead(
         **vars(summary),
         has_ic_evidence=summary.has_ic_evidence,
+        evidence_identity_valid=summary.has_consistent_evidence_identity,
+        evidence_identity_release_tag=summary.evidence_identity_release_tag,
     )
 
 

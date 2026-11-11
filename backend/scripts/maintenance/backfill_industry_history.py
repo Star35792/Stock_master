@@ -33,9 +33,7 @@ from app.utils.duckdb_write_lock import duckdb_write_lock  # noqa: E402
 
 SOURCE_NAME = "current_label_backfill_20261024"
 
-DEFAULT_WARM_MARKET_GLOB = (
-    "data/warm/exported/20261021-1800/market/daily_bar/**/*.parquet"
-)
+DEFAULT_WARM_MARKET_GLOB = "data/warm/exported/20261021-1800/market/daily_bar/**/*.parquet"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,10 +53,12 @@ def main(argv: list[str] | None = None) -> int:
 def _run(args: argparse.Namespace) -> int:
     db = SessionLocal()
     try:
-        securities = db.execute(text("""
+        securities = db.execute(
+            text("""
             SELECT symbol, industry, list_date FROM market.security
             WHERE industry IS NOT NULL AND industry <> ''
-        """)).all()
+        """)
+        ).all()
         existing = {
             row[0]
             for row in db.execute(
@@ -82,10 +82,12 @@ def _run(args: argparse.Namespace) -> int:
         first_bars: dict[str, date] = {}
         if need_first_bar:
             glob_arg = args.warm_market_glob.replace("'", "''")
-            warm_rows = db.execute(text(f"""
+            warm_rows = db.execute(
+                text(f"""
                 SELECT symbol, min(trade_date) FROM read_parquet('{glob_arg}')
                 GROUP BY symbol
-            """)).all()
+            """)
+            ).all()
             first_bars = dict(warm_rows)
 
         inserts: list[tuple[str, str, date]] = []
@@ -113,10 +115,12 @@ def _run(args: argparse.Namespace) -> int:
             for symbol, industry, effective_from in inserts
         )
         db.commit()
-        inserted = db.execute(text(
-            "SELECT count(*) FROM market.security_industry_history "
-            "WHERE source_name = :source"
-        ), {"source": SOURCE_NAME}).scalar()
+        inserted = db.execute(
+            text(
+                "SELECT count(*) FROM market.security_industry_history WHERE source_name = :source"
+            ),
+            {"source": SOURCE_NAME},
+        ).scalar()
         print(f"完成：source={SOURCE_NAME} 共 {inserted} 行")
     finally:
         db.close()

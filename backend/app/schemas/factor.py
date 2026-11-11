@@ -164,6 +164,11 @@ class FactorProfileSummaryRead(BaseModel):
     factor_status: str = "active"
     evidence_eligibility: str = "research_only"
     evidence_eligibility_reason: str = "unverified_evidence_eligibility"
+    evidence_eligibility_count: int = 0
+    evidence_identity_count: int = 0
+    trade_date_sha256: str = ""
+    evidence_identity_valid: bool = False
+    evidence_identity_release_tag: str | None = None
     has_ic_evidence: bool = False
 
 

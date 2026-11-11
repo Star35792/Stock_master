@@ -148,7 +148,11 @@ class FakeSecurityRepository:
         return self.symbols
 
 
-def _fake_sync_result(trusted_count: int = 3) -> HithinkDailySyncResult:
+def _fake_sync_result(
+    trusted_count: int = 3,
+    intraday_dates: tuple[date, ...] = (),
+    intraday_count: int = 0,
+) -> HithinkDailySyncResult:
     return HithinkDailySyncResult(
         reference_data=None,
         collection=DailyBarCollectionResult(
@@ -165,6 +169,8 @@ def _fake_sync_result(trusted_count: int = 3) -> HithinkDailySyncResult:
             trusted_count=trusted_count,
             rejected_count=0,
             issue_count=0,
+            intraday_snapshot_count=intraday_count,
+            intraday_snapshot_dates=intraday_dates,
         ),
     )
 
@@ -234,6 +240,44 @@ def test_daily_loop_runs_sync_then_factor_pipeline(monkeypatch: pytest.MonkeyPat
     assert job_log_repo.jobs[0].status == "success"
     assert job_log_repo.jobs[0].metadata_["sync_batch_no"] == "batch-1"
     assert session.closed is True
+
+
+def test_daily_loop_blocks_publishing_a_session_captured_before_the_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An early run must fail loudly instead of certifying a half-day bar."""
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    security_repo = FakeSecurityRepository(["600519.SH"])
+    target = date.today()
+
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(
+            trusted_count=0, intraday_dates=(target,), intraday_count=5
+        ),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=security_repo,
+        job_log_repository=job_log_repo,
+    )
+
+    job = job_log_repo.jobs[0]
+    assert result.failed is True
+    assert job.status == "failed"
+    assert job.metadata_["gate_status"] == "blocked"
+    assert job.metadata_["publish_eligible"] is False
+    assert job.metadata_["intraday_snapshot_count"] == 5
+    assert job.metadata_["intraday_snapshot_dates"] == [target.isoformat()]
+    assert "INTRADAY_SNAPSHOT" in job.metadata_["reason_codes"]
+    assert "INTRADAY_SNAPSHOT" in (job.error_message or "")
 
 
 def test_daily_loop_fetches_active_symbols_when_none_provided(

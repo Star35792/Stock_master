@@ -2,11 +2,12 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, delete, event, select, text
+from sqlalchemy import Sequence, create_engine, delete, event, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.database.base import Base
 from app.database.research_session import initialize_research_database
 from app.database.session import (
     apply_schema_compatibility,
@@ -234,7 +235,18 @@ def test_fresh_database_needs_no_sequence_default_ddl(tmp_path) -> None:
     engine.dispose()
 
     assert alters == []
-    assert defaults == 40
+    # Every sequence-defaulted column of the model layer must have its
+    # default baked into ``CREATE TABLE``.  The expected count is derived
+    # from the metadata instead of hard-coded, so adding a table does not
+    # turn this into a brittle number, while a *missing* default still
+    # fails the test.
+    expected_defaults = sum(
+        1
+        for table in Base.metadata.sorted_tables
+        for column in table.columns
+        if isinstance(column.default, Sequence)
+    )
+    assert defaults == expected_defaults
 
 
 def test_repeated_initialization_does_not_reissue_sequence_default_ddl(tmp_path) -> None:

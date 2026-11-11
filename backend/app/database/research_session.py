@@ -48,13 +48,23 @@ ResearchSessionLocal = sessionmaker(
 
 def initialize_research_database(bind: Engine | None = None) -> None:
     """Create missing research tables in the standalone database."""
+    from app.utils.duckdb_write_lock import duckdb_write_lock
+
     resolved_bind = bind or research_engine
-    _create_schemas(resolved_bind)
 
     import app.models  # noqa: F401  (registers every model)
     from app.database.research_base import ResearchBase
 
-    ResearchBase.metadata.create_all(bind=resolved_bind)
+    # Startup must coordinate with research scripts just like request sessions.
+    # Explicit engines are isolated test/maintenance targets and use their own lock.
+    lock_path = (
+        Path(str(resolved_bind.url.database)).with_suffix(".initialize.lock")
+        if bind is not None
+        else Path("data/research_write.lock")
+    )
+    with duckdb_write_lock(lock_path, timeout_seconds=3.0, poll_interval_seconds=0.25):
+        _create_schemas(resolved_bind)
+        ResearchBase.metadata.create_all(bind=resolved_bind)
 
 
 def get_research_db() -> Generator[Session]:

@@ -134,3 +134,13 @@ def test_preparation_wait_does_not_treat_partial_data_as_complete(tmp_path):
     report.write_text('{"status":"running"}', encoding='utf-8')
     with pytest.raises(TimeoutError):
         wait_for_preparation(report, timeout_seconds=0)
+
+
+def test_financial_sector_does_not_receive_generic_cash_flow_evidence():
+    class Bank(Repository):
+        def stocks(self):
+            return [dict(row, industry='银行') for row in super().stocks()]
+
+    result = QualityValueDataService(Bank()).run(as_of=DAY)
+    assert all(c['model'] == 'financial' for c in result['evidence_request']['candidates'])
+    assert result['evidence_review_queue'] == []

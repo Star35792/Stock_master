@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.factors.categories import FactorCategory
+from app.factors.rank_ic import rank_values
 from app.repositories.factor import (
     FactorDefinitionRepository,
     FactorRunRepository,
@@ -15,7 +16,8 @@ from app.repositories.factor import (
 from app.repositories.market import DailyBarRepository
 
 FACTOR_NAME = "crowding_score"
-FACTOR_VERSION = "v1"
+FACTOR_VERSION = "v2-average-rank"
+COMPONENT_FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
 SUPPORTED_SECURITY_TYPES = ("stock",)
 LOOKBACK_DAYS = 60
@@ -70,6 +72,7 @@ class CrowdingFactorService:
             raise ValueError("adjust_type must be one of: none, qfq, hfq")
 
         factor_version = f"{FACTOR_VERSION}-{adjust_type}"
+        component_factor_version = f"{COMPONENT_FACTOR_VERSION}-{adjust_type}"
         normalized_symbols = (
             sorted({symbol.strip().upper() for symbol in symbols if symbol.strip()})
             if symbols
@@ -93,21 +96,21 @@ class CrowdingFactorService:
         turnover_rows = self.value_repository.list_for_cross_section(
             db,
             factor_name=TURNOVER_FACTOR_NAME,
-            factor_version=factor_version,
+            factor_version=component_factor_version,
             start_date=input_start_date,
             end_date=end_date,
         )
         abnormal_rows = self.value_repository.list_for_cross_section(
             db,
             factor_name=ABNORMAL_VOLUME_FACTOR_NAME,
-            factor_version=factor_version,
+            factor_version=component_factor_version,
             start_date=input_start_date,
             end_date=end_date,
         )
         sentiment_rows = self.value_repository.list_for_cross_section(
             db,
             factor_name=SENTIMENT_FACTOR_NAME,
-            factor_version=FACTOR_VERSION,
+            factor_version=COMPONENT_FACTOR_VERSION,
             start_date=input_start_date,
             end_date=end_date,
         )
@@ -127,9 +130,9 @@ class CrowdingFactorService:
         )
 
         component_inputs = [
-            f"factor.{TURNOVER_FACTOR_NAME}:{factor_version}",
-            f"factor.{ABNORMAL_VOLUME_FACTOR_NAME}:{factor_version}",
-            f"factor.{SENTIMENT_FACTOR_NAME}:{FACTOR_VERSION}",
+            f"factor.{TURNOVER_FACTOR_NAME}:{component_factor_version}",
+            f"factor.{ABNORMAL_VOLUME_FACTOR_NAME}:{component_factor_version}",
+            f"factor.{SENTIMENT_FACTOR_NAME}:{COMPONENT_FACTOR_VERSION}",
         ]
         definition = self.definition_repository.ensure(
             db,
@@ -150,21 +153,22 @@ class CrowdingFactorService:
                 "components": [
                     {
                         "factor_name": TURNOVER_FACTOR_NAME,
-                        "factor_version": factor_version,
+                        "factor_version": component_factor_version,
                         "weight": "1",
                     },
                     {
                         "factor_name": ABNORMAL_VOLUME_FACTOR_NAME,
-                        "factor_version": factor_version,
+                        "factor_version": component_factor_version,
                         "weight": "1",
                     },
                     {
                         "factor_name": SENTIMENT_FACTOR_NAME,
-                        "factor_version": FACTOR_VERSION,
+                        "factor_version": COMPONENT_FACTOR_VERSION,
                         "weight": "1",
                     },
                 ],
                 "sentiment_history_days": SENTIMENT_HISTORY_DAYS,
+                "cross_section_rank_method": "average_rank",
             },
         )
         run = self.run_repository.create(
@@ -179,10 +183,11 @@ class CrowdingFactorService:
                 "lookback_days": LOOKBACK_DAYS,
                 "sentiment_history_days": SENTIMENT_HISTORY_DAYS,
                 "component_versions": {
-                    TURNOVER_FACTOR_NAME: factor_version,
-                    ABNORMAL_VOLUME_FACTOR_NAME: factor_version,
-                    SENTIMENT_FACTOR_NAME: FACTOR_VERSION,
+                    TURNOVER_FACTOR_NAME: component_factor_version,
+                    ABNORMAL_VOLUME_FACTOR_NAME: component_factor_version,
+                    SENTIMENT_FACTOR_NAME: COMPONENT_FACTOR_VERSION,
                 },
+                "cross_section_rank_method": "average_rank",
             },
             code_version=code_version,
             release_id=release_id,
@@ -192,6 +197,7 @@ class CrowdingFactorService:
                 "applicable_security_types": list(SUPPORTED_SECURITY_TYPES),
                 "components": component_inputs,
                 "sentiment_history_days": SENTIMENT_HISTORY_DAYS,
+                "cross_section_rank_method": "average_rank",
             },
         )
         rows_written = self._write_factor_values(
@@ -320,17 +326,10 @@ def _percentile_ranks(
     *,
     higher_is_better: bool,
 ) -> dict[str, Decimal]:
-    ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
-    if len(ordered) == 1:
-        return {ordered[0][0]: Decimal(1)}
-    return {
-        symbol: (
-            Decimal(index) / Decimal(len(ordered) - 1)
-            if higher_is_better
-            else Decimal(len(ordered) - index - 1) / Decimal(len(ordered) - 1)
-        )
-        for index, (symbol, _) in enumerate(ordered)
-    }
+    ranks = rank_values(values)
+    if higher_is_better:
+        return ranks
+    return {symbol: Decimal(1) - rank for symbol, rank in ranks.items()}
 
 
 def _percentile_rank(values: list[Decimal], current: Decimal) -> Decimal | None:

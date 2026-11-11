@@ -19,6 +19,10 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
+from app.factors.profile_evidence import (
+    hash_trade_dates,
+    parse_profile_evidence_identity,
+)
 from app.repositories.factor import FactorDefinitionRepository, FactorProfileRepository
 from app.repositories.system import JobLogRepository
 from app.services.factor_cross_section import FactorCrossSectionService
@@ -113,6 +117,12 @@ class FactorProfileSummary:
     #: Evidence-level strategy eligibility, independent from definition PIT status.
     evidence_eligibility: str = "research_only"
     evidence_eligibility_reason: str = "unverified_evidence_eligibility"
+    #: Distinct eligibility values represented by the persisted rows.
+    evidence_eligibility_count: int = 0
+    #: Distinct evidence identities/reasons represented by the persisted rows.
+    evidence_identity_count: int = 0
+    #: SHA-256 of the exact ordered dates read back from factor_profile.
+    trade_date_sha256: str = ""
 
     @property
     def has_ic_evidence(self) -> bool:
@@ -142,6 +152,27 @@ class FactorProfileSummary:
             "local",
             "unknown",
         }
+
+    @property
+    def evidence_identity_release_tag(self) -> str | None:
+        identity = parse_profile_evidence_identity(self.evidence_eligibility_reason)
+        return identity.release_tag if identity is not None else None
+
+    @property
+    def has_consistent_evidence_identity(self) -> bool:
+        """Whether provenance and the database date set describe one exact window."""
+        if self.evidence_eligibility_count != 1 or self.evidence_identity_count != 1:
+            return False
+        identity = parse_profile_evidence_identity(self.evidence_eligibility_reason)
+        return identity is not None and identity.matches(
+            factor_name=self.factor_name,
+            factor_version=self.factor_version,
+            code_version=self.code_version,
+            first_trade_date=self.first_trade_date,
+            last_trade_date=self.last_trade_date,
+            trade_date_count=self.trade_date_count,
+            trade_date_sha256=self.trade_date_sha256,
+        )
 
 
 class FactorBatchProfilerService:
@@ -364,6 +395,17 @@ class FactorBatchProfilerService:
             if code_version_count == 1 and row.get("code_version")
             else None
         )
+        trade_dates: list[date] = []
+        if self._summary_db is not None and hasattr(
+            self.profile_repository, "list_trade_dates"
+        ):
+            trade_dates = self.profile_repository.list_trade_dates(
+                self._summary_db,
+                factor_name=str(row["factor_name"]),
+                factor_version=str(row["factor_version"]),
+                start_date=row.get("first_trade_date"),  # type: ignore[arg-type]
+                end_date=row.get("last_trade_date"),  # type: ignore[arg-type]
+            )
         if self._summary_db is not None:
             try:
                 definition = self.definition_repository.get_by_name_version(
@@ -422,6 +464,15 @@ class FactorBatchProfilerService:
             factor_status=factor_status,
             evidence_eligibility=evidence_eligibility,
             evidence_eligibility_reason=evidence_eligibility_reason,
+            evidence_eligibility_count=int(
+                row.get("evidence_eligibility_count") or 0
+            ),
+            evidence_identity_count=int(row.get("evidence_identity_count") or 0),
+            trade_date_sha256=(
+                hash_trade_dates(trade_dates)
+                if trade_dates
+                else str(row.get("trade_date_sha256") or "")
+            ),
         )
 
     @staticmethod

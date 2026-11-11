@@ -170,11 +170,39 @@ def test_backtest_service_reads_trusted_market_and_persists_result() -> None:
     assert snapshot["verification_status"] == "verified"
     assert snapshot["sha256"] == snapshot["post_run_sha256"]
     assert backtest_repository.create_kwargs["parameters"]["engine_version"] == (
-        "daily_event_v2"
+        "daily_event_v3"
+    )
+    assert backtest_repository.create_kwargs["parameters"]["missing_held_bar_policy"] == (
+        "reject_on_open_date_v1"
     )
     assert backtest_repository.create_kwargs["parameters"]["fee_model_version"] == (
         "linear_commission_v1"
     )
+
+
+def test_backtest_service_fails_run_when_held_position_bar_is_missing() -> None:
+    class ThreeDayCalendar(FakeTradingCalendarRepository):
+        def list_open_dates(self, db, **kwargs):
+            return [date(2026, 7, day) for day in (1, 2, 3)]
+
+    repository = FakeBacktestRepository()
+    service = DailyBacktestService(
+        daily_bar_repository=FakeDailyBarRepository(),
+        backtest_repository=repository,
+        corporate_action_repository=FakeCorporateActionRepository(),
+        trading_calendar_repository=ThreeDayCalendar(),
+    )
+    with pytest.raises(ValueError, match="missing trusted held-position bar"):
+        service.run(
+            SimpleNamespace(commit=lambda: None), name="missing-held", strategy_name="unit_test",
+            signals=[TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+            start_date=date(2026, 7, 1), end_date=date(2026, 7, 3),
+            adjust_type="none", initial_cash=Decimal("10000"),
+            commission_rate=Decimal("0"), slippage_bps=Decimal("0"), lot_size=100,
+            code_version="test", data_version="test",
+        )
+    assert "2026-07-03: AAA.SH" in repository.failed_message
+    assert repository.saved_result is None
 
 
 def test_backtest_service_validates_signal_boundary() -> None:

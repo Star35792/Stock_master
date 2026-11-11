@@ -356,6 +356,7 @@ class DailyBacktestService:
             "adjust_type": adjust_type,
             "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
             "corporate_action_policy": _CORPORATE_ACTION_POLICY,
+            "missing_held_bar_policy": "reject_on_open_date_v1",
             "engine_version": ENGINE_VERSION,
             **fee_contract,
             "calculation_precision_policy": "unquantized_decimal_until_persistence_v1",
@@ -372,6 +373,7 @@ class DailyBacktestService:
                 "adjust_type": adjust_type,
                 "execution_adjust_type": _EXECUTION_ADJUST_TYPE,
                 "corporate_action_policy": _CORPORATE_ACTION_POLICY,
+                "missing_held_bar_policy": "reject_on_open_date_v1",
                 "engine_version": ENGINE_VERSION,
                 **fee_contract,
                 "calculation_precision_policy": (

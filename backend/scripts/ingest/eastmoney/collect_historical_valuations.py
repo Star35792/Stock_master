@@ -18,9 +18,7 @@ def main() -> int:
     args = parser.parse_args()
     initialize_database()
     with SessionLocal() as db:
-        result = PriceValueHistoricalCollectionService().collect(
-            db, trade_date=args.trade_date
-        )
+        result = PriceValueHistoricalCollectionService().collect(db, trade_date=args.trade_date)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
 

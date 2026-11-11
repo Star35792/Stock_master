@@ -23,8 +23,8 @@ def main() -> int:
             service = DelistEvidenceService()
             result = (
                 service.collect_with_fallback(db, exchange=args.exchange)
-                if args.source == "auto" else
-                service.collect(db, source=args.source, exchange=args.exchange)
+                if args.source == "auto"
+                else service.collect(db, source=args.source, exchange=args.exchange)
             )
     print(json.dumps(result, ensure_ascii=False))
     return 0

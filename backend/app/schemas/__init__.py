@@ -62,7 +62,9 @@ from app.schemas.strategy import (
     FactorScoreSpecRequest,
     FactorSelectionBacktestRequest,
     FactorSelectionBacktestResult,
+    StrategyDefinitionRead,
     StyleFactorRef,
+    ValueInvestingScreenRequest,
 )
 from app.schemas.system import DataQualityIssueRead, DataQualityIssueStatusUpdate
 from app.schemas.trade import (
@@ -132,8 +134,10 @@ __all__ = [
     "SecurityLifecycleRead",
     "Page",
     "SecurityRead",
+    "StrategyDefinitionRead",
     "StyleFactorRef",
     "TradingCalendarRead",
+    "ValueInvestingScreenRequest",
 ]
 from app.schemas.approval import (
     PaperExecutionApprovalCreateRequest,

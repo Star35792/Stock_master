@@ -158,9 +158,7 @@ def financial_industry_symbols(db) -> list[str]:
     declared as such in the caveats.
     """
     rows = db.execute(
-        select(Security.symbol, Security.industry).where(
-            Security.security_type == "stock"
-        )
+        select(Security.symbol, Security.industry).where(Security.security_type == "stock")
     ).all()
     return sorted(
         str(symbol)
@@ -240,7 +238,7 @@ def _load_daily_ic(
                 symbol,
                 trade_date,
                 unnest(
-                    [{', '.join(repr(name) for name in factor_names)}]
+                    [{", ".join(repr(name) for name in factor_names)}]
                 ) AS factor_name,
                 pe_ttm,
                 pb_mrq
@@ -362,13 +360,31 @@ def _load_daily_ic(
         """
     ).fetchall()
     keys = [
-        "factor_name", "trade_date", "universe_size", "observation_count",
-        "ic_1d", "rank_ic_1d", "ic_5d", "rank_ic_5d", "ic_20d", "rank_ic_20d",
-        "mean_value", "sd_value", "min_value", "max_value",
-        "p01_value", "p99_value", "extreme_count",
-        "top_q_1d", "bottom_q_1d", "top_q_5d", "bottom_q_5d",
-        "top_q_20d", "bottom_q_20d",
-        "monotonicity_1d", "top_quantile_turnover",
+        "factor_name",
+        "trade_date",
+        "universe_size",
+        "observation_count",
+        "ic_1d",
+        "rank_ic_1d",
+        "ic_5d",
+        "rank_ic_5d",
+        "ic_20d",
+        "rank_ic_20d",
+        "mean_value",
+        "sd_value",
+        "min_value",
+        "max_value",
+        "p01_value",
+        "p99_value",
+        "extreme_count",
+        "top_q_1d",
+        "bottom_q_1d",
+        "top_q_5d",
+        "bottom_q_5d",
+        "top_q_20d",
+        "bottom_q_20d",
+        "monotonicity_1d",
+        "top_quantile_turnover",
     ]
     return [dict(zip(keys, row, strict=True)) for row in rows]
 
@@ -407,9 +423,7 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
             for kind in ("ic", "rank_ic"):
                 values = [
                     cleaned
-                    for cleaned in (
-                        _clean(r.get(f"{kind}_{horizon}")) for r in rows
-                    )
+                    for cleaned in (_clean(r.get(f"{kind}_{horizon}")) for r in rows)
                     if cleaned is not None
                 ]
                 if not values:
@@ -436,9 +450,7 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
                 round(sum(spreads) / len(spreads), 6) if spreads else None
             )
             entry[f"top_minus_bottom_{horizon}_positive_rate"] = (
-                round(sum(1 for s in spreads if s > 0) / len(spreads), 4)
-                if spreads
-                else None
+                round(sum(1 for s in spreads if s > 0) / len(spreads), 4) if spreads else None
             )
         monotonicity = [
             cleaned
@@ -456,9 +468,7 @@ def _aggregate(daily: list[dict[str, object]]) -> list[dict[str, object]]:
         entry["mean_top_quantile_turnover"] = (
             round(sum(turnover) / len(turnover), 6) if turnover else None
         )
-        entry["avg_universe"] = round(
-            sum(int(r["universe_size"]) for r in rows) / len(rows), 1
-        )
+        entry["avg_universe"] = round(sum(int(r["universe_size"]) for r in rows) / len(rows), 1)
         summary.append(entry)
     return summary
 
@@ -541,15 +551,11 @@ def _persist(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    store = (
-        WarmLayerStore(args.warm_root) if args.warm_root else WarmLayerStore()
-    )
+    store = WarmLayerStore(args.warm_root) if args.warm_root else WarmLayerStore()
     tag = args.release_tag or settings.research_release_tag or store.latest_release_tag
     base = store.base_release_tag_for(tag) if tag else None
     if base:
-        store = WarmLayerStore(
-            args.warm_root or store.warm_root, base_release_tag=base
-        )
+        store = WarmLayerStore(args.warm_root or store.warm_root, base_release_tag=base)
     # Parquet-only: leaves the control-plane file handle free for ORM writes.
     con = store.connect(release_tag=tag, read_only=True, attach_control=False)
     curated = Path(args.curated_root) / "prices_qfq"
@@ -558,9 +564,7 @@ def main(argv: list[str] | None = None) -> int:
     # industry label comes from the control plane, so it is read through the
     # ORM session -- the same session that later writes the profiles.
     with SessionLocal() as db:
-        excluded = () if args.keep_financial_industry else tuple(
-            financial_industry_symbols(db)
-        )
+        excluded = () if args.keep_financial_industry else tuple(financial_industry_symbols(db))
         try:
             daily = _load_daily_ic(
                 con,
@@ -601,8 +605,7 @@ def main(argv: list[str] | None = None) -> int:
             "forward returns use qfq prices; execution would use unadjusted prices",
             "survivorship bias not corrected (no delisting dates available)",
             "single window, no out-of-sample validation",
-            f"cross-sections with fewer than {MIN_CROSS_SECTION} observations "
-            "are skipped",
+            f"cross-sections with fewer than {MIN_CROSS_SECTION} observations are skipped",
         ],
         "factors": summary,
     }

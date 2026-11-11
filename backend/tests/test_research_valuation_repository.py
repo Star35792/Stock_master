@@ -41,6 +41,7 @@ _SHARED_COLUMNS: tuple[str, ...] = (
     "float_market_cap",
     "change_rate",
     "pit_verified",
+    "source_name",
 )
 
 
@@ -226,11 +227,40 @@ def test_orm_reports_pb_mrq_as_unavailable(db_session: Session) -> None:
     assert all(row.pb_mrq is None for row in rows)
 
 
-def test_orm_marks_live_snapshots_as_point_in_time(db_session: Session) -> None:
-    """The control plane rows were captured live, so they are PIT observations."""
+def test_orm_does_not_infer_point_in_time_from_storage(db_session: Session) -> None:
+    """Storage location alone does not certify supplier availability."""
     _seed_control_plane(db_session)
     repository = ResearchValuationReadRepository(db_session)
     rows = repository.list_valuation_history(
         start_date=date(2026, 1, 1), end_date=date(2026, 1, 31)
     )
-    assert all(row.pit_verified is True for row in rows)
+    assert all(row.pit_verified is False for row in rows)
+
+
+def test_orm_isolates_research_observations_and_preserves_sources(db_session: Session) -> None:
+    _seed_control_plane(db_session)
+    db_session.add_all([
+        ValuationSnapshot(
+            symbol="000001.SZ", trade_date=date(2026, 1, 5), currency="CNY",
+            source_name="aaa_vendor", pe_ttm=Decimal("13"),
+        ),
+        ValuationSnapshot(
+            symbol="000003.SZ", trade_date=date(2026, 1, 6), currency="CNY",
+            source_name="eastmoney", raw_payload={"_research_batch_id": 123},
+        ),
+    ])
+    db_session.commit()
+    repository = ResearchValuationReadRepository(db_session)
+    rows = repository.list_valuation_history(
+        start_date=date(2026, 1, 1), end_date=date(2026, 1, 31),
+    )
+    assert [(row.symbol, row.source_name) for row in rows] == [
+        ("000001.SZ", "aaa_vendor"), ("000001.SZ", "eastmoney"),
+        ("000002.SZ", "eastmoney"),
+    ]
+    coverage = repository.valuation_history_coverage(
+        start_date=date(2026, 1, 1), end_date=date(2026, 1, 31),
+    )
+    assert coverage["row_count"] == 3
+    assert coverage["symbol_count"] == 2
+    assert coverage["max_date"] == date(2026, 1, 5)

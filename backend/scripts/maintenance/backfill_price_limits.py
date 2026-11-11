@@ -43,9 +43,7 @@ def _is_st_by_name(name: str | None) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="控制面日线涨跌停回填")
-    parser.add_argument(
-        "--dry-run", action="store_true", help="只统计将填充的行数，不写库"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="只统计将填充的行数，不写库")
     parser.add_argument("--batch-size", type=int, default=50_000)
     args = parser.parse_args(argv)
 
@@ -56,7 +54,8 @@ def main(argv: list[str] | None = None) -> int:
 def _run(args: argparse.Namespace) -> int:
     db = SessionLocal()
     try:
-        rows = db.execute(text("""
+        rows = db.execute(
+            text("""
             SELECT b.id, b.symbol, b.pre_close, b.special_treatment_status,
                    s.security_type, s.name
             FROM market.daily_bar b
@@ -66,7 +65,8 @@ def _run(args: argparse.Namespace) -> int:
               AND b.pre_close IS NOT NULL
               AND b.pre_close > 0
             ORDER BY b.id
-        """)).all()
+        """)
+        ).all()
         print(f"待处理行（limit_up 为空且 pre_close 有效）: {len(rows)}")
 
         updates: list[tuple[int, Decimal, Decimal]] = []
@@ -75,9 +75,7 @@ def _run(args: argparse.Namespace) -> int:
             if security_type is not None and security_type != "stock":
                 skipped["non_stock"] += 1
                 continue
-            st_flag = (st_status or "").strip() or (
-                "ST" if _is_st_by_name(name) else None
-            )
+            st_flag = (st_status or "").strip() or ("ST" if _is_st_by_name(name) else None)
             limit_up, limit_down = derive_price_limits(
                 pre_close,
                 symbol=symbol,
@@ -93,11 +91,13 @@ def _run(args: argparse.Namespace) -> int:
         if args.dry_run or not updates:
             return 0
 
-        db.execute(text(
-            "CREATE OR REPLACE TEMP TABLE _tmp_limits AS "
-            "SELECT NULL::BIGINT AS id, NULL::DECIMAL(18,4) AS limit_up, "
-            "NULL::DECIMAL(18,4) AS limit_down WHERE 1=0"
-        ))
+        db.execute(
+            text(
+                "CREATE OR REPLACE TEMP TABLE _tmp_limits AS "
+                "SELECT NULL::BIGINT AS id, NULL::DECIMAL(18,4) AS limit_up, "
+                "NULL::DECIMAL(18,4) AS limit_down WHERE 1=0"
+            )
+        )
         total = 0
         for start in range(0, len(updates), args.batch_size):
             chunk = updates[start : start + args.batch_size]
@@ -115,12 +115,14 @@ def _run(args: argparse.Namespace) -> int:
             )
             total += len(chunk)
             print(f"  已暂存 {total}/{len(updates)}")
-        updated = db.execute(text("""
+        updated = db.execute(
+            text("""
             UPDATE market.daily_bar b
             SET limit_up = t.limit_up, limit_down = t.limit_down
             FROM _tmp_limits t
             WHERE b.id = t.id
-        """)).rowcount
+        """)
+        ).rowcount
         db.commit()
         print(f"已更新 {updated} 行（adjust_type='none'，幂等：仅原 NULL 行）")
     finally:

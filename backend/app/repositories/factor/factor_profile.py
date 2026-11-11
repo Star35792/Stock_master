@@ -213,9 +213,15 @@ class FactorProfileRepository:
                 # evidence row is eligible. The lexical minimum is deterministic
                 # for the supported research_only/strategy_eligible values.
                 func.min(FactorProfile.evidence_eligibility).label("evidence_eligibility"),
+                func.count(func.distinct(FactorProfile.evidence_eligibility)).label(
+                    "evidence_eligibility_count"
+                ),
                 func.min(FactorProfile.evidence_eligibility_reason).label(
                     "evidence_eligibility_reason"
                 ),
+                func.count(
+                    func.distinct(FactorProfile.evidence_eligibility_reason)
+                ).label("evidence_identity_count"),
             )
             .where(*filters)
             .group_by(FactorProfile.factor_name, FactorProfile.factor_version)
@@ -231,3 +237,29 @@ class FactorProfileRepository:
             .all()
         )
         return [dict(row) for row in rows], total
+
+    def list_trade_dates(
+        self,
+        db: Session,
+        *,
+        factor_name: str,
+        factor_version: str,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[date]:
+        """Return the exact persisted date identity for one evidence window."""
+        filters = [
+            FactorProfile.factor_name == factor_name,
+            FactorProfile.factor_version == factor_version,
+        ]
+        if start_date:
+            filters.append(FactorProfile.trade_date >= start_date)
+        if end_date:
+            filters.append(FactorProfile.trade_date <= end_date)
+        return list(
+            db.scalars(
+                select(FactorProfile.trade_date)
+                .where(*filters)
+                .order_by(FactorProfile.trade_date)
+            )
+        )

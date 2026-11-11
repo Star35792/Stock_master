@@ -52,3 +52,24 @@ Thumbs.db
 # AI session tooling
 .zcode/
 .designkit-history-delivery/
+
+# 外部第三方项目（Apache-2.0 a-stock-data Skill 项目，仅本地参考，不入库）
+a-stock-data-main/
+
+# 第三方券商研报 PDF（外部版权材料，体积大，不入库）
+backend/reports/
+
+# pytest / 临时残留
+backend/outputs/test-tmp/
+*.tmp
+
+# 全量选股中间产物（≥1MB，合计约 125MB，可由脚本重新生成；
+# 结论已落在同名 .md / .html 中，故不入库）
+backend/outputs/quality_value_full_flow_20261029.json
+backend/outputs/quality_value_selection_20261028.json
+backend/outputs/quality_value_financial_all_20261028.json
+backend/outputs/value_investing_20261109.json
+backend/outputs/value_investing_20261109_v3.json
+backend/outputs/value_investing_20261110.json
+backend/outputs/price_value_selected_20261029-161151.json
+backend/outputs/price_value_selected_20261029-162629.json

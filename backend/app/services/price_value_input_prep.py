@@ -1,7 +1,7 @@
 """Collect a same-evening relative-valuation observation for manual review."""
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from itertools import chain
@@ -96,18 +96,63 @@ class PriceValueInputPrepService:
             error_message=f"{type(exc).__name__}: {exc}",
         )
 
-    def run(self, db: Session, *, now: datetime | None = None) -> dict:
-        instant = now or self.clock()
+    def run(
+        self, db: Session, *, now: datetime | None = None,
+        observation_mode: str = "same_evening", price_date: date | None = None,
+    ) -> dict:
+        if observation_mode not in {"same_evening", "current_research_catchup"}:
+            raise ValueError("unsupported research observation mode")
+        catchup = observation_mode == "current_research_catchup"
+        # Catch-up timestamps must come from the real collection clock. The
+        # optional scheduler clock cannot turn today's fetch into yesterday's.
+        instant = self.clock() if catchup else (now or self.clock())
         if instant.tzinfo is None:
             raise ValueError("input preparation clock must include timezone")
         local = instant.astimezone(SHANGHAI)
-        target = local.date()
-        if local.hour < 21:
+        observation_date = local.date()
+        target = price_date or observation_date
+        if catchup:
+            latest = self.screen_repository.latest_open_date(db, before=observation_date)
+            target = price_date or latest
+            if target is None or target != latest:
+                raise ValueError("catch-up price date must be the latest completed trading day")
+        elif target != observation_date:
+            raise ValueError("same-evening price date must be the actual observation date")
+        if not catchup and local.hour < 21:
             raise ValueError("current vendor quote may only be collected after 21:00 Shanghai")
 
         prior = self.screen_repository.completed_input_prep(db, trade_date=target)
         if prior is not None:
-            return dict(prior.metadata_ or {})
+            previous = prior.metadata_ or {}
+            reusable = previous.get("observation_mode", "same_evening") == observation_mode
+            if catchup and reusable:
+                try:
+                    captured = datetime.fromisoformat(previous["observed_at"])
+                    batch_id = previous.get("batch_id")
+                    batch = db.get(ImportBatch, batch_id) if type(batch_id) is int else None
+                    reusable = (
+                        captured.tzinfo is not None
+                        and captured <= instant
+                        and captured.astimezone(SHANGHAI).date() == observation_date
+                        and previous.get("price_as_of") == target.isoformat()
+                        and previous.get("financial_as_of") == observation_date.isoformat()
+                        and batch is not None and batch.status == "success"
+                    )
+                except (KeyError, TypeError, ValueError):
+                    reusable = False
+            if reusable:
+                return dict(previous)
+
+        observation_metadata = {
+            "observation_mode": observation_mode,
+            "price_as_of": target.isoformat(),
+            "observed_at": instant.astimezone(UTC).isoformat(),
+            "financial_as_of": observation_date.isoformat(),
+            "analysis_at": instant.astimezone(UTC).isoformat(),
+            "pit_verified": False,
+            "research_only": True,
+            "execution_eligible": False,
+        }
 
         with logged_job(
             db,
@@ -117,6 +162,7 @@ class PriceValueInputPrepService:
             metadata={
                 "target_trade_date": target.isoformat(),
                 "code_version": settings.app_code_version,
+                **observation_metadata,
             },
         ) as job:
             latest = self.screen_repository.latest_open_date(
@@ -158,11 +204,14 @@ class PriceValueInputPrepService:
                 dataset=DATASET,
                 request_params={
                     "target_trade_date": target.isoformat(),
-                    "endpoint_selection": "current_clist_then_same_day_dated_fallback",
+                    "endpoint_selection": (
+                        "dated_only" if catchup else "current_clist_then_same_day_dated_fallback"
+                    ),
                     "collected_after": local.isoformat(),
                     "supplier_asof_verified": False,
                     "unadjusted_daily_sync_job_id": sync.id,
                     "code_version": settings.app_code_version,
+                    **observation_metadata,
                 },
             )
             db.commit()
@@ -174,16 +223,22 @@ class PriceValueInputPrepService:
             expected_total = None
             page_hashes: list[str] = []
             try:
-                valuation_mode = "current_clist"
-                pages = iter(self.source.iter_valuation_snapshot_pages())
-                try:
-                    first_page = next(pages)
-                except EastmoneyDataError:
-                    if not hasattr(self.source, "iter_same_day_dated_valuation_pages"):
-                        raise
-                    valuation_mode = "same_day_dated_fallback"
+                valuation_mode = "dated_catchup" if catchup else "current_clist"
+                if catchup:
                     pages = iter(self.source.iter_same_day_dated_valuation_pages(trade_date=target))
                     first_page = next(pages)
+                else:
+                    pages = iter(self.source.iter_valuation_snapshot_pages())
+                    try:
+                        first_page = next(pages)
+                    except EastmoneyDataError:
+                        if not hasattr(self.source, "iter_same_day_dated_valuation_pages"):
+                            raise
+                        valuation_mode = "same_day_dated_fallback"
+                        pages = iter(self.source.iter_same_day_dated_valuation_pages(
+                            trade_date=target
+                        ))
+                        first_page = next(pages)
                 for page, total, items, response_json in chain((first_page,), pages):
                     if expected_total is not None and total != expected_total:
                         raise ValueError("vendor total changed during pagination")
@@ -197,6 +252,7 @@ class PriceValueInputPrepService:
                         "supplier_asof_verified": False,
                         "items": items,
                         "response_json": response_json,
+                        **observation_metadata,
                     }
                     page_hash = sha256(response_json.encode("utf-8")).hexdigest()
                     db.add(
@@ -211,7 +267,7 @@ class PriceValueInputPrepService:
                     )
                     db.commit()  # Preserve each raw page if later fetch or validation fails.
                     page_hashes.append(page_hash)
-                    self._capture_time(target)
+                    self._capture_time(observation_date)
                     for item in items:
                         code = item.get("f12")
                         if not code:
@@ -269,12 +325,13 @@ class PriceValueInputPrepService:
                                 "_raw_page_hash": page_hash,
                                 "_fetched_at_utc": fetched_at,
                                 "_supplier_asof_verified": False,
+                                **observation_metadata,
                             },
                         }
                     )
                 accepted_symbols = {row["symbol"] for row in accepted}
                 reported_roe = self.reported_roe_service.collect_into_batch(
-                    db, batch_id=batch_id, target=target, observed_at=local
+                    db, batch_id=batch_id, target=observation_date, observed_at=local
                 )
                 accepted_symbols = {row["symbol"] for row in accepted}
                 matched_by_exchange = {
@@ -423,7 +480,7 @@ class PriceValueInputPrepService:
 
                 if not reported_symbols:
                     raise ValueError("same-day reported ROE has no eligible values")
-                self._capture_time(target)
+                self._capture_time(observation_date)
                 inserted = self.valuation_repository.insert_research_rows(db, rows=accepted)
                 batch = db.get(ImportBatch, batch_id)
                 self.raw_repository.finish_batch(
@@ -459,8 +516,10 @@ class PriceValueInputPrepService:
                     "daily_sync_job_id": sync.id,
                     "pit_verified": False,
                     "research_only": True,
+                    **observation_metadata,
+                    "analysis_at": self.clock().astimezone(UTC).isoformat(),
                 }
-                self._capture_time(target)
+                self._capture_time(observation_date)
             except Exception as exc:
                 db.rollback()
                 batch = db.get(ImportBatch, batch_id)

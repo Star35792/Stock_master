@@ -457,3 +457,34 @@ class BacktestFinalHoldingsRead(BaseModel):
     cash: Decimal
     total_equity: Decimal
     holdings: list[BacktestFinalHoldingRead]
+
+
+class StrategyDefinitionRead(BaseModel):
+    """One registered built-in strategy definition."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    version: str
+    display_name: str | None = None
+    description: str | None = None
+    category: str
+    parameters_schema: dict[str, Any] = Field(default_factory=dict)
+    locked_parameters: list[str] = Field(default_factory=list)
+    required_margin: Decimal | None = None
+    inputs: list[str] = Field(default_factory=list)
+    is_active: bool = True
+    status: str = "active"
+
+
+class ValueInvestingScreenRequest(BaseModel):
+    """Run the built-in value-investing screen.
+
+    ``as_of`` selects a completed trading day; it must be strictly before
+    today in Shanghai time, because the daily bar of the running session is a
+    partial snapshot.  The screen takes no margin override on purpose: the
+    margin is a locked parameter of the registered strategy definition.
+    """
+
+    as_of: date | None = None

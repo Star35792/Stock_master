@@ -9,9 +9,7 @@ from app.services.eastmoney_collection import EastmoneyFlowCollectionService
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture Eastmoney capital-flow snapshots.")
     parser.add_argument("--limit", type=int, default=100)
-    parser.add_argument(
-        "--market", choices=("all", "sh", "sz", "cyb", "kcb"), default="all"
-    )
+    parser.add_argument("--market", choices=("all", "sh", "sz", "cyb", "kcb"), default="all")
     args = parser.parse_args()
     with SessionLocal() as db:
         result = EastmoneyFlowCollectionService().collect_current(

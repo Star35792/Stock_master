@@ -9,6 +9,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from app.factors.profile_evidence import parse_profile_evidence_identity
 from app.factors.quantile_diagnostics import prepare_tie_aware_quantiles
 
 
@@ -317,3 +318,57 @@ def test_warm_ic_script_includes_complete_endpoint_ties(tmp_path: Path) -> None:
     assert rows[0]["top_q_1d"] == pytest.approx(0.042)
     assert rows[0]["bottom_q_1d"] == pytest.approx(0.0045)
     con.close()
+
+
+def test_warm_ic_evidence_identity_requires_complete_price_dates() -> None:
+    script = _load_warm_ic_script()
+    first = date(2026, 1, 5)
+    second = date(2026, 1, 6)
+    daily = [
+        {"factor_name": "complete", "trade_date": first},
+        {"factor_name": "complete", "trade_date": second},
+        {"factor_name": "missing", "trade_date": first},
+    ]
+
+    identities = script._build_evidence_identities(
+        daily,
+        expected_trade_dates=[first, second],
+        requested_start_date=first,
+        requested_end_date=second,
+        release_tag="release-a",
+        factor_version="v-test",
+        code_version="source-a",
+        factor_snapshot_sha256="f" * 64,
+        price_snapshot_sha256="e" * 64,
+    )
+
+    assert set(identities) == {"complete"}
+    identity = parse_profile_evidence_identity(identities["complete"])
+    assert identity is not None
+    assert identity.trade_date_count == 2
+
+
+def test_warm_ic_source_snapshot_rejects_price_release_mismatch(tmp_path: Path) -> None:
+    script = _load_warm_ic_script()
+    warm_root = tmp_path / "warm"
+    factor_root = warm_root / "exported" / "release-a" / "factor" / "factor_value"
+    factor_root.mkdir(parents=True)
+    (factor_root / "part.parquet").write_bytes(b"factor")
+    prices = tmp_path / "prices_qfq"
+    prices.mkdir()
+    (prices / "part.parquet").write_bytes(b"prices")
+
+    class Store:
+        def __init__(self) -> None:
+            self.warm_root = warm_root
+
+        def table_globs(self, *args):
+            return [factor_root]
+
+    with pytest.raises(ValueError, match="does not match"):
+        script._capture_source_snapshots(
+            Store(),
+            release_tag="release-a",
+            curated_prices=prices,
+            expected_price_checksum="0" * 64,
+        )

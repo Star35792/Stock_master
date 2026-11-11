@@ -302,11 +302,11 @@ class WarmResearchReadRepository:
             rows = self._con.execute(
                 "SELECT symbol, trade_date, close, pe_ttm, pb_mrq, ps_ttm, "
                 "total_market_cap, total_shares, free_shares_a, "
-                "float_market_cap, change_rate, pit_verified "
+                "float_market_cap, change_rate, pit_verified, source_name "
                 "FROM research.valuation_history "
                 "WHERE trade_date BETWEEN ? AND ?"
                 f"{symbol_filter} "
-                "ORDER BY trade_date, symbol",
+                "ORDER BY trade_date, symbol, source_name",
                 params,
             ).fetchall()
         except Exception as exc:  # noqa: BLE001 - the table may not exist
@@ -329,6 +329,7 @@ class WarmResearchReadRepository:
                 float_market_cap=record[9],
                 change_rate=record[10],
                 pit_verified=bool(record[11]),
+                source_name=record[12],
             )
             for record in rows
         ]

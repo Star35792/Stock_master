@@ -14,9 +14,7 @@ def _parse_symbols(value: str | None) -> list[str] | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Calculate the crowding score factor."
-    )
+    parser = argparse.ArgumentParser(description="Calculate the crowding score factor.")
     parser.add_argument("--start-date", required=True, help="Inclusive start date, YYYY-MM-DD.")
     parser.add_argument("--end-date", required=True, help="Inclusive end date, YYYY-MM-DD.")
     parser.add_argument("--symbols", help="Optional comma-separated symbols.")

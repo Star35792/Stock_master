@@ -221,23 +221,27 @@ def factor_qualification_report(db: Session, spec_set: str) -> list[dict[str, ob
             db, factor_name=name, factor_version=FACTOR_VERSION, limit=1
         )
         if not summaries:
-            report.append({
-                "factor_name": name,
-                "factor_version": FACTOR_VERSION,
-                "pool": "frozen",
-                "reasons": ["no profile for the exact factor version"],
-            })
+            report.append(
+                {
+                    "factor_name": name,
+                    "factor_version": FACTOR_VERSION,
+                    "pool": "frozen",
+                    "reasons": ["no profile for the exact factor version"],
+                }
+            )
             continue
         result = classifier.classify(summaries)[0]
-        report.append({
-            "factor_name": name,
-            "factor_version": FACTOR_VERSION,
-            "pool": result.pool,
-            "reasons": result.reasons,
-            "trade_date_count": result.summary.trade_date_count,
-            "pit_status": result.summary.pit_status,
-            "evidence_eligibility": result.summary.evidence_eligibility,
-        })
+        report.append(
+            {
+                "factor_name": name,
+                "factor_version": FACTOR_VERSION,
+                "pool": result.pool,
+                "reasons": result.reasons,
+                "trade_date_count": result.summary.trade_date_count,
+                "pit_status": result.summary.pit_status,
+                "evidence_eligibility": result.summary.evidence_eligibility,
+            }
+        )
     return report
 
 
@@ -255,7 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release-tag", default="20261022-181648")
     parser.add_argument("--initial-cash", default="1000000")
     parser.add_argument(
-        "--invested-weight", default="1",
+        "--invested-weight",
+        default="1",
         help="目标股票仓位预算，1 为原策略；例如 0.8 保留至少 20% 现金",
     )
     parser.add_argument("--benchmark", default=None)
@@ -411,7 +416,8 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             "factor_qualifications": qualifications,
             "strategy_validation_status": "research_only",
             "research_read_source": settings.research_read_source,
-            "limitations": FACTOR_LIMITATIONS + (
+            "limitations": FACTOR_LIMITATIONS
+            + (
                 ["exact_factor_version_not_in_core_pool"]
                 if any(item["pool"] != "core" for item in qualifications)
                 else []
@@ -449,9 +455,7 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
         if args.out:
             out_path = Path(args.out)
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"\n已落盘: {args.out}")
     finally:
         db.close()

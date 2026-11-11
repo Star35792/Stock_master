@@ -38,43 +38,57 @@ def audit(start_date: date, end_date: date) -> dict[str, object]:
                 limit=1,
             )
             if not summaries:
-                qualifications.append({
-                    "factor_version": version,
-                    "pool": "frozen",
-                    "reasons": ["exact-version profile missing"],
-                })
+                qualifications.append(
+                    {
+                        "factor_version": version,
+                        "pool": "frozen",
+                        "reasons": ["exact-version profile missing"],
+                    }
+                )
                 continue
             result = classifier.classify(summaries)[0]
-            qualifications.append({
-                "factor_version": version,
-                "pool": result.pool,
-                "reasons": result.reasons,
-                "trade_date_count": result.summary.trade_date_count,
-                "pit_status": result.summary.pit_status,
-                "evidence_eligibility": result.summary.evidence_eligibility,
-            })
+            qualifications.append(
+                {
+                    "factor_version": version,
+                    "pool": result.pool,
+                    "reasons": result.reasons,
+                    "trade_date_count": result.summary.trade_date_count,
+                    "pit_status": result.summary.pit_status,
+                    "evidence_eligibility": result.summary.evidence_eligibility,
+                }
+            )
 
-        actions = list(db.scalars(
-            select(CorporateAction).where(
-                CorporateAction.ex_date >= start_date,
-                CorporateAction.ex_date <= end_date,
+        actions = list(
+            db.scalars(
+                select(CorporateAction).where(
+                    CorporateAction.ex_date >= start_date,
+                    CorporateAction.ex_date <= end_date,
+                )
             )
-        ))
-        zero_value_events = db.scalar(
-            select(func.count()).select_from(CorporateAction).where(
-                func.coalesce(CorporateAction.cash_dividend, 0) == 0,
-                func.coalesce(CorporateAction.bonus_share_ratio, 0) == 0,
-                func.coalesce(CorporateAction.transfer_share_ratio, 0) == 0,
-                func.coalesce(CorporateAction.rights_issue_ratio, 0) == 0,
-                func.coalesce(CorporateAction.split_ratio, 0) == 0,
+        )
+        zero_value_events = (
+            db.scalar(
+                select(func.count())
+                .select_from(CorporateAction)
+                .where(
+                    func.coalesce(CorporateAction.cash_dividend, 0) == 0,
+                    func.coalesce(CorporateAction.bonus_share_ratio, 0) == 0,
+                    func.coalesce(CorporateAction.transfer_share_ratio, 0) == 0,
+                    func.coalesce(CorporateAction.rights_issue_ratio, 0) == 0,
+                    func.coalesce(CorporateAction.split_ratio, 0) == 0,
+                )
             )
-        ) or 0
+            or 0
+        )
         status_events = db.scalar(select(func.count()).select_from(SecurityStatusEvent)) or 0
         industry_sources = Counter(db.scalars(select(SecurityIndustryHistory.source_name)))
         security_count = db.scalar(select(func.count()).select_from(Security)) or 0
-        delisted_count = db.scalar(
-            select(func.count()).select_from(Security).where(Security.delist_date.is_not(None))
-        ) or 0
+        delisted_count = (
+            db.scalar(
+                select(func.count()).select_from(Security).where(Security.delist_date.is_not(None))
+            )
+            or 0
+        )
 
     blockers = [
         "research_factor_version_v1_not_core",

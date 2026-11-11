@@ -247,7 +247,7 @@ def get_backtest_benchmark(
     run_id: int,
 ) -> BacktestBenchmarkRead:
     try:
-        return service.get_benchmark_comparison(db, run_id=run_id)
+        return service.get_benchmark_comparison(db, run_id=run_id, research_db=research_db)
     except ValueError as exc:
         detail = str(exc)
         code = 404 if detail == "backtest run not found" else 422

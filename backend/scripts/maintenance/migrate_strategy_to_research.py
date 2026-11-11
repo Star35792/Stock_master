@@ -49,17 +49,13 @@ def main(argv: list[str] | None = None) -> int:
     with duckdb_write_lock("data/duckdb_write.lock", timeout_seconds=120):
         with duckdb_write_lock("data/research_write.lock", timeout_seconds=120):
             con = duckdb.connect(settings.metadata_db_path)
-            con.execute(
-                f"ATTACH '{settings.research_db_path}' AS research"
-            )
+            con.execute(f"ATTACH '{settings.research_db_path}' AS research")
             try:
                 for table in TABLES:
                     copied = con.execute(
                         f"SELECT count(*) FROM research.strategy.{table}"
                     ).fetchone()[0]
-                    source = con.execute(
-                        f"SELECT count(*) FROM strategy.{table}"
-                    ).fetchone()[0]
+                    source = con.execute(f"SELECT count(*) FROM strategy.{table}").fetchone()[0]
                     if copied == source and source > 0:
                         print(f"  {table}: 已同步 {source} 行，跳过复制")
                         if not args.keep_main:
@@ -83,9 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                             f"AND table_name = '{table}' ORDER BY ordinal_position"
                         ).fetchall()
                     ]
-                    main_catalog = con.execute(
-                        "SELECT current_database()"
-                    ).fetchone()[0]
+                    main_catalog = con.execute("SELECT current_database()").fetchone()[0]
                     missing = [
                         column
                         for column in columns
@@ -102,9 +96,7 @@ def main(argv: list[str] | None = None) -> int:
                         }
                     ]
                     if missing:
-                        raise SystemExit(
-                            f"{table}: 主库缺少列 {missing}，中止"
-                        )
+                        raise SystemExit(f"{table}: 主库缺少列 {missing}，中止")
                     column_list = ", ".join(f'"{column}"' for column in columns)
                     con.execute(
                         f"INSERT INTO research.strategy.{table} ({column_list}) "
@@ -114,9 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                         f"SELECT count(*) FROM research.strategy.{table}"
                     ).fetchone()[0]
                     if moved != source:
-                        raise SystemExit(
-                            f"{table}: 复制后 {moved} != 源 {source}，中止"
-                        )
+                        raise SystemExit(f"{table}: 复制后 {moved} != 源 {source}，中止")
                     max_id = con.execute(
                         f"SELECT coalesce(max(id), 0) FROM research.strategy.{table}"
                     ).fetchone()[0]
@@ -126,15 +116,11 @@ def main(argv: list[str] | None = None) -> int:
                         # restart that one; drop any stray schema-qualified
                         # twin. DuckDB has no ALTER SEQUENCE RESTART.
                         con.execute(
-                            f"DROP SEQUENCE IF EXISTS "
-                            f"research.strategy.strategy_{table}_id_seq"
+                            f"DROP SEQUENCE IF EXISTS research.strategy.strategy_{table}_id_seq"
                         )
+                        con.execute(f"DROP SEQUENCE IF EXISTS research.strategy_{table}_id_seq")
                         con.execute(
-                            f"DROP SEQUENCE IF EXISTS research.strategy_{table}_id_seq"
-                        )
-                        con.execute(
-                            f"CREATE SEQUENCE research.strategy_{table}_id_seq "
-                            f"START {max_id + 1}"
+                            f"CREATE SEQUENCE research.strategy_{table}_id_seq START {max_id + 1}"
                         )
                     print(f"  {table}: 复制 {moved} 行，sequence 重启到 {max_id + 1}")
                     if not args.keep_main:

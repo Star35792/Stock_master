@@ -19,20 +19,27 @@ from app.schemas.strategy import (
     RollingFactorSelectionBacktestRequest,
     RollingWindowRead,
     RollingWindowRequest,
+    StrategyDefinitionRead,
+    ValueInvestingScreenRequest,
 )
 from app.services import StrategyResearchService
 from app.services.backtest import BacktestDataChangedError
 from app.services.price_value_backtest import PriceValueBacktestService
 from app.services.price_value_research import PriceValueResearchService
 from app.services.price_value_screen import PriceValueScreenService
+from app.services.price_value_tracking import PriceValueForwardTrackingService
 from app.services.training_factor_selector import build_training_selection_policy
+from app.services.value_investing_screen import ValueInvestingScreenService
 from app.strategies import FactorScoreSpec
+from app.strategies.registry import register_all_strategy_definitions
 
 router = APIRouter(prefix="/strategy-research", tags=["strategy-research"])
 service = StrategyResearchService()
 price_value_service = PriceValueResearchService()
 price_value_backtest_service = PriceValueBacktestService()
 price_value_screen_service = PriceValueScreenService()
+price_value_tracking_service = PriceValueForwardTrackingService()
+value_investing_service = ValueInvestingScreenService()
 
 
 def _to_portfolio_constraints(
@@ -56,9 +63,57 @@ def latest_price_value_screen(db: DatabaseSession) -> dict:
     return result
 
 
+@router.get("/definitions", response_model=list[StrategyDefinitionRead])
+def list_strategy_definitions(db: DatabaseSession) -> list[StrategyDefinitionRead]:
+    """List the registered built-in strategy definitions.
+
+    The catalog is the fact source for the locked parameters: a screen reads
+    its margin from this row instead of from the caller.
+    """
+    from app.repositories.strategy import StrategyDefinitionRepository
+
+    items, _ = StrategyDefinitionRepository().list(db, limit=500)
+    return [StrategyDefinitionRead.model_validate(item) for item in items]
+
+
+@router.post("/definitions/register-all")
+def register_strategy_definitions(db: DatabaseSession) -> dict:
+    """Register every built-in strategy definition (idempotent)."""
+    counts = register_all_strategy_definitions(db)
+    db.commit()
+    return {"registered": counts}
+
+
+@router.post("/value-investing/screen")
+def run_value_investing_screen(
+    payload: ValueInvestingScreenRequest,
+    db: DatabaseSession,
+) -> dict:
+    """Run the built-in value-investing screen with its locked margin of safety.
+
+    Read-only: the screen writes no weights, no orders and no portfolio
+    state.  The response is research output and carries
+    ``research_only=true / execution_eligible=false``.
+    """
+    try:
+        return value_investing_service.run(as_of=payload.as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/price-value/profit-status")
-def price_value_profit_status(db: DatabaseSession) -> dict:
-    return price_value_screen_service.profit_status(db)
+def price_value_profit_status(db: DatabaseSession, research_db: ResearchDatabaseSession) -> dict:
+    return price_value_screen_service.profit_status(db, research_db=research_db)
+
+
+@router.get("/price-value/screen/tracking")
+def price_value_screen_tracking(db: DatabaseSession) -> dict:
+    result = price_value_tracking_service.latest(db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="price/value screen has not run")
+    return result
 
 
 @router.post("/price-value/backtests", response_model=PriceValueBacktestResponse)
@@ -83,9 +138,11 @@ def run_price_value_backtest(
 
 
 @router.get("/price-value/backtests/{run_id}", response_model=PriceValueBacktestResponse)
-def get_price_value_backtest(run_id: int, db: DatabaseSession) -> PriceValueBacktestResponse:
+def get_price_value_backtest(
+    run_id: int, db: DatabaseSession, research_db: ResearchDatabaseSession
+) -> PriceValueBacktestResponse:
     try:
-        return price_value_backtest_service.get(db, run_id)
+        return price_value_backtest_service.get(db, run_id, research_db=research_db)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

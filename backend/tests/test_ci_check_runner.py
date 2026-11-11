@@ -29,7 +29,19 @@ def test_backend_checks_run_the_full_suite_once(runner):
             "scripts",
             "../scripts/ci_check.py",
         ],
-        ["uv", "run", "--extra", "dev", "pytest", "-q"],
+        # The pytest step pins its temporary directory inside the repo: the
+        # host environment's bulk-delete guard aborts the process once its
+        # unlink budget is exhausted, which turns unrelated tests into
+        # failures.  A repo-local basetemp keeps the run reproducible.
+        [
+            "uv",
+            "run",
+            "--extra",
+            "dev",
+            "pytest",
+            "-q",
+            f"--basetemp={RUNNER.parents[1] / 'backend' / '.pytest_tmp' / 'ci'}",
+        ],
     ]
     assert all(directory == RUNNER.parents[1] / "backend" for directory, _ in steps)
 

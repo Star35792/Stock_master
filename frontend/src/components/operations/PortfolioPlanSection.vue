@@ -61,6 +61,7 @@ const prefillBooks = ref<PositionBook[]>([]);
 const prefillBookId = ref<number | null>(null);
 const prefillRunId = ref("");
 const isPrefillingFromRun = ref(false);
+const backtestPrefillNote = ref<string | null>(null);
 
 async function prefillFromBacktestRun() {
   const runId = Number(prefillRunId.value);
@@ -82,11 +83,12 @@ async function prefillFromBacktestRun() {
       industry: row.industry ?? "",
       price: row.close,
       current_quantity: 0,
-      requested_weight: String(Number(row.weight)),
+      requested_weight: row.weight,
       lot_size: 100,
     }));
-    // 与账本预填同理：现金填回测期末现金，避免与已预填的目标权重双计。
-    form.cash = String(Number(report.cash));
+    // 复制目标权重且当前持仓为零：全部权益作为草案预算，不能仅使用剩余现金。
+    form.cash = report.total_equity;
+    backtestPrefillNote.value = `已复制回测 #${runId} 截至 ${report.as_of_date} 的目标权重，预算 ${report.total_equity} 元。当前持仓设为零，未复制历史实际持仓；请按所选账户核对预算与现仓。`;
     form.name = `预填自回测 #${runId}（截至 ${report.as_of_date}）`;
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "回测持仓预填失败";
@@ -109,6 +111,7 @@ async function loadPrefillBooks() {
 }
 
 async function prefillFromPositionBook() {
+  backtestPrefillNote.value = null;
   isPrefilling.value = true;
   errorMessage.value = null;
   try {
@@ -559,13 +562,14 @@ const reasonLabels: Record<string, string> = {
                 {{ isPrefilling ? "预填中…" : "从持仓账本预填" }}
               </button>
               <button type="button" class="secondary-action" :disabled="isPrefillingFromRun" @click="prefillFromBacktestRun">
-                {{ isPrefillingFromRun ? "预填中…" : "从回测持仓预填" }}
+                {{ isPrefillingFromRun ? "预填中…" : "复制回测目标权重" }}
               </button>
               <button type="button" class="secondary-action" @click="form.assets.push(newAsset())">
                 <Plus :size="16" />增加标的
               </button>
             </div>
           </div>
+          <p v-if="backtestPrefillNote" class="section-note">{{ backtestPrefillNote }}</p>
           <div v-for="(asset, index) in form.assets" :key="index" class="asset-row">
             <label>代码<input v-model.trim="asset.symbol" required maxlength="20" /></label>
             <label>类型

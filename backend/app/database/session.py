@@ -70,6 +70,11 @@ def apply_schema_compatibility(bind: Engine) -> None:
         # read one consistent value.  Additive and idempotent.
         ("market.security", "ALTER TABLE market.security "
          "ADD COLUMN IF NOT EXISTS special_treatment_status VARCHAR(20)"),
+        # Strategy definitions carry their locked thresholds in a JSON column
+        # so a run is reproducible from the catalog alone.  Nullable and
+        # additive: a pre-existing row simply has an empty parameter set.
+        ("strategy.strategy_definition", "ALTER TABLE strategy.strategy_definition "
+         "ADD COLUMN IF NOT EXISTS parameters JSON"),
     )
     with bind.begin() as conn:
         for table, statement in statements:

@@ -56,6 +56,11 @@ def test_factor_pool_cli_exports_horizon_observation_counts() -> None:
         "rank_ic_5d_observation_count",
         "rank_ic_20d_observation_count",
         "endpoint_observation_count",
+        "evidence_eligibility_count",
+        "evidence_identity_count",
+        "evidence_identity_valid",
+        "evidence_identity_release_tag",
+        "trade_date_sha256",
     ):
         assert f'"{field_name}"' in source
 

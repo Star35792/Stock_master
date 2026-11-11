@@ -96,9 +96,7 @@ def export_table(
     """把一张表按年月分区导出为 Parquet，并写 manifest。"""
     output_dir = warm_root / release_tag / schema / table
     if output_dir.exists():
-        raise FileExistsError(
-            f"release table already exists; use a new release tag: {output_dir}"
-        )
+        raise FileExistsError(f"release table already exists; use a new release tag: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=False)
 
     fingerprint = _table_fingerprint(con, schema, table, date_column)
@@ -177,9 +175,7 @@ def verify_export(
         FROM read_parquet('{result.output_dir.as_posix()}/**/*.parquet')
         """
     ).fetchone()[0]
-    source_count = con.execute(
-        f"SELECT COUNT(*) FROM {result.schema}.{result.table}"
-    ).fetchone()[0]
+    source_count = con.execute(f"SELECT COUNT(*) FROM {result.schema}.{result.table}").fetchone()[0]
     ok = int(parquet_count) == int(source_count)
     if ok:
         logger.info(
@@ -192,7 +188,10 @@ def verify_export(
     else:
         logger.error(
             "校验失败: %s.%s 源表 %s 行 != Parquet %s 行",
-            result.schema, result.table, source_count, parquet_count
+            result.schema,
+            result.table,
+            source_count,
+            parquet_count,
         )
     return ok
 
@@ -283,8 +282,7 @@ def main(argv: list[str] | None = None) -> int:
                 "table": r.table,
                 "mode": (
                     "snapshot"
-                    if not args.base_release_tag
-                    or f"{r.schema}.{r.table}" in snapshot_tables
+                    if not args.base_release_tag or f"{r.schema}.{r.table}" in snapshot_tables
                     else "delta"
                 ),
                 "row_count": r.row_count,

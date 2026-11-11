@@ -22,9 +22,7 @@ from app.services.job_logging import logged_job
 JOB_NAME = "price_value_research_factor_cleanup"
 
 
-def cleanup_research_factor(
-    db: Session, *, run_id: int, output_dir: Path
-) -> dict[str, object]:
+def cleanup_research_factor(db: Session, *, run_id: int, output_dir: Path) -> dict[str, object]:
     for job in db.scalars(
         select(JobLog).where(JobLog.job_name == JOB_NAME, JobLog.status == "success")
     ):
@@ -33,10 +31,13 @@ def cleanup_research_factor(
 
     prep = next(
         (
-            job for job in db.scalars(select(JobLog).where(
-                JobLog.job_name == "price_value_input_prep",
-                JobLog.status == "success",
-            ))
+            job
+            for job in db.scalars(
+                select(JobLog).where(
+                    JobLog.job_name == "price_value_input_prep",
+                    JobLog.status == "success",
+                )
+            )
             if (job.metadata_ or {}).get("factor_run_id") == run_id
         ),
         None,
@@ -45,14 +46,18 @@ def cleanup_research_factor(
     if prep is None or run is None or run.factor_name != "roe_ttm" or run.status != "success":
         raise ValueError("run is not an active legacy price/value ROE factor")
     target = date.fromisoformat((prep.metadata_ or {})["target_trade_date"])
-    values = list(db.scalars(
-        select(FactorValue).where(FactorValue.run_id == run_id).order_by(FactorValue.id)
-    ))
-    if not values or len(values) != run.rows_written or any(
-        row.factor_name != "roe_ttm"
-        or row.factor_version != run.factor_version
-        or row.trade_date != target
-        for row in values
+    values = list(
+        db.scalars(select(FactorValue).where(FactorValue.run_id == run_id).order_by(FactorValue.id))
+    )
+    if (
+        not values
+        or len(values) != run.rows_written
+        or any(
+            row.factor_name != "roe_ttm"
+            or row.factor_version != run.factor_version
+            or row.trade_date != target
+            for row in values
+        )
     ):
         raise ValueError("factor values do not match the legacy preparation run")
 
@@ -110,9 +115,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("data/repair"))
     args = parser.parse_args()
     with SessionLocal() as db:
-        result = cleanup_research_factor(
-            db, run_id=args.run_id, output_dir=args.output_dir
-        )
+        result = cleanup_research_factor(db, run_id=args.run_id, output_dir=args.output_dir)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 

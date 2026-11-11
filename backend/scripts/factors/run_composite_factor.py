@@ -27,9 +27,7 @@ def _parse_components(value: str) -> list[FactorScoreSpec]:
     for item in value.split(","):
         parts = [part.strip() for part in item.split(":")]
         if len(parts) not in {2, 4} or not all(parts[:2]):
-            raise ValueError(
-                "components must use name:version or name:version:weight:direction"
-            )
+            raise ValueError("components must use name:version or name:version:weight:direction")
         weight = Decimal(parts[2]) if len(parts) == 4 else Decimal(1)
         higher_is_better = True
         if len(parts) == 4:
@@ -48,9 +46,7 @@ def _parse_components(value: str) -> list[FactorScoreSpec]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Calculate a weighted composite decision factor."
-    )
+    parser = argparse.ArgumentParser(description="Calculate a weighted composite decision factor.")
     parser.add_argument("--start-date", required=True, help="Inclusive start date, YYYY-MM-DD.")
     parser.add_argument("--end-date", required=True, help="Inclusive end date, YYYY-MM-DD.")
     parser.add_argument(

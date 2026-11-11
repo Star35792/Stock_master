@@ -1,4 +1,34 @@
+export interface PriceValueResearchDiagnostics {
+  version: string;
+  trend: {
+    status: "improving" | "weak" | "mixed" | "unknown";
+    return_20: string | null;
+    ma20_gap: string | null;
+    reason_codes: string[];
+    source_refs: string[];
+  };
+  quality: {
+    status: "supported" | "risk" | "unknown" | "not_applicable";
+    net_income_sum_3y: string | null;
+    net_income_ttm?: string | null;
+    net_income_min_3y?: string | null;
+    net_income_positive_years_3y?: string | number | null;
+    ocf_profit_3y: string | null;
+    ocf_ttm: string | null;
+    reason_codes: string[];
+    source_refs: string[];
+  };
+  review_eligible: boolean;
+}
 export interface PriceValueScreenRow {
+  shortlist?: {
+    status: "selected" | "qualified_deferred" | "excluded" | "needs_review" | "blocked";
+    qualified: boolean;
+    selected: boolean;
+    rank: number | null;
+    reason_codes: string[];
+    metrics: Record<string, unknown>;
+  };
   symbol: string;
   name: string;
   industry: string | null;
@@ -25,8 +55,42 @@ export interface PriceValueScreenRow {
   roe_factor_name: string | null;
   roe_factor_version: string | null;
   roe_factor_run_id: number | null;
+  research_diagnostics?: PriceValueResearchDiagnostics;
 }
 export interface PriceValueScreenReport {
+  screen_version?: string;
+  selection?: {
+    version: string;
+    parameters: Record<string, unknown>;
+    qualified_count: number;
+    shortlist_count: number;
+    ordered_symbols: string[];
+    reason_counts: Record<string, number>;
+    ranking_description?: string;
+    rule_impact?: {
+      comparison: string;
+      v1_equivalent_qualified_count: number;
+      v1_equivalent_shortlist_count: number;
+      removed_from_qualified_by_v2_count: number;
+      removed_from_shortlist_by_v2: string[];
+      reason_counts: Record<string, number>;
+      mixed_with_other_reasons_count: number;
+    };
+  };
+  observation_mode?: "same_evening" | "current_research_catchup";
+  price_as_of?: string | null;
+  financial_as_of?: string | null;
+  analysis_at?: string | null;
+  observed_at?: string | null;
+  freshness?: {
+    status: "current" | "stale" | "unknown" | "future";
+    expected_trade_date: string | null;
+    checked_at: string;
+    reason_codes: string[];
+  };
+  candidate_eligible?: boolean;
+  research_candidate_count?: number;
+  diagnostic_version?: string;
   run_id: number;
   generated_at: string;
   target_trade_date: string | null;
@@ -55,6 +119,9 @@ export interface PriceValueScreenReport {
   limitations: string[];
   rows: PriceValueScreenRow[];
 }
+export type PriceValueRuleImpact = NonNullable<
+  NonNullable<PriceValueScreenReport["selection"]>["rule_impact"]
+>;
 export interface PriceValueProfitStatus {
   value_backtest: null | {
     run_id: number;
@@ -76,6 +143,53 @@ export interface PriceValueProfitStatus {
   }>;
   paper_profit_note: string;
 }
+export interface PriceValueTrackingPool {
+  status: "complete" | "incomplete";
+  member_count: number;
+  observed_count: number;
+  missing_count: number;
+  coverage_rate: string | null;
+  gross_return_observed: string | null;
+  net_return_observed: string | null;
+  excess_return_vs_research_pool?: string | null;
+  positive_member_rate: string | null;
+  maximum_member_loss: string | null;
+  missing_reason_counts: Record<string, number>;
+}
+export interface PriceValueForwardTracking {
+  version: string;
+  status: "blocked" | "pending" | "observing" | "incomplete" | "complete";
+  reason_codes: string[];
+  snapshot_hash?: string;
+  screen_version?: string;
+  selection_version?: string;
+  target_trade_date?: string;
+  observation_mode?: "same_evening" | "current_research_catchup";
+  analysis_at?: string | null;
+  formation_cutoff?: string;
+  entry_date?: string | null;
+  benchmark?: string;
+  price_dataset?: string;
+  price_input_hash?: string | null;
+  observation_hash?: string;
+  cost_policy?: {
+    version: string;
+    round_trip_cost_rate: string;
+    description: string;
+  };
+  pools: Record<string, string[]>;
+  rule_impact?: PriceValueRuleImpact;
+  windows: Array<{
+    trading_days: number;
+    status: "pending" | "incomplete" | "complete";
+    end_date: string | null;
+    reason_codes: string[];
+    pools: Record<"shortlist" | "qualified" | "research", PriceValueTrackingPool> | Record<string, never>;
+  }>;
+  research_only: true;
+  pit_verified: false;
+  execution_eligible: false;
+}
 export async function fetchPriceValueScreen(signal?: AbortSignal): Promise<PriceValueScreenReport | null> {
   const response = await fetch("/api/v1/strategy-research/price-value/screen/latest", { signal });
   if (response.status === 404) return null;
@@ -86,4 +200,10 @@ export async function fetchPriceValueProfitStatus(signal?: AbortSignal): Promise
   const response = await fetch("/api/v1/strategy-research/price-value/profit-status", { signal });
   if (!response.ok) throw new Error(`收益状态读取失败（${response.status}）`);
   return response.json() as Promise<PriceValueProfitStatus>;
+}
+export async function fetchPriceValueTracking(signal?: AbortSignal): Promise<PriceValueForwardTracking | null> {
+  const response = await fetch("/api/v1/strategy-research/price-value/screen/tracking", { signal });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`名单效果跟踪读取失败（${response.status}）`);
+  return response.json() as Promise<PriceValueForwardTracking>;
 }

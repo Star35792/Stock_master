@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import calendar
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -151,7 +152,16 @@ def save_report(output: Path, report: dict) -> None:
     }
     temp = output.with_name(output.name + f".{uuid4().hex[:8]}.tmp")
     temp.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp.replace(output)
+    # Windows readers can briefly hold a handle that denies atomic replacement.
+    # A diagnostic reader must not abort a long, already committed data import.
+    for attempt in range(20):
+        try:
+            temp.replace(output)
+            break
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def main() -> int:
@@ -163,6 +173,9 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-complete", action="store_true")
+    parser.add_argument(
+        "--resume", action="store_true", help="Resume unattempted symbols in the same dated report"
+    )
     args = parser.parse_args()
     if not 1 <= args.workers <= 8 or (args.max_symbols is not None and args.max_symbols < 1):
         parser.error("workers must be 1..8; max-symbols must be positive")
@@ -182,6 +195,13 @@ def main() -> int:
         "workers": args.workers,
         "symbols": [],
     }
+    if args.resume:
+        previous = json.loads(args.output.read_text(encoding="utf-8"))
+        if previous.get("as_of") != as_of.isoformat() or previous.get("scope") != report["scope"]:
+            parser.error("resume report must have the same scope and observation date")
+        report["symbols"] = previous["symbols"]
+        report["started_at"] = previous["started_at"]
+        report["resumed_at"] = datetime.now(UTC).isoformat()
     try:
         with duckdb_write_lock(
             Path(settings.metadata_db_path).resolve().parent / "duckdb_write.lock"
@@ -203,6 +223,11 @@ def main() -> int:
                 if args.max_symbols:
                     symbols = symbols[: args.max_symbols]
                 report["requested_symbols"] = len(symbols)
+                if args.resume:
+                    attempted = {r["symbol"] for r in report["symbols"]}
+                    if not attempted <= set(symbols):
+                        raise ValueError("resume report contains symbols outside requested scope")
+                    symbols = [s for s in symbols if s not in attempted]
                 save_report(args.output, report)
                 # Bound network cache memory to one worker-sized batch.
                 for offset in range(0, len(symbols), args.workers):
@@ -226,7 +251,7 @@ def main() -> int:
                         report["symbols"].append(state)
                         save_report(args.output, report)
                         print(
-                            f"{len(report['symbols'])}/{len(symbols)} {symbol} "
+                            f"{len(report['symbols'])}/{report['requested_symbols']} {symbol} "
                             f"annual={state['annual']['status']} "
                             f"quarterly={state['quarterly']['status']}",
                             flush=True,

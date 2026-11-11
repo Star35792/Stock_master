@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+from app.factors.profile_evidence import build_profile_evidence_identity
 from app.services import FactorPoolClassifierService, FactorPoolPolicy
 from app.services.factor_batch_profiler import FactorProfileSummary
 
@@ -20,10 +21,27 @@ def _summary(
     pit_status: str = "point_in_time",
     factor_status: str = "active",
     evidence_eligibility: str = "strategy_eligible",
-    evidence_eligibility_reason: str = "verified PIT evidence",
+    evidence_eligibility_reason: str | None = None,
+    evidence_eligibility_count: int = 1,
+    evidence_identity_count: int = 1,
     code_version: str | None = "code-a",
     code_version_count: int = 1,
 ) -> FactorProfileSummary:
+    trade_date_sha256 = "d" * 64
+    resolved_reason = evidence_eligibility_reason or build_profile_evidence_identity(
+        release_tag="release-a",
+        factor_snapshot_sha256="f" * 64,
+        price_snapshot_sha256="e" * 64,
+        trade_date_sha256=trade_date_sha256,
+        requested_start_date=date(2024, 1, 2),
+        requested_end_date=date(2025, 12, 31),
+        start_date=date(2024, 1, 2),
+        end_date=date(2025, 12, 31),
+        trade_date_count=trade_date_count,
+        factor_name="ret_1d",
+        factor_version="v1-qfq",
+        code_version=code_version or "code-a",
+    )
     return FactorProfileSummary(
         factor_name="ret_1d",
         factor_version="v1-qfq",
@@ -48,7 +66,10 @@ def _summary(
         pit_status=pit_status,
         factor_status=factor_status,
         evidence_eligibility=evidence_eligibility,
-        evidence_eligibility_reason=evidence_eligibility_reason,
+        evidence_eligibility_reason=resolved_reason,
+        evidence_eligibility_count=evidence_eligibility_count,
+        evidence_identity_count=evidence_identity_count,
+        trade_date_sha256=trade_date_sha256,
     )
 
 
@@ -248,6 +269,26 @@ def test_missing_or_placeholder_code_version_cannot_enter_core() -> None:
         )[0]
         assert result.pool == "observation"
         assert any("code_version=" in reason for reason in result.reasons)
+
+
+def test_legacy_or_mixed_evidence_identity_cannot_enter_core() -> None:
+    service = FactorPoolClassifierService()
+    for summary in (
+        _summary(evidence_eligibility_reason="verified PIT evidence"),
+        _summary(evidence_identity_count=2),
+        _summary(evidence_eligibility_count=2),
+    ):
+        result = service.classify([summary])[0]
+        assert result.pool == "observation"
+        assert any("evidence_identity_invalid" in reason for reason in result.reasons)
+
+
+def test_evidence_identity_date_hash_mismatch_cannot_enter_core() -> None:
+    summary = _summary()
+    summary = FactorProfileSummary(**{**vars(summary), "trade_date_sha256": "0" * 64})
+    result = FactorPoolClassifierService().classify([summary])[0]
+    assert result.pool == "observation"
+    assert any("evidence_identity_invalid" in reason for reason in result.reasons)
 
 
 def test_default_pit_status_is_unknown() -> None:

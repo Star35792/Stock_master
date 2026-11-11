@@ -290,7 +290,8 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
 
         selection_enabled = args.selection_policy != "none"
         limitations = [
-            item for item in FACTOR_LIMITATIONS
+            item
+            for item in FACTOR_LIMITATIONS
             if item != "single_window_no_out_of_sample_validation"
         ]
         if selection_enabled:
@@ -336,7 +337,8 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
             "factor_version": args.factor_version,
             "research_read_source": settings.research_read_source,
             "interpretation": (
-                "link_validation_only" if selection_enabled
+                "link_validation_only"
+                if selection_enabled
                 else "fixed_rule_window_sensitivity_only"
             ),
             "limitations": limitations,
@@ -357,9 +359,7 @@ def _run(args: argparse.Namespace, research_db: Session) -> int:
         if args.out:
             out_path = Path(args.out)
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"\n已落盘: {args.out}")
     finally:
         db.close()
