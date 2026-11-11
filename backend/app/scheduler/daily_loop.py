@@ -27,6 +27,10 @@ from app.repositories.market import SecurityRepository, TradingCalendarRepositor
 from app.repositories.system import JobLogRepository
 from app.repositories.system.auto_data_sync import AutoDataSyncRepository
 from app.repositories.warm_layer import WarmLayerStore
+from app.scheduler.alternative_data import (
+    AlternativeDataCollectionResult,
+    run_alternative_data_collection,
+)
 from app.scheduler.daily_sync import run_hithink_daily_sync
 from app.scheduler.factor_pipeline import (
     DAILY_FACTOR_SET_VERSION,
@@ -58,9 +62,11 @@ class DailyLoopResult:
     sync_result: HithinkDailySyncResult | None = None
     curated_result: CuratedDatasetResult | None = None
     factor_result: FactorBatchResult | None = None
+    alternative_result: AlternativeDataCollectionResult | None = None
     sync_error: str | None = None
     curated_error: str | None = None
     factor_error: str | None = None
+    alternative_error: str | None = None
     skipped: bool = False
     skip_reason: str | None = None
     failed: bool = False
@@ -106,6 +112,8 @@ def run_daily_loop(
     adjustment_version: str = "v1",
     target_date: date | None = None,
     skip_sync: bool = False,
+    collect_alternative_data: bool = True,
+    alternative_collector: Callable[..., AlternativeDataCollectionResult] | None = None,
     session_factory: Callable[[], Session] = SessionLocal,
     security_repository: SecurityRepository | None = None,
     job_log_repository: JobLogRepository | None = None,
@@ -115,6 +123,11 @@ def run_daily_loop(
 
     参数 ``symbols`` 为 ``None`` 时从 ``market.security`` 拉取全部 active 证券。
     同步失败时直接结束并标记任务失败；因子管道部分失败时标记 partial。
+
+    六族 alternative 数据（情绪/宏观/政策/盈利预期/资金流/拥挤度）在因子管道
+    **之前**采集——这六族因子读的就是 ``market.alternative_data_snapshot``，
+    晚采一天就等于让它们白等一天。采集失败**不**让整轮失败（行情更重要），
+    但会把任务降级为 partial 并留下 reason code，避免断供再次伪装成成功。
     """
     repo = job_log_repository or JobLogRepository()
     result = DailyLoopResult()
@@ -430,6 +443,66 @@ def run_daily_loop(
             }
             db.commit()
 
+        # ---- Alternative data collection (six families) ----
+        # Runs *before* the factor pipeline on purpose: sentiment / macro /
+        # policy / earnings-revision / capital-flow / crowding factors all read
+        # ``market.alternative_data_snapshot``, and that snapshot is a daily
+        # series — collecting afterwards would leave the six families one day
+        # behind for no reason.
+        #
+        # Failure semantics: a vendor outage must not fail the whole loop (the
+        # market sync matters more), but it must not be swallowed either —
+        # otherwise the six families go stale again while the job log keeps
+        # claiming "success", which is precisely the failure mode this step
+        # exists to fix.  So the job is degraded to ``partial`` and the reason
+        # code is surfaced (see the degradation block before ``repo.finish``).
+        alternative_status: str | None = None
+        alternative_meta: dict[str, object] = {}
+        if collect_alternative_data:
+            collector = alternative_collector or run_alternative_data_collection
+            try:
+                alt_result = collector(
+                    session_factory=session_factory,
+                    job_log_repository=repo,
+                )
+                result.alternative_result = alt_result
+                alternative_status = alt_result.status
+                alternative_meta = {
+                    "alternative_status": alt_result.status,
+                    "alternative_sources": alt_result.sources,
+                    "alternative_empty_datasets": list(alt_result.empty_datasets),
+                    "alternative_failures": alt_result.failures,
+                }
+                if alt_result.status == "failed":
+                    result.alternative_error = (
+                        "alternative data collection failed: "
+                        + "; ".join(
+                            f"{name}: {message}"
+                            for name, message in sorted(alt_result.failures.items())
+                        )
+                    )
+                elif alt_result.status == "partial":
+                    result.alternative_error = (
+                        "alternative data collection returned empty datasets: "
+                        + ", ".join(alt_result.empty_datasets)
+                    )
+            except Exception as exc:  # noqa: BLE001 - never fail the loop here
+                alternative_status = "failed"
+                alternative_meta = {
+                    "alternative_status": "failed",
+                    "alternative_sources": {},
+                    "alternative_empty_datasets": [],
+                    "alternative_failures": {
+                        "collector": f"{type(exc).__name__}: {exc}"
+                    },
+                }
+                result.alternative_error = (
+                    f"alternative data collection raised: {type(exc).__name__}: {exc}"
+                )
+                logger.exception("Alternative data collection failed")
+            job.metadata_ = {**(job.metadata_ or {}), **alternative_meta}
+            db.commit()
+
         try:
             factor_result = run_all_factors(
                 start_date=today - timedelta(days=factor_lookback_days),
@@ -569,6 +642,27 @@ def run_daily_loop(
             job.status = "failed"
             job.error_message = error_message
 
+        # ---- Alternative data degradation ----
+        # Applied last so the factor/gate stages cannot overwrite it, and
+        # deliberately *not* a hard failure: the market release and the publish
+        # gate are independent of the alternative snapshots.  A degraded job is
+        # still a visible one — that is the whole point.
+        if alternative_status and alternative_status != "success":
+            reason_codes = list((job.metadata_ or {}).get("reason_codes") or [])
+            reason_code = (
+                "ALTERNATIVE_DATA_SOURCE_FAILED"
+                if alternative_status == "failed"
+                else "ALTERNATIVE_DATA_EMPTY_DATASETS"
+            )
+            if reason_code not in reason_codes:
+                reason_codes.append(reason_code)
+            job.metadata_ = {
+                **(job.metadata_ or {}),
+                "reason_codes": reason_codes,
+            }
+            if job.status == "success":
+                job.status = "partial"
+
         repo.finish(
             db,
             job_log=job,
@@ -585,10 +679,12 @@ def run_daily_loop(
             discard_directory(staged_path)
 
     logger.info(
-        "Daily loop completed: failed=%s sync_trusted=%s factor_rows=%s",
+        "Daily loop completed: failed=%s sync_trusted=%s factor_rows=%s "
+        "alternative=%s",
         result.failed,
         result.sync_result.market_build.trusted_count if result.sync_result else 0,
         result.factor_result.total_rows if result.factor_result else 0,
+        result.alternative_result.status if result.alternative_result else "skipped",
     )
     return result
 

@@ -80,11 +80,13 @@ SENTIMENT_FACTOR_SPECS = (
         name="dragon_tiger_net_buy_ratio",
         display_name="Dragon tiger net buy ratio",
         description="latest available dragon tiger net buy ratio",
-        inputs=(
-            "market.alternative_data_snapshot.dragon_tiger.attributes",
-            "market.alternative_data_snapshot.dragon_tiger_hot_money.attributes",
-        ),
-        datasets=("dragon_tiger", "dragon_tiger_hot_money"),
+        # 只用总榜 ``dragon_tiger``。游资榜 ``dragon_tiger_hot_money`` 是
+        # **席位口径**（net_rate = 该席位对该股的净买率），与总榜口径不同；
+        # 同一只股票还可能同时出现在两个席位下（唯一键带席位区分）。
+        # 把两张榜混进同一个因子，等于让「龙虎榜净买比例」在不同标的上
+        # 悄悄换口径——所以这里显式只用总榜，游资数据留给专门的席位因子。
+        inputs=("market.alternative_data_snapshot.dragon_tiger.attributes",),
+        datasets=("dragon_tiger",),
     ),
     SentimentFactorSpec(
         name="limit_up_breadth",

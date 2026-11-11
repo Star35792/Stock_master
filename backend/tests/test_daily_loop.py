@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.config.settings import Settings
+from app.scheduler.alternative_data import AlternativeDataCollectionResult
 from app.scheduler.daily_loop import run_daily_loop
 from app.scheduler.factor_pipeline import FactorBatchResult
 from app.services import (
@@ -137,6 +138,13 @@ def _reset_daily_loop_settings(monkeypatch: pytest.MonkeyPatch) -> None:
             "gate_core_factor_partial": False,
             "gate_query_error": False,
         },
+    )
+    # The six-family collector talks to external vendors.  Orchestration tests
+    # must never reach the network, so the default collector is stubbed here;
+    # the dedicated alternative-data tests inject their own fake.
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_alternative_data_collection",
+        lambda **kwargs: AlternativeDataCollectionResult(status="success"),
     )
 
 
@@ -652,3 +660,202 @@ def test_daily_loop_fails_when_calendar_missing(monkeypatch: pytest.MonkeyPatch)
     assert len(job_log_repo.jobs) == 1
     assert job_log_repo.jobs[0].status == "failed"
     assert "CALENDAR_MISSING" in job_log_repo.jobs[0].metadata_.get("reason_codes", [])
+
+
+# ---------------------------------------------------------------------------
+# Alternative data (six families) wiring
+# ---------------------------------------------------------------------------
+
+
+def test_daily_loop_collects_alternative_data_before_the_factor_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The six families feed the factor pipeline — they must be collected first."""
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    order: list[str] = []
+
+    def fake_alternative(**kwargs: object) -> AlternativeDataCollectionResult:
+        order.append("alternative")
+        return AlternativeDataCollectionResult(status="success")
+
+    def fake_factors(**kwargs: object) -> FactorBatchResult:
+        order.append("factors")
+        return _fake_factor_result()
+
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr("app.scheduler.daily_loop.run_all_factors", fake_factors)
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=FakeSecurityRepository(["600519.SH"]),
+        job_log_repository=job_log_repo,
+        alternative_collector=fake_alternative,
+    )
+
+    assert order == ["alternative", "factors"]
+    assert result.failed is False
+    assert result.alternative_result is not None
+    assert result.alternative_result.status == "success"
+    assert result.alternative_error is None
+    assert job_log_repo.jobs[0].status == "success"
+    assert job_log_repo.jobs[0].metadata_["alternative_status"] == "success"
+    assert "ALTERNATIVE_DATA_EMPTY_DATASETS" not in (
+        job_log_repo.jobs[0].metadata_.get("reason_codes") or []
+    )
+
+
+def test_daily_loop_degrades_to_partial_when_alternative_source_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A vendor outage must not fail the market closure, but must be visible."""
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    def fake_alternative(**kwargs: object) -> AlternativeDataCollectionResult:
+        return AlternativeDataCollectionResult(
+            status="failed",
+            failures={"eastmoney": "ConnectionError: tunnel 502"},
+        )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=FakeSecurityRepository(["600519.SH"]),
+        job_log_repository=job_log_repo,
+        alternative_collector=fake_alternative,
+    )
+
+    assert result.failed is False
+    assert result.factor_result is not None
+    assert result.alternative_result is not None
+    assert result.alternative_result.status == "failed"
+    assert result.alternative_error is not None
+    assert "eastmoney" in result.alternative_error
+    job = job_log_repo.jobs[0]
+    assert job.status == "partial"
+    assert "ALTERNATIVE_DATA_SOURCE_FAILED" in job.metadata_["reason_codes"]
+    assert job.metadata_["alternative_failures"]["eastmoney"].startswith(
+        "ConnectionError"
+    )
+
+
+def test_daily_loop_degrades_to_partial_when_alternative_datasets_are_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty set is not a success — the endpoint may be alive but useless."""
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    def fake_alternative(**kwargs: object) -> AlternativeDataCollectionResult:
+        return AlternativeDataCollectionResult(
+            status="partial",
+            empty_datasets=("hot_stock", "limit_up_pool"),
+        )
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=FakeSecurityRepository(["600519.SH"]),
+        job_log_repository=job_log_repo,
+        alternative_collector=fake_alternative,
+    )
+
+    assert result.failed is False
+    assert result.alternative_error is not None
+    assert "hot_stock" in result.alternative_error
+    job = job_log_repo.jobs[0]
+    assert job.status == "partial"
+    assert "ALTERNATIVE_DATA_EMPTY_DATASETS" in job.metadata_["reason_codes"]
+    assert job.metadata_["alternative_empty_datasets"] == [
+        "hot_stock",
+        "limit_up_pool",
+    ]
+
+
+def test_daily_loop_survives_an_alternative_collector_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected exception must not abort the factor pipeline."""
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    def boom(**kwargs: object) -> AlternativeDataCollectionResult:
+        raise RuntimeError("collector exploded")
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=FakeSecurityRepository(["600519.SH"]),
+        job_log_repository=job_log_repo,
+        alternative_collector=boom,
+    )
+
+    assert result.failed is False
+    assert result.factor_result is not None
+    assert result.alternative_error is not None
+    assert "collector exploded" in result.alternative_error
+    job = job_log_repo.jobs[0]
+    assert job.status == "partial"
+    assert "ALTERNATIVE_DATA_SOURCE_FAILED" in job.metadata_["reason_codes"]
+
+
+def test_daily_loop_can_skip_alternative_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    job_log_repo = FakeJobLogRepository()
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        lambda **kwargs: _fake_sync_result(),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.run_all_factors",
+        lambda **kwargs: _fake_factor_result(),
+    )
+
+    def must_not_run(**kwargs: object) -> AlternativeDataCollectionResult:
+        raise AssertionError("alternative collection must be skippable")
+
+    result = run_daily_loop(
+        symbols=["600519.SH"],
+        session_factory=lambda: session,
+        security_repository=FakeSecurityRepository(["600519.SH"]),
+        job_log_repository=job_log_repo,
+        collect_alternative_data=False,
+        alternative_collector=must_not_run,
+    )
+
+    assert result.failed is False
+    assert result.alternative_result is None
+    assert result.alternative_error is None
+    assert job_log_repo.jobs[0].status == "success"
+    assert "alternative_status" not in job_log_repo.jobs[0].metadata_

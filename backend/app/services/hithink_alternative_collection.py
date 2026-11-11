@@ -55,6 +55,12 @@ class HithinkAlternativeCollectionService:
             request_params={"index_symbols": index_symbols or []},
         )
         dragon_tiger = self.data_source.fetch_dragon_tiger_list()
+        # 游资榜是**独立的一张榜**：端点用 ``board_type`` 选择返回哪张榜，
+        # ``board_type="all"`` 的响应里 ``hot_money_items`` 恒为空数组。
+        # 早先把这个数据集判成「端点该子集无内容」是误判——参数没传对而已。
+        dragon_tiger_hot_money = self.data_source.fetch_dragon_tiger_list(
+            board_type="hot_money"
+        )
         payloads = {
             "limit_up_pool": self.data_source.fetch_limit_up_pool(),
             "limit_up_ladder": self.data_source.fetch_limit_up_ladder(),
@@ -63,9 +69,11 @@ class HithinkAlternativeCollectionService:
             "skyrocket": self.data_source.fetch_skyrocket_list(),
             "dragon_tiger": dragon_tiger,
             "dragon_tiger_hot_money": {
-                "timestamp": dragon_tiger.get("timestamp"),
-                "trade_date": dragon_tiger.get("trade_date"),
-                "item": dragon_tiger.get("hot_money_items", []),
+                "timestamp": dragon_tiger_hot_money.get("timestamp"),
+                "trade_date": dragon_tiger_hot_money.get("trade_date"),
+                "item": _flatten_hot_money(
+                    dragon_tiger_hot_money.get("hot_money_items") or []
+                ),
             },
             **{
                 f"index_catalog_{tag}": {
@@ -150,6 +158,29 @@ def _normalize_payload(
         symbol = item.get("thscode")
         item_date = _parse_item_date(item.get("date")) or snapshot_date
         item_key = str(symbol or item.get("name") or item.get("stock_name") or index)
+        value = _first_decimal(
+            item,
+            "heat",
+            "net_value",
+            "seal_money",
+            "continue_day_cnt",
+        )
+        if dataset == "dragon_tiger_hot_money":
+            # 同一只股票可能同时出现在两个游资席位下（实测 2026-11-10 有 7 只）。
+            # item_key 必须带上席位，否则 (dataset, snapshot_date, item_key)
+            # 唯一键会让后一条覆盖前一条，席位归属就静默丢了。
+            seat = item.get("hot_money_seat")
+            if seat:
+                item_key = f"{seat}|{item_key}"
+            # 席位口径的净买额。端点的 ``net_value`` 在这张榜里是**该席位**
+            # 的净买额，与总榜 ``dragon_tiger`` 的 ``net_value`` 不同口径。
+            seat_value = _first_decimal(
+                item,
+                "hot_money_item_net_value",
+                "hot_money_net_value",
+            )
+            if seat_value is not None:
+                value = seat_value
         rows.append(
             {
                 "dataset": dataset,
@@ -157,18 +188,36 @@ def _normalize_payload(
                 "item_key": item_key,
                 "symbol": str(symbol).upper() if symbol else None,
                 "rank": _integer(item.get("rank") or item.get("hot_rank")),
-                "value": _first_decimal(
-                    item,
-                    "heat",
-                    "net_value",
-                    "seal_money",
-                    "continue_day_cnt",
-                ),
+                "value": value,
                 "attributes": item,
                 "source_name": source_name,
             }
         )
     return rows
+
+
+def _flatten_hot_money(seats: list[dict]) -> list[dict]:
+    """把「游资席位 → 个股」两层结构拍平成个股行。
+
+    端点的游资榜是**按席位分组**的：每个席位一个对象，内含 ``rows``
+    （该席位的个股明细）。把它当个股列表直接读会得到 0 行——这正是该
+    数据集长期被误判为「端点无内容」的原因。
+
+    席位名随行携带（``hot_money_seat``），归一化时用它区分 item_key。
+    """
+    flattened: list[dict] = []
+    for seat in seats:
+        seat_name = seat.get("name")
+        seat_buying = seat.get("buying")
+        for row in seat.get("rows") or []:
+            flattened.append(
+                {
+                    **row,
+                    "hot_money_seat": seat_name,
+                    "hot_money_seat_buying": seat_buying,
+                }
+            )
+    return flattened
 
 
 def _flatten_ladder(items: list[dict]) -> list[dict]:

@@ -83,6 +83,9 @@ def main() -> int:
     print(f"daily_loop.skip_reason={result.skip_reason or ''}")
     print(f"daily_loop.sync_error={result.sync_error or ''}")
     print(f"daily_loop.factor_error={result.factor_error or ''}")
+    print(f"daily_loop.alternative_error={result.alternative_error or ''}")
+    if result.alternative_result:
+        print(f"daily_loop.alternative_status={result.alternative_result.status}")
     if result.sync_result:
         print(f"daily_loop.sync_trusted={result.sync_result.market_build.trusted_count}")
     if result.factor_result:

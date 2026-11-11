@@ -122,6 +122,9 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
             value="12",
             attributes={"net_rate": "0.12"},
         ),
+        # 游资榜是**席位口径**，与总榜不同口径，且同一只股票可能出现在两个
+        # 席位下。该数据集不得进入 dragon_tiger_net_buy_ratio——否则这个
+        # 因子会在不同标的上悄悄换口径。
         _snapshot(
             "dragon_tiger_hot_money",
             "BBB",
@@ -159,7 +162,7 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
         "hot_heat": 2,
         "hot_rank_change": 2,
         "limit_up_strength": 2,
-        "dragon_tiger_net_buy_ratio": 2,
+        "dragon_tiger_net_buy_ratio": 1,
         "limit_up_breadth": 3,
         "limit_up_failure_rate": 3,
         "consecutive_limit_up_height": 3,
@@ -167,7 +170,7 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
         "sentiment_temperature_percentile": 3,
         "overheat_reversal_signal": 3,
     }
-    assert result.total_rows == 28
+    assert result.total_rows == 27
     assert result.input_rows == len(snapshots)
     assert len(definition_repository.definitions) == 11
     assert all(run["status"] == "success" for run in run_repository.finished)
@@ -188,7 +191,8 @@ def test_sentiment_factor_service_calculates_snapshot_factors() -> None:
     assert values[("hot_rank_change", "BBB")] == Decimal("6.0000000000")
     assert values[("limit_up_strength", "CCC")] == Decimal("500.0000000000")
     assert values[("dragon_tiger_net_buy_ratio", "AAA")] == Decimal("0.1200000000")
-    assert values[("dragon_tiger_net_buy_ratio", "BBB")] == Decimal("0.1000000000")
+    # BBB 只有游资榜（席位口径）快照：不得进入龙虎榜净买比例因子
+    assert ("dragon_tiger_net_buy_ratio", "BBB") not in values
     assert values[("limit_up_breadth", "AAA")] == Decimal("0.6666666667")
     assert values[("limit_up_failure_rate", "AAA")] == Decimal("0.3333333333")
     assert values[("consecutive_limit_up_height", "AAA")] == Decimal("3.0000000000")

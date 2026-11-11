@@ -128,12 +128,15 @@ DATASET_SUPPLY_REGISTRY: dict[str, DatasetSupplySpec] = {
         DatasetSupplySpec(
             dataset="dragon_tiger_hot_money",
             factor_family="sentiment",
-            endpoint="hithink /api/a-share/dragon-tiger-list (hot_money_items)",
+            endpoint="hithink /api/a-share/dragon-tiger-list?board_type=hot_money",
             min_expected_rows=1,
             pit_semantics=PitSemantics.NEXT_SESSION_PUBLISH,
-            status=SupplyStatus.EMPTY,
-            blocker="端点 hot_money_items 恒为空数组，归一化后 0 行",
-            notes="2026-09-17 抓取时即为 0 行，非断供而是端点该子集无内容",
+            status=SupplyStatus.CONNECTED,
+            notes=(
+                "游资席位榜；端点用 board_type 选择榜单，board_type=all 的响应里 "
+                "hot_money_items 恒为空——早期把它判成「端点无内容」是误判。"
+                "数据为席位口径，与总榜 dragon_tiger 口径不同，不得混用于同一因子"
+            ),
         ),
         DatasetSupplySpec(
             dataset="failed_limit_up",
