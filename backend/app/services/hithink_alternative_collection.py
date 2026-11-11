@@ -13,6 +13,7 @@ from app.data_sources import HithinkFinanceDataSource
 from app.models.market import AlternativeDataSnapshot, IndexConstituentSnapshot
 from app.models.raw import RawVendorSnapshot
 from app.repositories.raw import RawDailyBarImportRepository
+from app.services.alternative_data_supply import EmptyDatasetError, check_dataset_supply
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -23,6 +24,9 @@ class AlternativeCollectionResult:
     raw_snapshots: int
     normalized_rows: int
     constituent_rows: int
+    #: 归一化后没有任何行的 dataset。端点返回空集时**必须**出现在这里，
+    #: 否则断供会伪装成一次成功采集。
+    empty_datasets: tuple[str, ...] = ()
 
 
 class HithinkAlternativeCollectionService:
@@ -74,6 +78,7 @@ class HithinkAlternativeCollectionService:
         raw_count = 0
         normalized_count = 0
         constituent_count = 0
+        empty_datasets: list[str] = []
         try:
             for dataset, payload in payloads.items():
                 snapshot_date = _snapshot_date(payload)
@@ -88,6 +93,12 @@ class HithinkAlternativeCollectionService:
                 )
                 raw_count += 1
                 rows = _normalize_payload(dataset, snapshot_date, payload, self.data_source.name)
+                try:
+                    check_dataset_supply(dataset, len(rows))
+                except EmptyDatasetError:
+                    # 端点活着但返回空集：留痕、记账、但不把整个批次判成成功。
+                    empty_datasets.append(dataset)
+                    continue
                 normalized_count += _upsert_alternative_rows(db, rows)
 
             for index_symbol in index_symbols or []:
@@ -103,10 +114,15 @@ class HithinkAlternativeCollectionService:
             self.repository.finish_batch(
                 db,
                 batch,
-                status="success",
+                status="partial" if empty_datasets else "success",
                 row_count=raw_count,
-                accepted_count=raw_count,
-                rejected_count=0,
+                accepted_count=raw_count - len(empty_datasets),
+                rejected_count=len(empty_datasets),
+                error_message=(
+                    f"empty datasets: {', '.join(sorted(empty_datasets))}"
+                    if empty_datasets
+                    else None
+                ),
             )
             db.commit()
         except Exception:
@@ -117,6 +133,7 @@ class HithinkAlternativeCollectionService:
             raw_snapshots=raw_count,
             normalized_rows=normalized_count,
             constituent_rows=constituent_count,
+            empty_datasets=tuple(sorted(empty_datasets)),
         )
 
 

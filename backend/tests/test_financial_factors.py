@@ -107,6 +107,10 @@ class FakeFactorValueRepository:
     def upsert_value(self, db: object, **kwargs: object) -> None:
         self.values.append(kwargs)
 
+    def upsert_values(self, db: object, rows: list[dict]) -> int:
+        self.values.extend(rows)
+        return len(rows)
+
 
 def _bar(trade_date: date, symbol: str = "600519.SH") -> SimpleNamespace:
     return SimpleNamespace(

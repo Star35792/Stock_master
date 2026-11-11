@@ -15,9 +15,12 @@ from app.repositories.factor import (
 from app.repositories.fundamental import FinancialStatementRepository
 from app.repositories.market import (
     DailyBarRepository,
+    SecurityIndustryHistoryRepository,
     SecurityRepository,
     ValuationSnapshotRepository,
+    resolve_industries_by_date,
 )
+from app.services.factor_universe import require_price_universe
 
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
@@ -235,6 +238,7 @@ class ValuationFactorService:
         daily_bar_repository: DailyBarRepository | None = None,
         valuation_repository: ValuationSnapshotRepository | None = None,
         security_repository: SecurityRepository | None = None,
+        security_industry_history_repository: (SecurityIndustryHistoryRepository | None) = None,
         financial_statement_repository: FinancialStatementRepository | None = None,
         definition_repository: FactorDefinitionRepository | None = None,
         run_repository: FactorRunRepository | None = None,
@@ -243,6 +247,9 @@ class ValuationFactorService:
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.valuation_repository = valuation_repository or ValuationSnapshotRepository()
         self.security_repository = security_repository or SecurityRepository()
+        self.security_industry_history_repository = (
+            security_industry_history_repository or SecurityIndustryHistoryRepository()
+        )
         self.financial_statement_repository = (
             financial_statement_repository or FinancialStatementRepository()
         )
@@ -285,6 +292,14 @@ class ValuationFactorService:
         for bar in bars:
             if bar.security_type in SUPPORTED_SECURITY_TYPES:
                 bars_by_symbol[bar.symbol].append(bar)
+                require_price_universe(
+                    bars_by_symbol,
+                    adjust_type=adjust_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    factor_family='valuation',
+                    all_bars=bars,
+                )
 
         input_start_date = start_date - timedelta(days=LOOKBACK_DAYS)
         valuation_rows = self.valuation_repository.list_available(
@@ -303,7 +318,13 @@ class ValuationFactorService:
             symbols=statement_symbols,
         )
         statements_by_symbol = _snapshots_by_symbol(statements)
-        industries = self.security_repository.get_industries(db, set(bars_by_symbol))
+        # 行业标签按时点解析：把今天的行业套到历史盈利收益率上，等于用未来的
+        # 行业分组去算今天的「行业内分位」。
+        industries_by_date = self._pit_industries_by_date(
+            db,
+            symbols=set(bars_by_symbol),
+            dates=sorted({bar.trade_date for bars in bars_by_symbol.values() for bar in bars}),
+        )
 
         rows_by_factor: dict[str, int] = {}
         run_ids: dict[str, int] = {}
@@ -351,7 +372,7 @@ class ValuationFactorService:
                 bars_by_symbol=bars_by_symbol,
                 valuations_by_symbol=valuations_by_symbol,
                 statements_by_symbol=statements_by_symbol,
-                industries=industries,
+                industries_by_date=industries_by_date,
                 run_id=run.id,
             )
             self.run_repository.update_status(
@@ -388,6 +409,27 @@ class ValuationFactorService:
             raise ValueError(f"unknown factor names: {', '.join(unknown)}")
         return tuple(spec for spec in VALUATION_FACTOR_SPECS if spec.name in requested)
 
+    def _pit_industries_by_date(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        dates: list[date],
+    ) -> dict[date, dict[str, str]]:
+        """按交易日解析时点行业标签。
+
+        没有历史区间的标的回退到当前标签；回退是显式的，真实历史缺失时的
+        最接近近似，且在代码里可见。
+        """
+
+        if not symbols or not dates:
+            return {}
+        fallback = self.security_repository.get_industries(db, symbols)
+        intervals = self.security_industry_history_repository.load_intervals(
+            db, symbols=symbols
+        )
+        return resolve_industries_by_date(intervals, dates, fallback=fallback)
+
     def _write_factor_values(
         self,
         db: Session,
@@ -396,16 +438,16 @@ class ValuationFactorService:
         bars_by_symbol: dict[str, list[Any]],
         valuations_by_symbol: dict[str, list[Any]],
         statements_by_symbol: dict[str, list[FinancialSnapshot]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
         run_id: int,
     ) -> int:
-        rows_written = 0
+        pending_rows: list[dict[str, Any]] = []
         if spec.name == "industry_valuation_gap":
             gap_values = self._industry_valuation_gaps(
                 bars_by_symbol=bars_by_symbol,
                 valuations_by_symbol=valuations_by_symbol,
                 statements_by_symbol=statements_by_symbol,
-                industries=industries,
+                industries_by_date=industries_by_date,
             )
         else:
             gap_values = {}
@@ -444,17 +486,17 @@ class ValuationFactorService:
                     )
                 if value is None:
                     continue
-                self.value_repository.upsert_value(
-                    db,
-                    symbol=symbol,
-                    trade_date=bar.trade_date,
-                    factor_name=spec.name,
-                    factor_version=FACTOR_VERSION,
-                    value=value.quantize(VALUE_QUANT),
-                    run_id=run_id,
+                pending_rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": bar.trade_date,
+                        "factor_name": spec.name,
+                        "factor_version": FACTOR_VERSION,
+                        "value": value.quantize(VALUE_QUANT),
+                        "run_id": run_id,
+                    }
                 )
-                rows_written += 1
-        return rows_written
+        return self.value_repository.upsert_values(db, pending_rows)
 
     def _industry_valuation_gaps(
         self,
@@ -462,7 +504,7 @@ class ValuationFactorService:
         bars_by_symbol: dict[str, list[Any]],
         valuations_by_symbol: dict[str, list[Any]],
         statements_by_symbol: dict[str, list[FinancialSnapshot]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
     ) -> dict[tuple[str, date], Decimal]:
         earnings_yield_by_date: dict[date, dict[str, Decimal]] = defaultdict(dict)
         for symbol, bars in bars_by_symbol.items():
@@ -497,6 +539,7 @@ class ValuationFactorService:
 
         result: dict[tuple[str, date], Decimal] = {}
         for trade_date, symbol_values in earnings_yield_by_date.items():
+            industries = industries_by_date.get(trade_date, {})
             percentiles = _cross_section_percentiles(symbol_values)
             industry_percentiles: dict[str, list[Decimal]] = defaultdict(list)
             for symbol, percentile in percentiles.items():

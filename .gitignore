@@ -73,3 +73,6 @@ backend/outputs/value_investing_20261109_v3.json
 backend/outputs/value_investing_20261110.json
 backend/outputs/price_value_selected_20261029-161151.json
 backend/outputs/price_value_selected_20261029-162629.json
+
+# 采集缓存（源文件快照）
+backend/data/cache/

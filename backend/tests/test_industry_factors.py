@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.repositories.market.security_industry_history import IndustryInterval
 from app.services import IndustryFactorService
 
 
@@ -30,6 +31,13 @@ class FakeSecurityRepository:
 
 
 class FakeSecurityIndustryHistoryRepository:
+    """时点行业替身。
+
+    测试用「按日映射」描述场景（``{日期: {标的: 行业}}``），服务侧现在走
+    ``load_intervals`` 批量接口，所以这里把按日映射翻译成区间：同一标的的
+    相邻两日之间构成一段生效区间。
+    """
+
     def __init__(self, by_date: dict[date, dict[str, str]] | None = None) -> None:
         self.by_date = by_date or {}
         self.calls: list[dict] = []
@@ -40,6 +48,31 @@ class FakeSecurityIndustryHistoryRepository:
         self.calls.append({"symbols": set(symbols), "as_of": as_of})
         resolved = self.by_date.get(as_of, {})
         return {s: v for s, v in resolved.items() if s in set(symbols)}
+
+    def load_intervals(
+        self, db: object, *, symbols: set[str] | list[str]
+    ) -> dict[str, list[IndustryInterval]]:
+        symbol_set = set(symbols)
+        by_symbol: dict[str, list[tuple[date, str]]] = {}
+        for trade_date in sorted(self.by_date):
+            for symbol, industry in self.by_date[trade_date].items():
+                by_symbol.setdefault(symbol, []).append((trade_date, industry))
+        intervals: dict[str, list[IndustryInterval]] = {}
+        for symbol, points in by_symbol.items():
+            if symbol not in symbol_set:
+                continue
+            rows: list[IndustryInterval] = []
+            for index, (effective_from, industry) in enumerate(points):
+                effective_to = points[index + 1][0] if index + 1 < len(points) else None
+                rows.append(
+                    IndustryInterval(
+                        effective_from=effective_from,
+                        effective_to=effective_to,
+                        industry=industry,
+                    )
+                )
+            intervals[symbol] = rows
+        return intervals
 
 
 class FakeFactorDefinitionRepository:
@@ -73,6 +106,10 @@ class FakeFactorValueRepository:
 
     def upsert_value(self, db: object, **kwargs: object) -> None:
         self.values.append(kwargs)
+
+    def upsert_values(self, db: object, rows: list[dict]) -> int:
+        self.values.extend(rows)
+        return len(rows)
 
 
 def _bar(

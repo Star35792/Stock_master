@@ -14,6 +14,7 @@ from app.repositories.factor import (
     FactorValueRepository,
 )
 from app.repositories.market import DailyBarRepository
+from app.services.factor_universe import require_price_universe
 
 FACTOR_NAME = "crowding_score"
 FACTOR_VERSION = "v2-average-rank"
@@ -91,6 +92,14 @@ class CrowdingFactorService:
         for bar in bars:
             if bar.security_type in SUPPORTED_SECURITY_TYPES:
                 bars_by_symbol[bar.symbol].append(bar)
+                require_price_universe(
+                    bars_by_symbol,
+                    adjust_type=adjust_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    factor_family='crowding',
+                    all_bars=bars,
+                )
 
         target_symbols = set(bars_by_symbol)
         turnover_rows = self.value_repository.list_for_cross_section(
@@ -244,7 +253,7 @@ class CrowdingFactorService:
         factor_version: str,
         run_id: int,
     ) -> int:
-        rows_written = 0
+        pending_rows: list[dict[str, Any]] = []
         turnover_ranks = _percentile_ranks_by_date(turnover_by_date)
         abnormal_ranks = _percentile_ranks_by_date(abnormal_by_date)
         for symbol, bars in bars_by_symbol.items():
@@ -261,17 +270,17 @@ class CrowdingFactorService:
                 ):
                     continue
                 value = (turnover_rank + abnormal_rank + sentiment_rank) / Decimal(3)
-                self.value_repository.upsert_value(
-                    db,
-                    symbol=symbol,
-                    trade_date=bar.trade_date,
-                    factor_name=FACTOR_NAME,
-                    factor_version=factor_version,
-                    value=value.quantize(VALUE_QUANT),
-                    run_id=run_id,
+                pending_rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": bar.trade_date,
+                        "factor_name": FACTOR_NAME,
+                        "factor_version": factor_version,
+                        "value": value.quantize(VALUE_QUANT),
+                        "run_id": run_id,
+                    }
                 )
-                rows_written += 1
-        return rows_written
+        return self.value_repository.upsert_values(db, pending_rows)
 
 
 def _group_symbol_values(

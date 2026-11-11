@@ -6,7 +6,9 @@ from app.repositories.market.daily_bar_source_compare import DailyBarSourceCompa
 from app.repositories.market.manual_correction import ManualCorrectionRepository
 from app.repositories.market.security import SecurityRepository
 from app.repositories.market.security_industry_history import (
+    IndustryInterval,
     SecurityIndustryHistoryRepository,
+    resolve_industries_by_date,
 )
 from app.repositories.market.security_status_event import SecurityStatusEventRepository
 from app.repositories.market.trading_calendar import TradingCalendarRepository
@@ -18,10 +20,12 @@ __all__ = [
     "CorporateActionRepository",
     "DailyBarRepository",
     "DailyBarSourceCompareRepository",
+    "IndustryInterval",
     "ManualCorrectionRepository",
     "SecurityIndustryHistoryRepository",
     "SecurityRepository",
     "SecurityStatusEventRepository",
     "TradingCalendarRepository",
     "ValuationSnapshotRepository",
+    "resolve_industries_by_date",
 ]

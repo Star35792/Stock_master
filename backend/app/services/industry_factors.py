@@ -16,7 +16,9 @@ from app.repositories.market import (
     DailyBarRepository,
     SecurityIndustryHistoryRepository,
     SecurityRepository,
+    resolve_industries_by_date,
 )
+from app.services.factor_universe import require_price_universe
 
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
@@ -144,20 +146,34 @@ class IndustryFactorService:
         for bar in bars:
             if bar.security_type in SUPPORTED_SECURITY_TYPES:
                 bars_by_symbol[bar.symbol].append(bar)
+                require_price_universe(
+                    bars_by_symbol,
+                    adjust_type=adjust_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    factor_family='industry',
+                    all_bars=bars,
+                )
 
         all_symbols = set(bars_by_symbol)
         current_industries = self.security_repository.get_industries(db, all_symbols)
         # Point-in-time classification: resolve the label effective on each
         # trade date from history; fall back to the current label only when no
         # history row covers the symbol, and record the fallback explicitly.
+        #
+        # 历史区间一次读进内存再逐日解析（而不是每个交易日查一次库）：两年回测
+        # 约 500 个交易日，逐日查库就是 500 次带 5,585 个 symbol 的 IN 扫描。
+        trade_dates = sorted(
+            {bar.trade_date for bars in bars_by_symbol.values() for bar in bars}
+        )
+        intervals = self.security_industry_history_repository.load_intervals(
+            db, symbols=all_symbols
+        )
+        pit_by_date = resolve_industries_by_date(intervals, trade_dates)
         industries_by_date: dict[date, dict[str, str]] = {}
         fallback_symbols: set[str] = set()
-        for trade_date in sorted(
-            {bar.trade_date for bars in bars_by_symbol.values() for bar in bars}
-        ):
-            pit = self.security_industry_history_repository.industries_as_of(
-                db, symbols=all_symbols, as_of=trade_date
-            )
+        for trade_date in trade_dates:
+            pit = pit_by_date.get(trade_date, {})
             resolved: dict[str, str] = {}
             for symbol in all_symbols:
                 industry = pit.get(symbol)
@@ -387,7 +403,7 @@ class IndustryFactorService:
         run_id: int,
         start_date: date,
     ) -> int:
-        rows_written = 0
+        pending_rows: list[dict[str, Any]] = []
         for symbol, bars in bars_by_symbol.items():
             for bar in bars:
                 if bar.trade_date < start_date:
@@ -398,14 +414,14 @@ class IndustryFactorService:
                 value = industry_metrics_by_factor.get(bar.trade_date, {}).get(industry)
                 if value is None:
                     continue
-                self.value_repository.upsert_value(
-                    db,
-                    symbol=symbol,
-                    trade_date=bar.trade_date,
-                    factor_name=spec.name,
-                    factor_version=FACTOR_VERSION,
-                    value=value.quantize(VALUE_QUANT),
-                    run_id=run_id,
+                pending_rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": bar.trade_date,
+                        "factor_name": spec.name,
+                        "factor_version": FACTOR_VERSION,
+                        "value": value.quantize(VALUE_QUANT),
+                        "run_id": run_id,
+                    }
                 )
-                rows_written += 1
-        return rows_written
+        return self.value_repository.upsert_values(db, pending_rows)

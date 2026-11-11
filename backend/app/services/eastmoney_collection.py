@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.data_sources.eastmoney import EastmoneyDataSource
 from app.models.raw import RawVendorSnapshot
 from app.repositories.raw import RawDailyBarImportRepository
+from app.services.alternative_data_supply import EmptyDatasetError, check_dataset_supply
 from app.services.hithink_alternative_collection import _upsert_alternative_rows
 
 
@@ -20,6 +21,9 @@ class EastmoneyFlowCollectionResult:
     batch_no: str
     raw_snapshots: int
     normalized_rows: int
+    #: 归一化后没有任何行的 dataset。端点返回空集时**必须**出现在这里，
+    #: 否则断供会伪装成一次成功采集。
+    empty_datasets: tuple[str, ...] = ()
 
 
 class EastmoneyFlowCollectionService:
@@ -65,6 +69,7 @@ class EastmoneyFlowCollectionService:
             },
         )
         normalized_rows = 0
+        empty_datasets: list[str] = []
         try:
             for dataset, items in payloads.items():
                 payload = {
@@ -83,16 +88,26 @@ class EastmoneyFlowCollectionService:
                         ).hexdigest(),
                     )
                 )
-                normalized_rows += _upsert_alternative_rows(
-                    db, _normalize_rows(dataset, items, snapshot_date, self.data_source.name)
-                )
+                rows = _normalize_rows(dataset, items, snapshot_date, self.data_source.name)
+                try:
+                    check_dataset_supply(dataset, len(rows))
+                except EmptyDatasetError:
+                    # 端点活着但返回空集：留痕、记账、但不把整个批次判成成功。
+                    empty_datasets.append(dataset)
+                    continue
+                normalized_rows += _upsert_alternative_rows(db, rows)
             self.repository.finish_batch(
                 db,
                 batch,
-                status="success",
+                status="partial" if empty_datasets else "success",
                 row_count=len(payloads),
-                accepted_count=len(payloads),
-                rejected_count=0,
+                accepted_count=len(payloads) - len(empty_datasets),
+                rejected_count=len(empty_datasets),
+                error_message=(
+                    f"empty datasets: {', '.join(sorted(empty_datasets))}"
+                    if empty_datasets
+                    else None
+                ),
             )
             db.commit()
         except Exception:
@@ -102,6 +117,7 @@ class EastmoneyFlowCollectionService:
             batch_no=batch_no,
             raw_snapshots=len(payloads),
             normalized_rows=normalized_rows,
+            empty_datasets=tuple(sorted(empty_datasets)),
         )
 
 

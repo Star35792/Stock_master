@@ -51,6 +51,18 @@ class FakeSecurityRepository:
         return {symbol: self.industries[symbol] for symbol in symbols}
 
 
+class FakeSecurityIndustryHistoryRepository:
+    """时点行业区间替身；默认无历史 → 走当前标签回退。"""
+
+    def __init__(self, intervals: dict[str, list] | None = None) -> None:
+        self.intervals = intervals or {}
+
+    def load_intervals(self, db: object, *, symbols: set[str]) -> dict[str, list]:
+        return {
+            symbol: rows for symbol, rows in self.intervals.items() if symbol in symbols
+        }
+
+
 class FakeFactorDefinitionRepository:
     def __init__(self) -> None:
         self.definitions: list[SimpleNamespace] = []
@@ -82,6 +94,10 @@ class FakeFactorValueRepository:
 
     def upsert_value(self, db: object, **kwargs: object) -> None:
         self.values.append(kwargs)
+
+    def upsert_values(self, db: object, rows: list[dict]) -> int:
+        self.values.extend(rows)
+        return len(rows)
 
 
 def _bar(trade_date: date, symbol: str = "600519.SH") -> SimpleNamespace:
@@ -171,6 +187,7 @@ def test_valuation_factor_service_calculates_valuation_factors() -> None:
         ),
         valuation_repository=valuation_repository,  # type: ignore[arg-type]
         security_repository=FakeSecurityRepository({"600519.SH": "Baijiu"}),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         financial_statement_repository=statement_repository,  # type: ignore[arg-type]
         definition_repository=definition_repository,
         run_repository=run_repository,
@@ -241,6 +258,7 @@ def test_deducted_earnings_factors() -> None:
         daily_bar_repository=FakeDailyBarRepository([_bar(date(2026, 5, 6))]),
         valuation_repository=valuation_repository,  # type: ignore[arg-type]
         security_repository=FakeSecurityRepository({"600519.SH": "Baijiu"}),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         financial_statement_repository=statement_repository,  # type: ignore[arg-type]
         definition_repository=FakeFactorDefinitionRepository(),
         run_repository=FakeFactorRunRepository(),
@@ -290,6 +308,7 @@ def test_deducted_earnings_yield_falls_back_to_none_when_missing() -> None:
         daily_bar_repository=FakeDailyBarRepository([_bar(date(2026, 5, 6))]),
         valuation_repository=valuation_repository,  # type: ignore[arg-type]
         security_repository=FakeSecurityRepository({"600519.SH": "Baijiu"}),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         financial_statement_repository=statement_repository,  # type: ignore[arg-type]
         definition_repository=FakeFactorDefinitionRepository(),
         run_repository=FakeFactorRunRepository(),
@@ -316,6 +335,7 @@ def test_valuation_factor_service_validates_inputs() -> None:
         daily_bar_repository=FakeDailyBarRepository([]),
         valuation_repository=FakeValuationSnapshotRepository([]),  # type: ignore[arg-type]
         security_repository=FakeSecurityRepository({}),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         financial_statement_repository=FakeFinancialStatementRepository([]),
         definition_repository=FakeFactorDefinitionRepository(),
         run_repository=FakeFactorRunRepository(),

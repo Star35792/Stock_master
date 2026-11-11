@@ -16,8 +16,10 @@ from app.repositories.factor import (
 )
 from app.repositories.market import (
     DailyBarRepository,
+    SecurityIndustryHistoryRepository,
     SecurityRepository,
     TradingCalendarRepository,
+    resolve_industries_by_date,
 )
 
 VALUE_QUANT = Decimal("0.0000000001")
@@ -56,6 +58,7 @@ class FactorCrossSectionService:
         run_repository: FactorRunRepository | None = None,
         daily_bar_repository: DailyBarRepository | None = None,
         security_repository: SecurityRepository | None = None,
+        security_industry_history_repository: (SecurityIndustryHistoryRepository | None) = None,
         trading_calendar_repository: TradingCalendarRepository | None = None,
     ) -> None:
         self.value_repository = value_repository or FactorValueRepository()
@@ -64,6 +67,9 @@ class FactorCrossSectionService:
         self.run_repository = run_repository or FactorRunRepository()
         self.daily_bar_repository = daily_bar_repository or DailyBarRepository()
         self.security_repository = security_repository or SecurityRepository()
+        self.security_industry_history_repository = (
+            security_industry_history_repository or SecurityIndustryHistoryRepository()
+        )
         self.trading_calendar_repository = (
             trading_calendar_repository or TradingCalendarRepository()
         )
@@ -108,7 +114,13 @@ class FactorCrossSectionService:
 
         values_by_date = self._group_values(source_rows)
         all_symbols = {symbol for values in values_by_date.values() for symbol in values}
-        industries = self.security_repository.get_industries(db, all_symbols)
+        # 行业中性化必须用**时点**行业标签：把今天的行业套到历史截面上，
+        # 等于让未来的分组信息进入过去的横截面——那正是要消除的前视偏差。
+        industries_by_date = self._pit_industries_by_date(
+            db,
+            symbols=all_symbols,
+            dates=sorted(values_by_date),
+        )
         universe_by_date = self.daily_bar_repository.count_trusted_by_date(
             db,
             start_date=start_date,
@@ -148,12 +160,14 @@ class FactorCrossSectionService:
             "winsor": self._winsorize,
             "zscore": self._standardize,
             "rank": self._rank,
-            "industry_neutral": lambda values: self._industry_neutralize(values, industries),
+            "industry_neutral": lambda values: self._industry_neutralize(
+                values, industries_by_date
+            ),
         }
         if size_factor_name:
             transforms["industry_size_neutral"] = lambda values: self._size_neutralize(
                 values,
-                industries,
+                industries_by_date,
                 size_by_date,
             )
 
@@ -510,13 +524,36 @@ class FactorCrossSectionService:
             result[trade_date] = self._rank_values(values)
         return result
 
+    def _pit_industries_by_date(
+        self,
+        db: Session,
+        *,
+        symbols: set[str],
+        dates: list[date],
+    ) -> dict[date, dict[str, str]]:
+        """按交易日解析时点行业标签。
+
+        没有历史区间的标的回退到当前标签。回退是**显式**的：真实历史缺失时，
+        用今天的标签是最接近的近似，比让标的凭空消失更可控；但它确实不是
+        时点事实，所以回退行为必须留在代码里可见，不能藏在默认参数后面。
+        """
+
+        if not symbols or not dates:
+            return {}
+        fallback = self.security_repository.get_industries(db, symbols)
+        intervals = self.security_industry_history_repository.load_intervals(
+            db, symbols=symbols
+        )
+        return resolve_industries_by_date(intervals, dates, fallback=fallback)
+
     def _industry_neutralize(
         self,
         values_by_date: dict[date, dict[str, Decimal]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
     ) -> dict[date, dict[str, Decimal]]:
         result = {}
         for trade_date, values in values_by_date.items():
+            industries = industries_by_date.get(trade_date, {})
             groups: dict[str, list[tuple[str, Decimal]]] = defaultdict(list)
             for symbol, value in values.items():
                 groups[industries.get(symbol, "UNKNOWN")].append((symbol, value))
@@ -530,20 +567,21 @@ class FactorCrossSectionService:
     def _size_neutralize(
         self,
         values_by_date: dict[date, dict[str, Decimal]],
-        industries: dict[str, str],
+        industries_by_date: dict[date, dict[str, str]],
         size_by_date: dict[date, dict[str, Decimal]],
     ) -> dict[date, dict[str, Decimal]]:
         result = {}
         for trade_date, values in values_by_date.items():
+            industries = industries_by_date.get(trade_date, {})
             sizes = size_by_date.get(trade_date, {})
             common_values = {symbol: value for symbol, value in values.items() if symbol in sizes}
             y_demeaned = self._industry_neutralize(
                 {trade_date: common_values},
-                industries,
+                {trade_date: industries},
             )[trade_date]
             x_demeaned = self._industry_neutralize(
                 {trade_date: {symbol: sizes[symbol] for symbol in common_values}},
-                industries,
+                {trade_date: industries},
             )[trade_date]
             denominator = sum((value**2 for value in x_demeaned.values()), Decimal())
             beta = (

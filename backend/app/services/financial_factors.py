@@ -23,6 +23,7 @@ from app.repositories.market import (
     SecurityIndustryHistoryRepository,
     SecurityRepository,
 )
+from app.services.factor_universe import require_price_universe
 from app.services.financial_sector import (
     EXCLUDED_FACTORS,
     POLICY_VERSION as FINANCIAL_SECTOR_POLICY_VERSION,
@@ -413,6 +414,14 @@ class FinancialFactorService:
         for bar in bars:
             if bar.security_type in SUPPORTED_SECURITY_TYPES:
                 bars_by_symbol[bar.symbol].append(bar)
+                require_price_universe(
+                    bars_by_symbol,
+                    adjust_type=adjust_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    factor_family='financial',
+                    all_bars=bars,
+                )
 
         statement_symbols = (
             sorted(bars_by_symbol) if normalized_symbols is None else normalized_symbols
@@ -648,7 +657,7 @@ class FinancialFactorService:
         excluded_for_financials: bool,
         run_id: int,
     ) -> int:
-        rows_written = 0
+        pending_rows: list[dict[str, Any]] = []
         for symbol, bars in bars_by_symbol.items():
             snapshots = snapshots_by_symbol.get(symbol, [])
             snapshot_index = 0
@@ -686,17 +695,17 @@ class FinancialFactorService:
                 )
                 if value is None:
                     continue
-                self.value_repository.upsert_value(
-                    db,
-                    symbol=symbol,
-                    trade_date=bar.trade_date,
-                    factor_name=spec.name,
-                    factor_version=FACTOR_VERSION,
-                    value=value.quantize(VALUE_QUANT),
-                    run_id=run_id,
+                pending_rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": bar.trade_date,
+                        "factor_name": spec.name,
+                        "factor_version": FACTOR_VERSION,
+                        "value": value.quantize(VALUE_QUANT),
+                        "run_id": run_id,
+                    }
                 )
-                rows_written += 1
-        return rows_written
+        return self.value_repository.upsert_values(db, pending_rows)
 
     def _calculate_value(
         self,

@@ -13,6 +13,7 @@ from app.repositories.factor import (
     FactorValueRepository,
 )
 from app.repositories.market import AlternativeDataSnapshotRepository, DailyBarRepository
+from app.services.factor_universe import require_price_universe
 
 FACTOR_VERSION = "v1"
 VALUE_QUANT = Decimal("0.0000000001")
@@ -210,6 +211,14 @@ class SentimentFactorService:
         for bar in bars:
             if bar.security_type in SUPPORTED_SECURITY_TYPES:
                 bars_by_symbol[bar.symbol].append(bar)
+                require_price_universe(
+                    bars_by_symbol,
+                    adjust_type=adjust_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    factor_family='sentiment',
+                    all_bars=bars,
+                )
 
         input_start_date = start_date - timedelta(days=LOOKBACK_DAYS)
         datasets = sorted({dataset for spec in specs for dataset in spec.datasets})
@@ -321,7 +330,7 @@ class SentimentFactorService:
         universe_by_date: dict[date, int],
         run_id: int,
     ) -> int:
-        rows_written = 0
+        pending_rows: list[dict[str, Any]] = []
         for symbol, bars in bars_by_symbol.items():
             for bar in bars:
                 value = self._calculate_value(
@@ -334,17 +343,17 @@ class SentimentFactorService:
                 )
                 if value is None:
                     continue
-                self.value_repository.upsert_value(
-                    db,
-                    symbol=symbol,
-                    trade_date=bar.trade_date,
-                    factor_name=spec.name,
-                    factor_version=FACTOR_VERSION,
-                    value=value.quantize(VALUE_QUANT),
-                    run_id=run_id,
+                pending_rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": bar.trade_date,
+                        "factor_name": spec.name,
+                        "factor_version": FACTOR_VERSION,
+                        "value": value.quantize(VALUE_QUANT),
+                        "run_id": run_id,
+                    }
                 )
-                rows_written += 1
-        return rows_written
+        return self.value_repository.upsert_values(db, pending_rows)
 
     def _calculate_value(
         self,

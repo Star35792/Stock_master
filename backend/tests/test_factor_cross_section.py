@@ -25,6 +25,10 @@ class FakeFactorValueRepository:
     def upsert_value(self, db: object, **kwargs: object) -> None:
         self.values.append(kwargs)
 
+    def upsert_values(self, db: object, rows: list[dict]) -> int:
+        self.values.extend(rows)
+        return len(rows)
+
 
 class FakeProfileRepository:
     def __init__(self) -> None:
@@ -105,6 +109,22 @@ class FakeSecurityRepository:
         ]
 
 
+class FakeSecurityIndustryHistoryRepository:
+    """时点行业区间替身。
+
+    默认没有任何历史区间 → 服务会走**当前标签回退**，与这些用例原本的
+    断言语义一致。构造时传入 intervals 就能构造真实的时点行业场景。
+    """
+
+    def __init__(self, intervals: dict[str, list] | None = None) -> None:
+        self.intervals = intervals or {}
+
+    def load_intervals(self, db: object, *, symbols: set[str]) -> dict[str, list]:
+        return {
+            symbol: rows for symbol, rows in self.intervals.items() if symbol in symbols
+        }
+
+
 class FakeTradingCalendarRepository:
     def __init__(
         self,
@@ -173,6 +193,7 @@ def test_cross_section_service_transforms_and_profiles_factor() -> None:
         run_repository=run_repository,
         daily_bar_repository=FakeDailyBarRepository(),
         security_repository=FakeSecurityRepository(),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         trading_calendar_repository=FakeTradingCalendarRepository(),
     )
 
@@ -250,6 +271,7 @@ def test_write_profiles_skips_days_without_observations() -> None:
         run_repository=FakeRunRepository(),
         daily_bar_repository=FakeDailyBarRepository(),
         security_repository=FakeSecurityRepository(),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         trading_calendar_repository=FakeTradingCalendarRepository(),
     )
 
@@ -277,6 +299,7 @@ def test_cross_section_service_validates_size_factor_pair() -> None:
         run_repository=FakeRunRepository(),
         daily_bar_repository=FakeDailyBarRepository(),
         security_repository=FakeSecurityRepository(),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         trading_calendar_repository=FakeTradingCalendarRepository(),
     )
 
@@ -317,6 +340,7 @@ def test_cross_section_forward_return_does_not_skip_missing_target_open_day() ->
             ]
         ),
         security_repository=FakeSecurityRepository(),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         trading_calendar_repository=FakeTradingCalendarRepository(
             [date(2026, 7, 17), date(2026, 7, 20), date(2026, 7, 21)]
         ),
@@ -369,6 +393,7 @@ def test_cross_section_forward_return_uses_next_exchange_open_day_across_holiday
         security_repository=FakeSecurityRepository(
             {"A": "XSHG", "B": "XSHG", "C": "XSHE", "D": "XSHE"}
         ),
+        security_industry_history_repository=FakeSecurityIndustryHistoryRepository(),
         trading_calendar_repository=FakeTradingCalendarRepository(
             {
                 "XSHG": [date(2026, 7, 17), date(2026, 7, 21)],
