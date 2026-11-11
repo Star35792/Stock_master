@@ -3,6 +3,10 @@
 > 日期：2026-11-11
 > 关联任务：#11 六族 alternative 数据断供修复（第三阶段：PIT 认证）
 > 状态：已交付并验证（34 条审计台账落库 + 全量 1,430 passed）
+> **2026-11-11 修订**：炸板池端点接通后（见
+> `20261111-2050-alternative-history-backfill.md`），`limit_up_failure_rate` 与
+> `overheat_reversal_signal` 由 `unknown` 改判 `point_in_time`，
+> 判定分布更新为 **17 / 3 / 14**。
 
 ## 一句话
 
@@ -36,7 +40,11 @@ fail-closed——数据补齐了也进不了核心池。本轮把「凭什么算
 （本轮所有 `point_in_time` 判定的消费规则都落到同一句话：因子取值只接受
 `snapshot_date < 目标交易日的快照行`。）
 
-## 三、判定结果：15 / 3 / 16
+## 三、判定结果：17 / 3 / 14
+
+> 下表是**初判**（第三阶段落库时的状态）。炸板池端点接通后，
+> `limit_up_failure_rate` 与 `overheat_reversal_signal` 已改判 `point_in_time`，
+> 分布更新为 **17 point_in_time / 3 look_ahead / 14 unknown**。
 
 ### point_in_time（15 个）
 
@@ -71,7 +79,7 @@ fail-closed——数据补齐了也进不了核心池。本轮把「凭什么算
 |---|---|---|
 | 从未采集 | `rate_trend_10y` / `yield_curve_slope` / `social_financing_impulse` / `m1_m2_gap` / `usd_cnh_trend` / `commodity_inflation_proxy` / `credit_spread_change` / `policy_event_score` / `margin_financing_change_20` / `etf_flow_industry_20` / `institutional_crowding_score` | 没有任何记录，**无法验证 as-of 语义** |
 | 上游断供 | `northbound_flow_ratio` | 北向资金自 2024-08 断供（权威口径须 HKEX），既无数据也无法验证 |
-| 端点未找到 | `limit_up_failure_rate` / `overheat_reversal_signal` | 炸板池 `failed_limit_up` 至今没找到端点；不因「涨停池那一半是干净的」就放行整个因子 |
+| 端点未找到 | `limit_up_failure_rate` / `overheat_reversal_signal` | ~~炸板池 `failed_limit_up` 至今没找到端点~~ **→ 已推翻：端点一直都在，见第四阶段文档** |
 | 无公告日字段 | `guidance_surprise` / `profit_warning_risk` | 业绩预告 / 预警是**公司公告**，原则上公告日即可得日、PIT 可控；但本项目既无采集实现也无公告日字段，落库记的是哪个日期无法审计 |
 
 宏观族另有一层更隐蔽的坑：**发布滞后口径未确认**。社融 / M1 / M2 在次月
@@ -133,7 +141,7 @@ python -m scripts.factors.audit_six_family_pit_status --apply   # 写入库
 |---|---|---|
 | IC 证据 | `factor.factor_profile` 只有 **10 个因子名 / 7,169 行**，六族因子**一条都没有** | 分级器根本看不到它们，连分类都轮不到 |
 | 覆盖率 | `market.alternative_data_snapshot` 共 10,251 行 / 60 个 `snapshot_date`，但**只有 `limit_up_ladder` 覆盖 60 天**，其余 dataset 全是 **1–2 天** | 2 个快照日连 RankIC 都算不出来 |
-| 端点 | `failed_limit_up` 至今没找到 | 两个因子的输入始终缺一半 |
+| 端点 | ~~`failed_limit_up` 至今没找到~~ **→ 已解决：端点一直都在，第四阶段已接通** | 两个因子的输入不再缺一半 |
 
 所以**当前不会有任何六族因子进入核心池**，原因不是认证没做完，而是：
 
@@ -170,8 +178,10 @@ python -m scripts.factors.audit_six_family_pit_status --apply   # 写入库
 ## 九、遗留
 
 * **IC 证据**：等快照历史积累，或改用自带历史的端点。
+  **→ 第四阶段已解决历史来源**：端点多数支持按日期回溯（公共窗口 12 个月），
+  历史已一次性回填，下一步是跑出第一批 IC 证据。
 * **游资席位专用因子**：`dragon_tiger_hot_money` 数据已可用（35 标的 / 46 行），
   但因子定义、席位口径选择规则、PIT 审计、IC 证据都还没做。
-* **`failed_limit_up`**：端点仍未找到。
+* ~~**`failed_limit_up`**：端点仍未找到。~~ **→ 已解决。**
 * **宏观发布滞后口径**：需要确认 `snapshot_date` 记的是观测期还是公布日，
   确认后 macro 族 7 个因子才能从 `unknown` 前进。
