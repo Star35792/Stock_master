@@ -28,6 +28,8 @@
 
 ## 工具边界
 
+- DuckDB 写入协调采用操作系统锁：同路径常驻 `.guard` 文件维持稳定锁对象，PID 文件仅作诊断，持有时间不构成抢锁理由；退出或进程崩溃后 OS 释放锁。不要删除 `.guard` 文件。兼容旧 PID 文件时，存活或未知持有者保持阻断。研究库启动初始化与请求访问共同协调研究锁；分库集成测试的主库不建立 strategy 表。
+
 - `backend/app/lake`：本地 Parquet 数据湖和批量扫描工具；curated 数据集是因子服务可配置的生产消费源，与 DuckDB 事实层共同组成单机存储架构。
 - Warm release 表带 `snapshot/delta` 模式：完整快照截断同表父链，增量表按业务键由新层覆盖旧层；`all_ok=false` 的失败 release 不参与 latest 解析。同 tag 导出禁止覆盖。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。

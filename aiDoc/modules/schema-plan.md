@@ -523,6 +523,17 @@ V1 暂不引入以下设计：
   - 这些列由启动兼容桥 `app/database/session.py::apply_schema_compatibility` 幂等补齐（`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` + 既有行回填默认值），项目当前**没有** Alembic 迁移目录，schema 变更走该兼容桥。
 - `strategy.*`：回测运行、成交、净值、持仓和绩效。**2026-10-24 起这 6 张表物理上位于独立 `data/research.duckdb`**（模型挂 `ResearchBase`，服务层 `research_db=None` 兼容参数贯穿，迁移脚本 `migrate_strategy_to_research.py`；见 `aiDoc/relations/20261024-1427-research-database-split.md`），schema 限定名 `strategy.*` 不变，SQL/ORM 查询写法不变。新库训练产物关联 `backtest_run.training_artifact_id -> training_artifact.id` 使用默认外键删除限制，禁止删除被回测引用的产物，允许空引用；DuckDB 不支持 `ON DELETE SET NULL`，不能依赖它静默断开血缘。启动兼容桥为旧库幂等添加 nullable 的 `training_artifact_id` 和索引，保留已有回测记录；旧表追加列不追补外键，启用训练产物绑定前仍需正式约束迁移。当前独立滚动入口已支持不可变训练产物绑定与逐测试窗执行，并可启用训练窗自动选参；合同仍标记 `training_artifact_verified=false`，不能将产物绑定等同输入证据或策略资格认证。
   - 价格价值假设回测复用上述表，无新增 schema 或迁移。`backtest_run.parameters` 保存 `price_value_assumption_v1` 合同、显式假设、市场快照、引擎版本、输入哈希及完整 `price_value_report`（含决策日志）；`validation_mode=none`、`pit_verified=false`。标准成交/净值/持仓保持原定点精度，JSON 报告保留 Decimal 字符串精度；写入仅是研究存储，不创建 `trade.*` 事实。
+  - **`strategy.strategy_definition`（2026-11-09 新增，主库）**：内置策略定义目录，模型挂 `Base`，与上述 6 张研究产物表分属两个物理库。字段：`name` + `version`（唯一键）、`display_name`、`description`、`category`、`parameters_schema`（JSON，参数契约）、`parameters`（JSON，锁定阈值的**取值**）、`locked_parameters`（JSON，锁定参数名清单）、`required_margin`（`NUMERIC(12,10)`，锁定的安全边际）、`inputs`（JSON，数据来源列路径）、`is_active`、`status`（`active` / `retired`）。约束：`required_margin` 为空或落在 `(0, 1)`。
+    - `parameters` 列（2026-11-10 新增，nullable JSON）：承载除 `required_margin` 外的全部锁定阈值取值。`required_margin` 刻意**不放**在这份 JSON 里——同一个数字存两份可能互相矛盾的副本，参数就失去锁定意义。Decimal 一律用字符串（`"0.08"`），计数用整数。列可空是因为它是通过兼容桥加到既有库上的（DuckDB 的 `ALTER TABLE ADD COLUMN` 没法补 `NOT NULL`），读取时把缺失视为「没有额外阈值」。新库由 `create_all` 建成，与兼容桥路径一致。
+    - 落主库而不是研究库是决定性的：策略定义必须在**每次调用**时被读取，而研究库在研究脚本写入期间会对任何读请求返回 409；放进研究库会让内置策略在研究作业运行时整体不可用。
+    - 不复用 `factor.factor_definition`：那张表是**因子目录**，其行会被批量画像与因子池分级器消费，塞入策略会产生假因子。也不复用 `strategy.training_artifact`：它的主键是 `window_id`（一行一窗口），承载不了可跨窗口反复调用的策略定义。
+    - 由 `app/strategies/registry.py::register_all_strategy_definitions` 按 `(name, version)` 幂等 upsert；`app/repositories/strategy/definition.py` 提供 `ensure()` / `get_by_name_version()` / `get_active()` / `list()`。
+    - 新表由 `Base.metadata.create_all` 幂等创建，不新增 Alembic 迁移；当前 schema 变更仍走 `app/database/session.py::apply_schema_compatibility` 兼容桥。
+    - **版本演进（2026-11-10）**：`@v1`（仅价格闸门）与 `@v2`（价格 + 质地闸门）均置 `status='retired'` 保留供审计，`@v3` 为 `status='active'`。`@v3` 的 `parameters` 携带 4 个新增锁定阈值：`min_revenue_cagr_3y=0.12`、`min_net_profit_cagr_3y=0.15`、`decline_streak_years=2`、`max_debt_ratio_rise_3y=0.10`。`required_margin` 在三个版本中恒为 `0.30`。
+  - **`strategy.external_observation`（2026-11-10 新增，研究库）**：外部连接器观测的**可审计快照表**，模型挂 `ResearchBase`（物理上在 `data/research.duckdb`，与上方 6 张研究产物表同库）。字段：`symbol`、`source`、`observation_type`、`as_of_date`、`captured_at`、`payload`（JSON）、`payload_version`；唯一键 `(symbol, source, observation_type, as_of_date)`，按 `(symbol, source, observation_type, as_of_date)` 幂等 upsert。
+    - **这张表永不被任何闸门读取**。外部数据（券商一致预期、机构评级、研报观点）没有「首次可得时间」，本身就是前瞻性预测；把它接入闸门会让 PIT 约束形同虚设。表的存在意义是**留存证据供审计**，闸门证据仍只来自控制面与温层的事实数据。
+    - 读取与渲染在 `app/services/value_investing_research_card.py`：装配成研究卡，与已实现事实分区呈现，一致预期统一放在 `forward_looking` 块并固定附带「机构一致预期是前瞻性预测，不是已实现事实，不参与本策略的任何闸门判定」警示语。**没有观测的证券不出卡**，避免把「看过但没找到」与「没看过」混为一谈。
+    - 写入脚本 `backend/scripts/research/capture_value_investing_observations.py`（`--observations` 读连接器原始 JSON，`--include-trap-examples` 只收「陷阱闸门是唯一否决理由」的标的）。
 - `raw.daily_bar / market.daily_bar`：估值研究依赖 `limit_up / limit_down / is_suspended / special_treatment_status`，从选定 raw 记录复制至可信日线。沿用当前 DuckDB 初始化兼容桥幂等补列，旧行限价和特殊处理状态保留 NULL，停牌字段沿用 false 默认值；默认值不证明历史可交易，研究仍要求明确普通状态和有效限价。既有值不覆盖，实际用户数据库未由本次开发直接升级。
 - `market.security_status_event`：记录每只股票在每个交易日的状态（正常、停牌、ST、*ST、退市整理、未上市、已退市等），作为区分“真实停牌”与“数据缺失”的事实源。`market.daily_bar` 只保存可交易日行情，停牌日无 bar；下游应通过本表判断证券可交易性。
 - `portfolio.*`：组合计划和目标持仓。`portfolio.portfolio_plan` 以 nullable 的 `idempotency_key`、`request_hash` 和 `input_snapshot` 兼容历史记录；新公共草案 API 要求幂等键，保存规范化手工输入快照，并通过唯一索引防止重试生成重复草案。`portfolio_plan.parameters` 记录组合约束口径，当前包含 `enforcement_mode`（`proportional_scale` / `score_ranked_trim`，默认等比缩放）和 `extra_symbol_caps`（单标的额外上限字典），用于回放与审计。`portfolio_target` 行记录 `requested_weight` / `constrained_weight` / `final_weight`、`score`（可选，记录择优截断排序依据）及调整原因。
@@ -560,7 +571,7 @@ V1 暂不引入以下设计：
 
 - 温层研究表**不是**可信层表的替代品。它们服务于「研究口径」而非「交易口径」，消费方向仍然是 `raw -> market -> factor -> research/backtest`。
 - 温层研究表在 ORM 侧有**孪生读取路径**（见 `aiDoc/modules/backend-layer-rules.md`）：`research.valuation_history` 的 ORM 孪生是 `app/repositories/research_valuation.py` 的 `ResearchValuationReadRepository`，读控制面的 `market.valuation_snapshot`。两条路径的列名、排序和过滤语义一致，但覆盖范围不同：控制面只有实际采集过的交易日，温层才有完整回填。
-- 字段级时点有效性差异必须显式暴露：温层的 `pb_mrq` 会前视最多 120 天，ORM 孪生因此把 `pb_mrq` 报为 `None` 而不是假装两者同义；温层 `pit_verified=false`，控制面当日快照为 `true`。
+- 字段级时点有效性差异必须显式暴露：温层的 `pb_mrq` 会前视最多 120 天，ORM 孪生因此把 `pb_mrq` 报为 `None`。温层保持原始 PIT 标记（现有历史补采均为 `false`）；ORM 没有字段级首次可得证据，默认 `pit_verified=false`，并排除 `_research_batch_id` 研究观察，覆盖统计也使用同一过滤。两条读取路径保留 `source_name` 并按日期、证券、来源排序，不静默合并多源同日记录。此次无表结构变更。
 
 仍暂不创建或不作为当前主线：
 

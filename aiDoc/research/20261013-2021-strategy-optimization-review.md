@@ -210,6 +210,7 @@ complete_scores = {
 
 - 2026-10-28 修复横截面排名并列值口径：策略模板复用 `app/factors/rank_ic.py::rank_values` 的 Decimal 平均秩；同值证券共享分数，单标的与全体同值取中性 `0.5`，反向因子使用 `1-rank`。Top-N 容量切穿同分组时仍以证券代码稳定决胜，但代码不再进入因子分数或分数加权。旧研究运行不重写，新运行必须按代码版本区分。
 - 2026-10-28 将同一口径贯通到持久化组合因子：`CompositeFactorService` 不再用证券代码拆分并列值，改为复用同一 Decimal 平均秩；无横截面离散度时输出中性 `0.5`。默认 `decision_score` 版本由 `v1` 升为 `v2-average-rank`，CLI 同步使用新默认，避免新算法静默覆盖旧版落盘值；既有 `v1` 只保留为历史证据，服务入口拒绝以当前代码重算该冻结版本。
+- 2026-10-28 同步修正 `crowding_score` 内部的横截面拥挤度排名：换手率与异常成交压力的相同值现共享 Decimal 平均秩，单证券或全体同值为中性 `0.5`，不再把证券代码顺序当成拥挤差异。新输出版本为 `v2-average-rank-{adjust_type}`，仍明确依赖 `v1-{adjust_type}` 价量组件与 `market_sentiment_score:v1`；既有 `crowding_score:v1-*` 不重写。该修复只消除伪横截面差异，不解除换手率历史缺口、PIT、IC 或样本外资格门槛。
 
 - 新增 `WeightingMode`：`EQUAL_WEIGHT_FULLY_INVESTED`（默认，保持原行为，**始终满仓等权**，不读取 `invested_weight` 表达的部分仓位语义）、`EQUAL_WEIGHT_PARTIAL`（入选集等权，但总仓位为 `invested_weight`，剩余持币）、`SCORE_WEIGHTED`（按归一化分数加权）。
 - 新增 `MinimumScorePolicy`：`ALWAYS_FULLY_INVESTED`（默认）、`HOLD_CASH_WHEN_NO_CANDIDATE`。

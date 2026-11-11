@@ -49,7 +49,7 @@ A 股特殊交易约束：
 3. **停牌日无行情**
    - 停牌证券当日无 `market.daily_bar`；`market.daily_bar.is_suspended` 在 market 层应恒为 `false`。
    - 停牌、ST、*ST、退市整理、未上市、已退市等状态由 `market.security_status_event` 记录。
-   - 信号已持仓证券在停牌日仍按最新收盘价估值，但不可交易。
+   - 可信停牌证据完整时可按显式政策携价，但不可交易。通用日频因子回测当前使用 `daily_event_v3` / `reject_on_open_date_v1`，尚未接入该例外：持仓证券在自身开市日缺行情严格失败，不能仅从缺行推断停牌；闭市日可沿价。
    - 价格价值回测等要求连续 execution calendar 的策略必须允许停牌日无 bar，并在该日产生 `wait/suspended` 决策。
 
 4. **ST/*ST 状态**

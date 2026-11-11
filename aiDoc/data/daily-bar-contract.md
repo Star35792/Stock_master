@@ -10,6 +10,8 @@
 
 ## 1. 适用范围
 
+日频因子回测的持仓估值采用 `reject_on_open_date_v1`（引擎 `daily_event_v3`）：已持仓证券在自身交易所开市日必须有可信日线，缺行立即失败，错误包含证券和日期；不以最后收盘价静默填补未知断档。闭市日可沿价。当前尚未把可信停牌事件接入该引擎的携价例外，因此即使市场实际停牌，缺行也保持阻断；价格价值专用引擎的显式停牌处理另按其合同执行。
+
 首批覆盖：
 
 - A 股股票。
@@ -67,8 +69,8 @@
 
 | 值 | 含义 |
 |---|---|
-| `trusted` | 已通过校验，可供消费 |
-| `suspect` | 可疑，可展示但默认不用于严格回测 |
+| `trusted` | 已通过校验，可供消费（数值校验 + 采集时点校验均通过） |
+| `suspect` | 可疑，可展示但默认不用于严格回测；也承载「盘中采集的未定稿 bar」 |
 | `rejected` | 已拒绝，不进入可信消费路径 |
 | `manual_fixed` | 人工修复后采用 |
 
@@ -175,6 +177,7 @@ Python 清洗和校验阶段如涉及精确比较，应使用 `Decimal` 或明�
 8. 若 `pre_close` 存在，则 `change_amount` 和 `pct_change` 应可解释。
 9. 若存在多源冲突且超过阈值，不应自动标记为 `trusted`。
 10. `is_suspended` 必须为 `false`；任何来源标记为停牌的 raw 记录不得直接进入 market，应导入 `market.security_status_event` 并生成质量问题。
+11. **采集时点**：所选 raw 行的 `imported_at` 必须不早于该 bar 自身交易日的 `15:30 Asia/Shanghai`，否则只能记为 `suspect`（`INTRADAY_SNAPSHOT` + 每交易日一行 `INTRADAY_SNAPSHOT_BATCH`）。盘中快照数值自洽，只有出处能证伪它；缺失 `imported_at` 不构成盘中采集的证据，不降级。详见 `aiDoc/relations/20261111-0300-intraday-snapshot-guard.md`。
 
 ## 9. raw 与 market 的字段差异
 
