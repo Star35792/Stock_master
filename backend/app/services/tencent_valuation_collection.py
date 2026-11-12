@@ -31,13 +31,48 @@ published:
 3. The symbol must exist in the trusted security table as an active CNY
    stock on SH/SZ/BJ.
 
+Which session is observed
+-------------------------
+The observed session is the last trading session **strictly before the
+current Shanghai calendar day**.  A day is only observed once it has fully
+passed, so a run at 21:00 on 2026-11-12 still observes 2026-11-11, and only
+after midnight does the service move on to 2026-11-12.  The rule is
+deliberately conservative: it makes an observation immutable once published
+and removes any chance of publishing a half-day snapshot.
+
 Which vendor field carries the close
 -------------------------------------
-The Tencent quote endpoint publishes two prices: ``price`` is the *live* price
-at request time and ``last_close`` is the previous session's close.  Because
-the target is always a past session, this service reads ``last_close``:
-measured on 2026-11-11 it matched the 2026-11-10 trusted close for 5,561 of
-5,573 symbols (99.78%), while ``price`` matched only 11.1% of that close.
+The Tencent quote endpoint publishes two prices, and both are relative to the
+vendor's *quote day*: ``price`` is the quote day's price (frozen close before
+the session, live tick during it) and ``last_close`` is the close of the
+session before the quote day.  The quote day rolls at **09:15**, when the
+opening auction starts -- not at midnight.
+
+That makes the choice of field depend on the moment the endpoint is called:
+
+* before 09:15 on a trading day, and on every non-trading day, the endpoint
+  still serves the previous session, so ``price`` is the observed session's
+  close;
+* from 09:15 on a trading day the endpoint has rolled to the current session,
+  so ``last_close`` is the observed session's close.
+
+Hard-coding one of the two is wrong for half of every day, and the failure is
+silent: the wrong field still returns a plausible price for every symbol, it
+just belongs to a different session.  Measured on 2026-11-12, a run that took
+``last_close`` at 09:03 -- before the roll -- published 435 rows dated
+2026-11-11 of which **434 carried the 2026-11-10 close**.  The price gate
+rejected the other 5,138 rows, so the mistake surfaced as "coverage is bad"
+rather than "the dates are wrong".
+
+So this service *measures* the field instead of assuming it: it compares both
+fields against the trusted close of the target session and refuses to publish
+unless the field it selected actually agrees.  A rule that stops matching the
+vendor's behaviour fails loudly instead of writing misdated rows.
+
+The market cap and the ratios are restated onto the selected close.  The
+vendor quotes them against the quote day's price, so copying them verbatim
+next to a close from another session produces a row whose own numbers
+disagree with each other -- exactly what the 2026-11-10 batch did.
 
 The source can only describe **one** trade date
 ------------------------------------------------
@@ -81,6 +116,7 @@ reconciliation without letting them leak into the factor pipeline.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -93,7 +129,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.config.settings import settings
-from app.data_sources.tencent import TencentQuoteDataSource
+from app.data_sources.tencent import (
+    CloseField,
+    TencentQuoteDataSource,
+    close_field_for_quote_day,
+    to_symbol,
+)
 from app.models.raw import ImportBatch, RawVendorSnapshot
 from app.repositories.market import ValuationSnapshotRepository
 from app.repositories.raw import RawDailyBarImportRepository
@@ -118,6 +159,26 @@ PRICE_MATCH_TOLERANCE = Decimal("0.01")
 #: The two-threshold rule keeps a genuine rounding difference acceptable
 #: while rejecting a whole session that drifted.
 PRICE_MATCH_REL_TOLERANCE = Decimal("0.002")
+
+#: Minimum share of the trusted universe in which the selected vendor field
+#: has to agree with the trusted close before anything is published.
+#:
+#: The field is chosen from the vendor's documented quote-day roll, and this
+#: threshold turns that rule into a checked assumption: if the vendor ever
+#: changes when it rolls, the run fails loudly instead of publishing rows
+#: dated to the wrong session.  Measured agreement of the correct field is
+#: above 99%; the wrong one is below 50% even when the market is open.
+MIN_FIELD_AGREEMENT = 0.5
+
+
+def _decimal(value: object) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = Decimal(str(value))
+    except Exception:
+        return None
+    return number if number.is_finite() else None
 
 
 def price_matches_trusted_close(
@@ -151,6 +212,8 @@ class TencentValuationResult:
     inserted: int = 0
     batch_id: int | None = None
     batch_no: str | None = None
+    close_field: CloseField | None = None
+    field_agreement: dict[str, float] = field(default_factory=dict)
     rejection_reasons: dict[str, int] = field(default_factory=dict)
     coverage_by_exchange: dict[str, dict[str, int]] = field(default_factory=dict)
 
@@ -164,6 +227,10 @@ class TencentValuationResult:
             "inserted": self.inserted,
             "batch_id": self.batch_id,
             "batch_no": self.batch_no,
+            "close_field": self.close_field,
+            "field_agreement": {
+                key: round(value, 4) for key, value in self.field_agreement.items()
+            },
             "rejection_reasons": self.rejection_reasons,
             "coverage_by_exchange": self.coverage_by_exchange,
             "source_name": "tencent",
@@ -246,9 +313,71 @@ class TencentValuationCollectionService:
             .limit(1)
         )
 
-    def _fail_batch(
-        self, db: Session, job, exc: Exception, result: TencentValuationResult
-    ) -> None:
+    def _today_is_trading_day(self, db: Session, *, day: date) -> bool:
+        """Whether ``day`` is an open session on the mainland exchanges.
+
+        This decides which vendor field carries the observed close, because
+        the vendor rolls its quote day at 09:15 on a trading day and stays on
+        the previous session otherwise.  A missing calendar row is read as
+        "not a trading day"; the agreement check in :meth:`run` then catches
+        the mistake instead of letting it through.
+        """
+        from sqlalchemy import select
+
+        from app.models.market import TradingCalendar
+
+        return (
+            db.scalar(
+                select(TradingCalendar.trade_date)
+                .where(
+                    TradingCalendar.exchange == "SH",
+                    TradingCalendar.trade_date == day,
+                    TradingCalendar.is_open.is_(True),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    def _measure_field_agreement(
+        self,
+        quotes: dict[str, dict[str, object]],
+        closes: dict[str, Decimal],
+    ) -> dict[str, float]:
+        """Measure how often each vendor field agrees with the trusted close.
+
+        The correct field agrees with the trusted close of the observed
+        session for essentially the whole universe; the wrong one agrees
+        only where the two sessions happened to close at the same price.
+        The gap is wide enough to separate the two even while the market is
+        open, which is what makes the measurement usable as a guard.
+        """
+        agreement: dict[str, float] = {}
+        for candidate in ("last_close", "price"):
+            matched = 0
+            considered = 0
+            for code, payload in quotes.items():
+                if not payload:
+                    continue
+                try:
+                    symbol = to_symbol(code)
+                except ValueError:
+                    continue
+                if symbol is None:
+                    continue
+                trusted = closes.get(symbol)
+                if trusted is None:
+                    continue
+                vendor = _decimal(payload.get(candidate))
+                if vendor is None:
+                    continue
+                considered += 1
+                if price_matches_trusted_close(vendor, trusted):
+                    matched += 1
+            agreement[candidate] = matched / considered if considered else 0.0
+        return agreement
+
+    def _fail_batch(self, db: Session, job, exc: Exception, result: TencentValuationResult) -> None:
         if job.batch_id is None:
             return
         batch = db.get(ImportBatch, job.batch_id)
@@ -269,32 +398,49 @@ class TencentValuationCollectionService:
     def run(self, db: Session, *, trade_date: date | None = None) -> TencentValuationResult:
         """Collect and publish valuation rows for the latest completed session.
 
-        The vendor quote can only describe one trade date -- the most recent
-        completed session.  Asking it for an older date yields rows that
-        carry the newer date's close, so the target is pinned to that session
-        and a request for anything else is refused rather than silently
-        misdated.
+        The observed session is the last trading session strictly before the
+        current Shanghai calendar day: a day is only observed once it has
+        fully passed, so a run at 21:00 still observes the previous day and
+        only after midnight does the service move on.
+
+        The vendor quote can only describe that one session.  Asking it for an
+        older date yields rows that carry the newer date's close, so the
+        target is pinned to it and a request for anything else is refused
+        rather than silently misdated.
+
+        Which vendor field carries the close is decided from the vendor's
+        quote-day roll and then *checked* against the trusted close; a field
+        that does not agree aborts the run instead of publishing rows dated
+        to the wrong session.
         """
         local = self.clock().astimezone(SHANGHAI)
-        target = trade_date or local.date()
-        if target >= local.date():
-            raise ValueError(
-                "valuation observation requires a completed trading day; "
-                f"{target} is not before {local.date()} in Shanghai time"
-            )
+        today = local.date()
 
         # The source can only describe the latest completed session.  Pin the
         # target to it instead of trusting the caller: asking the vendor for
         # an older date returns rows that carry the newer date's close, and
         # no tolerance can tell the difference when the two prices are close.
-        latest = self._latest_completed_session(db, before=local.date())
+        latest = self._latest_completed_session(db, before=today)
         if latest is None:
             raise ValueError("no completed trading session before the observation date")
+
+        target = trade_date or latest
+        if target >= today:
+            raise ValueError(
+                "valuation observation requires a completed trading day; "
+                f"{target} is not before {today} in Shanghai time"
+            )
         if target != latest:
             raise ValueError(
                 "the vendor quote can only describe the latest completed session "
                 f"({latest}); {target} is not reachable from a live quote"
             )
+
+        # Which field holds the observed close depends on where the vendor's
+        # quote day currently sits: it rolls at 09:15 on a trading day and
+        # stays on the previous session otherwise.
+        today_is_trading_day = self._today_is_trading_day(db, day=local.date())
+        close_field = close_field_for_quote_day(local, today_is_trading_day=today_is_trading_day)
 
         closes, exchanges, open_exchanges = self._trusted_context(db, trade_date=target)
         if open_exchanges != {"SH", "SZ", "BJ"}:
@@ -309,15 +455,20 @@ class TencentValuationCollectionService:
         }
         codes = sorted(symbol.split(".")[0] for symbol in eligible_symbols)
 
-        result = TencentValuationResult(trade_date=target, requested=len(codes))
+        result = TencentValuationResult(
+            trade_date=target, requested=len(codes), close_field=close_field
+        )
         with logged_job(
             db,
             job_name="tencent_valuation_collect",
             job_type="import",
-            on_failure=lambda session, log, exc: self._fail_batch(
-                session, log, exc, result
-            ),
-            metadata={"target_trade_date": target.isoformat(), "source_name": "tencent"},
+            on_failure=lambda session, log, exc: self._fail_batch(session, log, exc, result),
+            metadata={
+                "target_trade_date": target.isoformat(),
+                "source_name": "tencent",
+                "close_field": close_field,
+                "today_is_trading_day": today_is_trading_day,
+            },
         ) as job:
             batch_no = f"tencent_val_{target:%Y%m%d}_{uuid4().hex[:12]}"
             batch = self.raw_repository.create_batch(
@@ -366,20 +517,38 @@ class TencentValuationCollectionService:
                 )
                 db.commit()
 
+                # Check the field choice against the trusted close before
+                # anything is published.  The vendor's quote-day roll is a
+                # documented behaviour, not a guarantee, and the failure mode
+                # of getting it wrong is silent: every row would carry a
+                # plausible price for a different session.
+                agreement = self._measure_field_agreement(quotes, closes)
+                result.field_agreement = agreement
+                if agreement[close_field] < MIN_FIELD_AGREEMENT:
+                    raise ValueError(
+                        "the vendor field "
+                        f"'{close_field}' does not describe {target}: it agrees "
+                        f"with the trusted close for only "
+                        f"{agreement[close_field]:.1%} of the universe "
+                        f"(last_close {agreement['last_close']:.1%}, "
+                        f"price {agreement['price']:.1%}). Refusing to publish."
+                    )
+
+                rejections: Counter[str] = Counter()
                 records = self.data_source.to_valuation_records(
                     quotes,
                     trade_date=target,
-                    # The target is always a *past* session, so the vendor's
-                    # ``last_close`` is the close of that session.  Its
-                    # ``price`` field is the live quote and would describe a
-                    # different day entirely.
-                    close_field="last_close",
+                    close_field=close_field,
                     allowed_symbols=eligible_symbols,
+                    rejections=rejections,
                 )
+                for reason, count in rejections.items():
+                    result.rejection_reasons[reason] = (
+                        result.rejection_reasons.get(reason, 0) + count
+                    )
                 accepted_rows: list[dict[str, object]] = []
                 coverage: dict[str, dict[str, int]] = {
-                    exchange: {"expected": 0, "accepted": 0}
-                    for exchange in ("SH", "SZ", "BJ")
+                    exchange: {"expected": 0, "accepted": 0} for exchange in ("SH", "SZ", "BJ")
                 }
                 for symbol in eligible_symbols:
                     exchange = exchanges.get(symbol)
@@ -421,6 +590,8 @@ class TencentValuationCollectionService:
                                 ),
                                 "_fetched_at_utc": fetched_at,
                                 "_supplier_asof_verified": False,
+                                "_close_field": close_field,
+                                "_caliber": "restated_to_close",
                                 "research_only": True,
                                 "pit_verified": False,
                             },
@@ -453,6 +624,8 @@ class TencentValuationCollectionService:
                     **result.as_metadata(),
                     "price_match_tolerance": str(PRICE_MATCH_TOLERANCE),
                     "price_match_rel_tolerance": str(PRICE_MATCH_REL_TOLERANCE),
+                    "min_field_agreement": MIN_FIELD_AGREEMENT,
+                    "today_is_trading_day": today_is_trading_day,
                     "pit_verified": False,
                     "research_only": True,
                 }
@@ -477,6 +650,7 @@ class TencentValuationCollectionService:
 
 __all__ = [
     "DATASET",
+    "MIN_FIELD_AGREEMENT",
     "PRICE_MATCH_TOLERANCE",
     "TencentValuationCollectionService",
     "TencentValuationResult",

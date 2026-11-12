@@ -26,49 +26,81 @@ Vendor contract, measured on 2026-11-11
   are safe.
 * ``mcap_yi`` and ``float_mcap_yi`` are in **hundred million yuan**; the
   control plane stores yuan.
-* ``is_stale`` marks a quote that did not move from the previous close; such a
-  row carries no fresh observation and is dropped rather than published.
+* ``is_stale`` marks a quote that did not move from the previous close, i.e.
+  the quote day had no trade at all.  Whether that kills the observation
+  depends on the selected close field: on the ``price`` basis the quote day
+  *is* the observed session, so the row is dropped; on the ``last_close``
+  basis the previous session's real close is still there and the trusted
+  gate decides.
 
-The price field is a *live* quote, not a closing price
-------------------------------------------------------
-This is the single most important thing to know about this source, and it was
-established by measurement rather than by reading the documentation.
+The two price fields are relative to the vendor's *quote day*
+-----------------------------------------------------------
+The quote endpoint publishes two prices, and they are not two arbitrary
+numbers: one is the quote day's price and the other is the close of the
+session *before* the quote day.
 
-``price`` is the **current** price at the moment of the request.  Measured on
-2026-11-11 at 15:05 Shanghai time, ``price`` matched the 2026-11-11 intraday
-bar for 39.7% of the market and the 2026-11-10 close for only 11.1%.
+* ``price`` is the quote day's price.  Outside the session it is that
+  session's close, frozen; during the session it is the live tick.
+* ``last_close`` is the close of the session before the quote day.
 
-``last_close`` is the **previous session's close**.  Measured on the same run,
-``last_close`` matched the 2026-11-10 trusted close for **5,561 of 5,573
-symbols (99.78%)**.
+The quote day rolls at **09:15**, when the opening auction starts -- not at
+midnight.  Measured on the same stock:
 
-So the usable field for a *historical* trade date is ``last_close``, and the
-usable field for the *current* trade date is ``price`` -- but only after the
-session has closed.  :meth:`TencentQuoteDataSource.to_valuation_records`
-therefore takes the closing price from an explicitly chosen field, and the
-caller has to decide which field that is.  Reading ``price`` for a past date
-produces a snapshot of the wrong day, which the price gate then rejects for
-almost the whole market -- a loud failure, but only because the gate is
-there.
+================  ==================  ==================
+observation       ``price``           ``last_close``
+================  ==================  ==================
+09:03 (pre-open)  11-11 close         11-10 close
+09:19 (auction)   live tick           11-11 close
+15:24 (closed)    11-11 close         11-10 close
+================  ==================  ==================
 
-Two classes of symbol are rejected by that gate, and both are correct
+So *which field holds yesterday's close* depends on when the endpoint is
+called, and the failure is silent: the wrong field still returns a
+plausible price for every symbol, it just belongs to a different session.
+Hard-coding one of the two is wrong for half of every day.  The caller has
+to measure which field actually carries the session it wants -- see
+``app/services/tencent_valuation_collection.py``.
+
+Every derived quantity is quoted against the live price
+-------------------------------------------------------
+``mcap_yi``, ``float_mcap_yi``, ``pe_ttm``, ``pe_static`` and ``pb`` are all
+computed from the quote day's price, not from ``last_close``.  Evidence:
+
+* ``mcap / price`` recovers the share count exactly -- Ping An Bank gives
+  19,405,902,500 shares against a true 19,405,920,000 -- while
+  ``mcap / last_close`` is 0.17% off.
+* ``price / pe_ttm`` is constant across observations (median drift
+  0.0075%), i.e. the earnings per share is fixed and the PE moves with the
+  price.  ``last_close / pe_ttm`` drifts by 0.6%.
+
+The one exception is ``limit_up`` / ``limit_down``: they come from
+``last_close`` (11.71 * 1.1 = 12.88), because the exchange sets the daily
+limit from the previous close.
+
+The consequence is that taking the close from ``last_close`` while copying
+the market cap verbatim mixes two sessions: the close belongs to one and
+the market cap to the next.  :meth:`TencentQuoteDataSource.to_valuation_records`
+therefore rescales the price-basis quantities onto the close it selected, so
+every published row is internally consistent.
+
+Two classes of symbol are rejected by the price gate, and both are correct
 rejections:
 
-* **Index-code collisions.**  108 six-digit codes are index codes on one side
-  while the vendor quotes a *company* under the same digits (``000905`` is the
-  CSI 500 index and also a listed company).  The trusted close and the vendor
-  quote differ by three orders of magnitude.
-* **Ex-dividend symbols.**  For an ``XD`` symbol the vendor's ``last_close``
-  is the *post*-ex-rights price while the trusted bar holds the
-  *pre*-ex-rights close, so the two differ by the dividend amount.
+* **Index-code collisions.**  108 six-digit codes are index codes on the
+  trusted side while the vendor quotes a company under the same digits
+  (``000905`` is the CSI 500 index and also a listed company).
+* **Ex-dividend symbols.**  For an ``XD`` symbol the vendor's
+  ``last_close`` is the *post*-ex-rights price while the trusted bar holds
+  the *pre*-ex-rights close.
 """
 
 from __future__ import annotations
 
 import sys
+from collections import Counter
 from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
+from datetime import date, datetime, time
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -85,6 +117,20 @@ BATCH_SIZE = 60
 
 #: One hundred million yuan -- the unit the vendor reports market caps in.
 _YI = Decimal("100000000")
+
+#: The moment the vendor rolls its quote day.
+#:
+#: The opening auction starts at 09:15, and the endpoint switches to the new
+#: session at that moment.  Before it, the endpoint still serves the previous
+#: session: ``price`` is that session's frozen close and ``last_close`` the
+#: one before it.  From 09:15 on, ``price`` becomes the live quote of the
+#: current session and ``last_close`` carries the previous session's close.
+QUOTE_DAY_ROLL = time(9, 15)
+
+#: Decimal places kept for the published quantities.  The control plane stores
+#: market caps with 6 decimals and the valuation ratios with 10.
+_MARKET_CAP_PLACES = 6
+_RATIO_PLACES = 10
 
 
 class TencentDataError(RuntimeError):
@@ -108,11 +154,53 @@ class ValuationRecord:
 
 #: Which vendor field carries the closing price of the observed trade date.
 #:
-#: ``LAST_CLOSE`` is the previous session's close -- the right choice for a
-#: historical trade date, because the quote is taken after that session ended.
-#: ``PRICE`` is the live price -- only correct for a trade date whose session
-#: has already closed.
+#: The two fields are relative to the vendor's *quote day*, and the quote day
+#: rolls at 09:15 -- so which field holds the observed session's close
+#: depends on when the endpoint is called.  Use
+#: :func:`close_field_for_quote_day` to decide; never hard-code one.
 CloseField = Literal["last_close", "price"]
+
+
+def close_field_for_quote_day(now: datetime, *, today_is_trading_day: bool) -> CloseField:
+    """Return the vendor field that carries the observed session's close.
+
+    The observed session is always the last session *before* the current
+    calendar day, so the vendor's quote day is either that session itself or
+    the one right after it:
+
+    * before 09:15 on a trading day, and on every non-trading day, the vendor
+      still serves the previous session -- the quote day *is* the observed one
+      and ``price`` carries its close;
+    * from 09:15 on a trading day the vendor has rolled to the current
+      session, so ``last_close`` carries the observed session's close.
+
+    ``now`` must already be in the vendor's local time zone; the caller
+    converts it, because the roll happens on the exchange's clock.
+    """
+    if today_is_trading_day and now.time().replace(tzinfo=None) >= QUOTE_DAY_ROLL:
+        return "last_close"
+    return "price"
+
+
+def _restate(
+    value: Decimal | None,
+    *,
+    close: Decimal,
+    price_basis: Decimal,
+    places: int,
+) -> Decimal | None:
+    """Move a price-basis quantity onto the selected close.
+
+    The vendor quotes the market cap and the ratios against the quote day's
+    price.  A share count and an earnings figure do not change within a
+    session, so scaling them by ``close / price_basis`` puts every published
+    quantity on the same session as the close.  Without this the row mixes
+    two sessions: a close from one day and a market cap from the next.
+    """
+    if value is None:
+        return None
+    restated = value * close / price_basis
+    return restated.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -147,6 +235,18 @@ def _prefixed(symbol: str) -> str:
     else:
         raise ValueError(f"unknown A-share code segment: {symbol!r}")
     return f"{code}.{exchange}"
+
+
+def to_symbol(code: str) -> str | None:
+    """Map a bare six-digit code to the project's symbol.
+
+    Returns ``None`` for anything that is not an A-share code, so callers can
+    skip the vendor's non-stock entries without catching exceptions.
+    """
+    try:
+        return _prefixed(code)
+    except ValueError:
+        return None
 
 
 class TencentQuoteDataSource:
@@ -193,15 +293,22 @@ class TencentQuoteDataSource:
         quotes: dict[str, dict[str, Any]],
         *,
         trade_date: date,
-        close_field: CloseField = "last_close",
+        close_field: CloseField,
         allowed_symbols: set[str] | None = None,
+        rejections: Counter[str] | None = None,
     ) -> list[ValuationRecord]:
         """Turn raw quote payloads into valuation records.
 
         ``close_field`` selects which vendor field carries the closing price of
-        the observed trade date.  Use ``last_close`` for a historical date and
-        ``price`` only for a session that has already closed -- see the module
-        docstring for the measurement behind that choice.
+        the observed trade date.  It has no default on purpose: which field
+        holds the close depends on the moment the quote was taken, and
+        hard-coding one silently misdates half of every day.  Use
+        :func:`close_field_for_quote_day` to pick it.
+
+        Whatever field is selected, the market cap and the ratios are
+        **restated onto it**.  The vendor quotes them against the quote day's
+        price, so copying them verbatim next to a close from another session
+        produces a row whose own numbers disagree with each other.
 
         ``allowed_symbols`` restricts the result to the project's own symbol
         namespace.  The vendor quotes any six-digit code it knows, which
@@ -209,23 +316,49 @@ class TencentQuoteDataSource:
         example ``000905`` is both the CSI 500 index and a listed company).
         Filtering against the trusted security table keeps the collision out of
         the market layer instead of publishing a mismatched name and price.
+
+        ``rejections`` optionally collects why a quote was dropped, keyed by
+        reason, so the caller can report the breakdown instead of a single
+        opaque difference between received and accepted.
         """
+
+        def drop(reason: str) -> None:
+            if rejections is not None:
+                rejections[reason] += 1
+
         records: list[ValuationRecord] = []
         for code, payload in quotes.items():
             if not payload:
+                drop("empty_payload")
                 continue
-            if payload.get("is_stale"):
-                # A stale quote did not move from the previous close, so it
-                # carries no fresh observation for this trade date.
+            if payload.get("is_stale") and close_field == "price":
+                # The quote day *is* the observed session here, so a frozen
+                # quote means the session itself had no trade: there is
+                # nothing to observe.  On the ``last_close`` basis the frozen
+                # quote still carries the previous session's real close -- and
+                # because the price did not move, the restatement factor is
+                # exactly 1 -- so it is kept and the trusted-close gate in
+                # the service decides whether it belongs.
+                drop("stale_quote")
                 continue
             close = _decimal(payload.get(close_field))
             if close is None or close <= 0:
+                drop("no_close")
                 continue
             try:
                 symbol = _prefixed(code)
             except ValueError:
+                drop("not_an_a_share_code")
                 continue
             if allowed_symbols is not None and symbol not in allowed_symbols:
+                drop("outside_trusted_universe")
+                continue
+            price_basis = _decimal(payload.get("price"))
+            if price_basis is None or price_basis <= 0:
+                # Without the quote day's price the price-basis quantities
+                # cannot be placed on the selected close, and the row would
+                # mix two sessions.
+                drop("no_price_basis")
                 continue
             total_cap_yi = _decimal(payload.get("mcap_yi"))
             float_cap_yi = _decimal(payload.get("float_mcap_yi"))
@@ -234,12 +367,46 @@ class TencentQuoteDataSource:
                     symbol=symbol,
                     trade_date=trade_date,
                     close=close,
-                    total_market_cap=total_cap_yi * _YI if total_cap_yi is not None else None,
-                    float_market_cap=float_cap_yi * _YI if float_cap_yi is not None else None,
-                    pe_ttm=_decimal(payload.get("pe_ttm")),
-                    pe_static=_decimal(payload.get("pe_static")),
-                    pb=_decimal(payload.get("pb")),
-                    raw_payload=dict(payload),
+                    total_market_cap=(
+                        _restate(
+                            total_cap_yi * _YI if total_cap_yi is not None else None,
+                            close=close,
+                            price_basis=price_basis,
+                            places=_MARKET_CAP_PLACES,
+                        )
+                    ),
+                    float_market_cap=(
+                        _restate(
+                            float_cap_yi * _YI if float_cap_yi is not None else None,
+                            close=close,
+                            price_basis=price_basis,
+                            places=_MARKET_CAP_PLACES,
+                        )
+                    ),
+                    pe_ttm=_restate(
+                        _decimal(payload.get("pe_ttm")),
+                        close=close,
+                        price_basis=price_basis,
+                        places=_RATIO_PLACES,
+                    ),
+                    pe_static=_restate(
+                        _decimal(payload.get("pe_static")),
+                        close=close,
+                        price_basis=price_basis,
+                        places=_RATIO_PLACES,
+                    ),
+                    pb=_restate(
+                        _decimal(payload.get("pb")),
+                        close=close,
+                        price_basis=price_basis,
+                        places=_RATIO_PLACES,
+                    ),
+                    raw_payload={
+                        **payload,
+                        "_close_field": close_field,
+                        "_quote_day_price": str(price_basis),
+                        "_caliber": "restated_to_close",
+                    },
                 )
             )
         return records
@@ -248,7 +415,10 @@ class TencentQuoteDataSource:
 __all__ = [
     "BATCH_SIZE",
     "CloseField",
+    "QUOTE_DAY_ROLL",
     "TencentDataError",
     "TencentQuoteDataSource",
     "ValuationRecord",
+    "close_field_for_quote_day",
+    "to_symbol",
 ]

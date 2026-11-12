@@ -36,8 +36,13 @@ def main() -> int:
     db_path = Path(args.db or settings.metadata_db_path)
 
     print("=== 腾讯估值采集 ===")
-    print(f"目标交易日: {target or '最近已完成交易日(由服务判定)'}")
-    print("注意: 该源只能描述最近一个已收盘交易日，其他日期会被拒绝")
+    print(f"目标交易日: {target or '最近已完整过去的交易日(由服务判定)'}")
+    print("注意:")
+    print("  1. 该源只能描述最近一个已完整过去的交易日，其他日期会被拒绝")
+    print("     (规则: 严格早于当前北京自然日的最后交易日")
+    print("      —— 21:00 跑采昨天，跨 0 点后才采新的一天)")
+    print("  2. 取哪个价格字段由厂商行情日归属决定(09:15 滚动)，服务会实测校验")
+    print("     ，不匹配则拒绝入库")
     print(f"数据库: {db_path}")
 
     if args.db:
@@ -57,6 +62,12 @@ def main() -> int:
     print(f"通过闸门       : {result.accepted}")
     print(f"拒绝           : {result.rejected}")
     print(f"入库行数       : {result.inserted}")
+    print(f"取价字段       : {result.close_field}")
+    if result.field_agreement:
+        agreement = "  ".join(
+            f"{key}={value:.2%}" for key, value in sorted(result.field_agreement.items())
+        )
+        print(f"字段一致率     : {agreement}")
     print(f"批次           : {result.batch_no} (id={result.batch_id})")
     if result.rejection_reasons:
         print(f"拒绝原因       : {result.rejection_reasons}")
