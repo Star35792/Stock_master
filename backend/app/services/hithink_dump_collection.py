@@ -17,6 +17,7 @@ from app.models.market import CorporateAction
 from app.models.raw import RawCorporateAction
 from app.repositories.market import SecurityRepository
 from app.repositories.raw import RawDailyBarImportRepository
+from app.services.daily_bar_market_builder import DailyBarMarketBuildService
 from app.services.hithink_collection import _to_raw_daily_bar
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -262,7 +263,22 @@ class HithinkDumpCollectionService:
             "cap_date": end_date,
         }
         db.execute(text(_ENSURE_DUMP_SECURITIES_SQL), params)
+        # The bulk path is needed for years of dump history, but it cannot
+        # decide cross-vendor consistency. Recheck only dates with an
+        # independent TDX observation or an already recorded conflict.
+        reconciliation_dates = [
+            row[0] for row in db.execute(text(_RECONCILIATION_DATES_SQL), params)
+        ]
         db.execute(text(_BUILD_MARKET_DAILY_SQL), params)
+        for trade_date in reconciliation_dates:
+            DailyBarMarketBuildService().build_from_raw(
+                db,
+                start_date=trade_date,
+                end_date=trade_date,
+                adjust_type="none",
+                source_name=batch.source_name,
+                commit=False,
+            )
         market_rows = int(db.scalar(text(_COUNT_MARKET_DAILY_SQL), params) or 0)
         db.commit()
         return market_rows
@@ -336,6 +352,13 @@ JOIN market.trading_calendar c
  AND c.trade_date = r.trade_date
  AND c.is_open = true
 WHERE r.adjust_type = 'none'
+  AND NOT EXISTS (
+      SELECT 1 FROM market.daily_bar_source_compare cmp
+      WHERE cmp.symbol = r.symbol
+        AND cmp.trade_date = r.trade_date
+        AND cmp.adjust_type = r.adjust_type
+        AND cmp.is_conflict = true
+  )
   AND r.open > 0 AND r.high > 0 AND r.low > 0 AND r.close > 0
   AND r.high >= r.open AND r.high >= r.close AND r.high >= r.low
   AND r.low <= r.open AND r.low <= r.close AND r.low <= r.high
@@ -371,6 +394,34 @@ SELECT COUNT(*)
 FROM market.daily_bar d
 JOIN latest r ON r.id = d.selected_raw_id
 WHERE d.adjust_type = 'none'
+  AND d.quality_status IN ('trusted', 'manual_fixed')
+  AND d.is_suspect = false
+"""
+
+_RECONCILIATION_DATES_SQL = """
+WITH comparison_dates AS (
+    SELECT trade_date FROM raw.daily_bar
+    WHERE source_name = 'tdx_official' AND adjust_type = 'none'
+    UNION
+    SELECT trade_date FROM market.daily_bar_source_compare
+    WHERE is_conflict = true AND adjust_type = 'none'
+)
+SELECT d.trade_date
+FROM comparison_dates d
+WHERE (CAST(:cap_date AS DATE) IS NULL OR d.trade_date <= CAST(:cap_date AS DATE))
+  AND EXISTS (
+      SELECT 1 FROM raw.daily_bar r
+      WHERE r.source_name = :source_name
+        AND r.adjust_type = 'none'
+        AND r.trade_date = d.trade_date
+        AND (
+          (CAST(:start_date AS DATE) IS NOT NULL AND CAST(:end_date AS DATE) IS NOT NULL
+           AND r.trade_date BETWEEN CAST(:start_date AS DATE) AND CAST(:end_date AS DATE))
+          OR ((CAST(:start_date AS DATE) IS NULL OR CAST(:end_date AS DATE) IS NULL)
+              AND r.batch_id = :batch_id)
+        )
+  )
+ORDER BY d.trade_date
 """
 
 _ENSURE_DUMP_SECURITIES_SQL = _DUMP_CANDIDATES_SQL + """

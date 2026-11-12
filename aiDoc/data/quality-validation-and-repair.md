@@ -152,6 +152,25 @@ PCT_CHANGE_ABNORMAL
 SOURCE_CONFLICT
 ```
 
+当前日线执行规则：同一业务键跨源对账为真实冲突时，本轮候选不得发布；若
+`market.daily_bar` 已有该键的厂商行，将其保留原值和 `selected_raw_id`，但降为
+`suspect`、`is_suspect=true`、质量分 0，立即退出可信消费路径。`manual_fixed`
+有独立修复审计，不由自动对账改写。相同 raw 配对重跑不重复创建
+`SOURCE_CONFLICT` 问题；任一源产生新 raw 修订版本时保留新的冲突证据。
+后续最新版本对账一致且自身质量校验通过，方可重新升为 `trusted`。
+
+HiThink dump 的历史批量构建仍用批量 SQL，但对有通达信独立观察或已有冲突的
+交易日，发布前调用通用多源对账；已记录冲突的键不会由批量 SQL 直接重新标为
+`trusted`。`source_count` 是参与的原始来源名称数，不等于独立厂商数；
+判断独立性须看数据源注册表和来源血缘。
+
+若冲突行已进入温层 Parquet，控制面降级后还须基于已验证父 release 发布
+`market.daily_bar` 的 delta release；只改热库不会改变已导出的研究输入。
+2026-11-11 对 `399002.SZ`（2026-11-10）执行单标的重对账后，热库保留
+`selected_raw_id=11284273` 但状态降为 `suspect`；发布
+`20261111-194616-source-conflict` 日线 delta release 后，温层研究读取该键返回
+0 条可信记录。原始值与旧 release 保留供历史复现。
+
 ### 4.7 复权口径
 
 复权类型必须明确，不允许把不复权、前复权、后复权数据混入同一唯一键。

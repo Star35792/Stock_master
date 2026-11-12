@@ -79,9 +79,13 @@ class FakeRawRepository:
 class FakeMarketRepository:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.conflicts: list[dict] = []
 
     def upsert_from_raw(self, db: object, **kwargs: object) -> None:
         self.calls.append(kwargs)
+
+    def mark_source_conflict(self, db: object, **kwargs: object) -> None:
+        self.conflicts.append(kwargs)
 
 
 class FakeSecurityRepository:
@@ -257,6 +261,12 @@ def test_market_build_blocks_price_conflict_between_sources() -> None:
     assert result.issue_count == 1
     assert result.conflict_count == 1
     assert market_repository.calls == []
+    assert market_repository.conflicts == [{
+        "symbol": "600519.SH",
+        "trade_date": date(2026, 7, 17),
+        "adjust_type": "none",
+        "source_count": 2,
+    }]
     assert compare_repository.calls[0]["is_conflict"] is True
     assert issue_repository.calls[0]["issue_type"] == "SOURCE_CONFLICT"
     assert db.committed is True

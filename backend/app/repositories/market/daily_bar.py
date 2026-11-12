@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, desc, func, literal, or_, select
+from sqlalchemy import and_, desc, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,36 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def mark_source_conflict(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        trade_date: date,
+        adjust_type: str,
+        source_count: int,
+    ) -> None:
+        """Remove a disputed vendor bar from every trusted read path.
+
+        Preserve its prices and selected raw ID for investigation. A manual
+        correction has its own audit trail and must not be silently replaced.
+        """
+        db.execute(
+            update(DailyBar)
+            .where(
+                DailyBar.symbol == symbol,
+                DailyBar.trade_date == trade_date,
+                DailyBar.adjust_type == adjust_type,
+                DailyBar.quality_status != "manual_fixed",
+            )
+            .values(
+                quality_status="suspect",
+                is_suspect=True,
+                quality_score=Decimal("0.00"),
+                source_count=max(1, source_count),
+            )
+        )
+
     def get_latest_consumable(
         self,
         db: Session,

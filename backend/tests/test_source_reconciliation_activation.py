@@ -46,9 +46,13 @@ class FakeRawRepository:
 class FakeMarketRepository:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.conflicts: list[dict] = []
 
     def upsert_from_raw(self, db: object, **kwargs: object) -> None:
         self.calls.append(kwargs)
+
+    def mark_source_conflict(self, db: object, **kwargs: object) -> None:
+        self.conflicts.append(kwargs)
 
 
 class FakeSecurityRepository:

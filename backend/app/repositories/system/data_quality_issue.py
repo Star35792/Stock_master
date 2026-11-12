@@ -24,6 +24,23 @@ class DataQualityIssueRepository:
         expected_value: dict[str, Any] | None = None,
         actual_value: dict[str, Any] | None = None,
     ) -> DataQualityIssue:
+        if issue_type == "SOURCE_CONFLICT" and raw_id is not None:
+            # Rechecking the same raw pair must not flood the operations view.
+            # A changed vendor revision has a different raw_id_b in the
+            # evidence and therefore still creates a new issue.
+            existing_rows = db.scalars(
+                select(DataQualityIssue).where(
+                    DataQualityIssue.dataset == dataset,
+                    DataQualityIssue.symbol == symbol,
+                    DataQualityIssue.trade_date == trade_date,
+                    DataQualityIssue.adjust_type == adjust_type,
+                    DataQualityIssue.issue_type == issue_type,
+                    DataQualityIssue.raw_id == raw_id,
+                )
+            ).all()
+            for existing in existing_rows:
+                if existing.actual_value == actual_value:
+                    return existing
         issue = DataQualityIssue(
             dataset=dataset,
             symbol=symbol,

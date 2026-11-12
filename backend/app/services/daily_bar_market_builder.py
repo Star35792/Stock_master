@@ -66,6 +66,7 @@ class DailyBarMarketBuildService:
         end_date: date | None = None,
         adjust_type: str = "none",
         source_name: str | None = None,
+        commit: bool = True,
     ) -> MarketBuildResult:
         """Promote raw bars into ``market.daily_bar``.
 
@@ -132,6 +133,13 @@ class DailyBarMarketBuildService:
             if key in reconciliation.conflict_issues:
                 rejected_count += 1
                 conflict_count += 1
+                self.market_repository.mark_source_conflict(
+                    db,
+                    symbol=candidate.symbol,
+                    trade_date=candidate.trade_date,
+                    adjust_type=candidate.adjust_type,
+                    source_count=reconciliation.source_counts.get(key, 1),
+                )
                 for issue in reconciliation.conflict_issues[key]:
                     self.issue_repository.create(db, **issue)
                     issue_count += 1
@@ -193,7 +201,8 @@ class DailyBarMarketBuildService:
             )
             issue_count += 1
 
-        db.commit()
+        if commit:
+            db.commit()
         return MarketBuildResult(
             candidates_count=len(candidates),
             trusted_count=trusted_count,

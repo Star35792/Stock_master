@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.data_sources.base import DailyBarRecord
 from app.data_sources.tdx_official import TdxOfficialDataSource
+from app.models.raw import ImportBatch
 from app.repositories.market import SecurityRepository
 from app.repositories.raw import RawDailyBarImportRepository
 from app.services.hithink_collection import _to_raw_daily_bar
@@ -74,42 +75,45 @@ class TdxDailyBarCollectionService:
         trade_date: date,
     ) -> TdxDailyBarCollectionResult:
         batch_no = f"tdx_daily_bar_{datetime.now(UTC):%Y%m%d%H%M%S}_{uuid4().hex[:8]}"
-        package = self.data_source.fetch_package(trade_date)
-
-        # 只保留项目证券主表里存在的标的。通达信独有的 999xxx 指数代码、基金
-        # 与债券不在项目命名空间内，放进来只会制造"项目没有的标的"。
-        project_symbols = {
-            symbol for symbol in self.security_repository.get_active_symbols(db)
-        }
-        package_symbols = {str(row["symbol"]) for row in package.rows}
-        allowed = project_symbols & package_symbols
-
-        security_types = self.security_repository.get_security_types(db, allowed)
-        records = self.data_source.to_daily_bar_records(
-            package,
-            allowed_symbols=allowed,
-            security_types=security_types,
-        )
-
         batch = self.repository.create_batch(
             db,
             batch_no=batch_no,
             source_name=self.data_source.name,
             source_type=self.data_source.source_type,
             dataset="daily_bar",
-            request_params={
-                "trade_date": trade_date.isoformat(),
-                "package_rows": len(package.rows),
-                "project_symbols_matched": len(allowed),
-            },
+            request_params={"trade_date": trade_date.isoformat()},
         )
+        batch_id = batch.id
+        # Persist the attempt before the network request; a timeout or 404 must
+        # leave a failed import batch instead of disappearing from raw lineage.
+        db.commit()
 
         accepted_count = 0
         skipped_count = 0
+        row_count = 0
         try:
+            package = self.data_source.fetch_package(trade_date)
+            # Only compare symbols from the project's security namespace.
+            project_symbols = set(self.security_repository.get_active_symbols(db))
+            package_symbols = {str(row["symbol"]) for row in package.rows}
+            allowed = project_symbols & package_symbols
+            security_types = self.security_repository.get_security_types(db, allowed)
+            records = self.data_source.to_daily_bar_records(
+                package,
+                allowed_symbols=allowed,
+                security_types=security_types,
+            )
+            row_count = len(records)
+            if row_count == 0:
+                raise ValueError(f"{trade_date} TDX package has no comparable daily bars")
+            batch.request_params = {
+                "trade_date": trade_date.isoformat(),
+                "package_rows": len(package.rows),
+                "project_symbols_matched": len(allowed),
+            }
             for record in records:
                 row = _to_raw_daily_bar(
-                    batch_id=batch.id,
+                    batch_id=batch_id,
                     source_name=self.data_source.name,
                     source_type=self.data_source.source_type,
                     source_priority=self.source_priority,
@@ -126,20 +130,23 @@ class TdxDailyBarCollectionService:
                 db,
                 batch,
                 status="success",
-                row_count=len(records),
+                row_count=row_count,
                 accepted_count=accepted_count,
                 rejected_count=0,
             )
             db.commit()
         except Exception as exc:
             db.rollback()
+            batch = db.get(ImportBatch, batch_id)
+            if batch is None:
+                raise RuntimeError("TDX import attempt disappeared after rollback") from exc
             self.repository.finish_batch(
                 db,
                 batch,
                 status="failed",
-                row_count=len(records),
-                accepted_count=accepted_count,
-                rejected_count=len(records) - accepted_count,
+                row_count=row_count,
+                accepted_count=0,
+                rejected_count=row_count,
                 error_message=str(exc),
             )
             db.commit()
@@ -150,7 +157,7 @@ class TdxDailyBarCollectionService:
             source_name=self.data_source.name,
             status="success",
             trade_date=trade_date,
-            row_count=len(records),
+            row_count=row_count,
             accepted_count=accepted_count,
             skipped_count=skipped_count,
             error_message=None,

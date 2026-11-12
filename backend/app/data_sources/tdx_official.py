@@ -34,7 +34,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -70,12 +70,12 @@ def _to_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     try:
-        number = float(value)
-    except (TypeError, ValueError):
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
         return None
-    if number != number:  # NaN
+    if not number.is_finite():
         return None
-    return Decimal(str(number))
+    return number
 
 
 class TdxOfficialDataSource:

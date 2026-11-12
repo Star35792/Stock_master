@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database.session import initialize_database
 from app.models.market import Security, TradingCalendar
 from app.models.raw import ImportBatch, RawDailyBar
+from app.repositories.market import DailyBarRepository
 from app.services.hithink_dump_collection import HithinkDumpCollectionService
 
 
@@ -64,8 +65,45 @@ def test_retry_protects_manual_repairs(db):
     db.execute(text("UPDATE market.daily_bar SET quality_status='manual_fixed'"))
     db.commit()
     add_raw(db, close="11")
+    add_raw(db, close="12", source="tdx_official")
     service.build_market_daily(db, batch_no="retry")
     assert db.scalar(text("SELECT selected_raw_id FROM market.daily_bar")) == original
+    assert db.scalar(text("SELECT quality_status FROM market.daily_bar")) == "manual_fixed"
+
+
+def test_independent_source_conflict_survives_primary_revisions_and_can_recover(db):
+    original = add_raw(db)
+    service = HithinkDumpCollectionService()
+    service.build_market_daily(db, batch_no="retry")
+    assert db.scalar(text("SELECT quality_status FROM market.daily_bar")) == "trusted"
+
+    add_raw(db, close="11", source="tdx_official")
+    service.build_market_daily(db, batch_no="retry")
+    assert db.execute(text(
+        "SELECT quality_status, is_suspect, selected_raw_id "
+        "FROM market.daily_bar"
+    )).one() == ("suspect", True, original)
+    assert DailyBarRepository().get_latest_consumable(
+        db, symbol="600000.SH", adjust_type="none"
+    ) is None
+    assert db.scalar(text("SELECT count(*) FROM market.daily_bar_source_compare "
+                          "WHERE is_conflict")) == 1
+    assert db.scalar(text("SELECT count(*) FROM metadata.data_quality_issue "
+                          "WHERE issue_type='SOURCE_CONFLICT'")) == 1
+
+    revised = add_raw(db, close="10.5")
+    service.build_market_daily(db, batch_no="retry")
+    assert db.scalar(text("SELECT quality_status FROM market.daily_bar")) == "suspect"
+    service.build_market_daily(db, batch_no="retry")
+    assert db.scalar(text("SELECT count(*) FROM metadata.data_quality_issue "
+                          "WHERE issue_type='SOURCE_CONFLICT'")) == 2
+
+    add_raw(db, close="10.5", source="tdx_official")
+    service.build_market_daily(db, batch_no="retry")
+    assert db.execute(text(
+        "SELECT quality_status, is_suspect, selected_raw_id "
+        "FROM market.daily_bar"
+    )).one() == ("trusted", False, revised)
 
 
 def test_build_caps_market_date_but_preserves_raw(db):

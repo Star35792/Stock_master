@@ -5,6 +5,7 @@
 - 按 trade_year/trade_month 分区，便于按时间片读取
 - 生成 manifest（行数、checksum、schema、日期范围）
 - 校验导出前后行数一致
+- 可用 ``--include-table`` 在已验证父 release 上只发布指定表的修订
 
 注意：本脚本**只读**源库并写新 Parquet，不删除源表数据；真正的
 DuckDB→Parquet 读切与写切需要后续阶段配合 repository/service 改造。
@@ -228,6 +229,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--include-table",
+        action="append",
+        choices=[f"{schema}.{table}" for schema, table, _ in EXPORT_TABLES],
+        metavar="SCHEMA.TABLE",
+        help="只导出指定表；可重复传入，用于父 release 上的局部修订",
+    )
+    parser.add_argument(
         "--skip-verify",
         action="store_true",
         help="跳过 Parquet 行数校验",
@@ -241,6 +249,22 @@ def main(argv: list[str] | None = None) -> int:
     warm_root = Path(args.warm_root)
     release_tag = args.release_tag
     snapshot_tables = set(args.snapshot_table)
+    selected_tables = set(args.include_table or [])
+    if selected_tables and not args.base_release_tag:
+        logger.error("局部导出必须指定 --base-release-tag，防止生成不完整的独立 release")
+        return 1
+    if selected_tables & snapshot_tables:
+        logger.error("局部导出的表不能声明为 snapshot；热窗口不含完整历史")
+        return 1
+    if selected_tables:
+        parent_summary = warm_root / args.base_release_tag / "export_summary.json"
+        try:
+            parent_ok = json.loads(parent_summary.read_text(encoding="utf-8")).get("all_ok")
+        except (OSError, ValueError):
+            parent_ok = False
+        if parent_ok is not True:
+            logger.error("父 release 不存在或未通过验证: %s", args.base_release_tag)
+            return 1
 
     if not db_path.exists():
         logger.error("数据库不存在: %s", db_path)
@@ -253,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
 
     with duckdb.connect(str(db_path), read_only=True) as con:
         for schema, table, date_column in EXPORT_TABLES:
+            if selected_tables and f"{schema}.{table}" not in selected_tables:
+                continue
             try:
                 result = export_table(
                     con,
