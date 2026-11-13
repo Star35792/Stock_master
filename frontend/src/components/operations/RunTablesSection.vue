@@ -1,13 +1,41 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
 import { BarChart3, LineChart } from "@lucide/vue";
 
 import type { OperationsOverview } from "../../types";
 import { formatDate, formatDateTime, formatNumber, formatPercent, statusClass, statusLabel, strategyLabel } from "./formatters";
 
-defineProps<{
+const props = defineProps<{
   factors: OperationsOverview["factors"];
   backtests: OperationsOverview["backtests"];
 }>();
+
+const runPage = ref<OperationsOverview["backtests"]["latest_runs"]>([]);
+const runTotal = ref(0);
+const runOffset = ref(0);
+const runError = ref("");
+const runLoading = ref(false);
+const loaded = ref(false);
+
+async function loadRuns(offset = 0) {
+  runLoading.value = true;
+  runError.value = "";
+  try {
+    const response = await fetch(`/api/v1/backtests/runs?limit=20&offset=${offset}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const page = await response.json() as {
+      items: OperationsOverview["backtests"]["latest_runs"];
+      total: number;
+    };
+    runPage.value = page.items;
+    runTotal.value = page.total;
+    runOffset.value = offset;
+    loaded.value = true;
+  } catch (cause) {
+    runError.value = `历史运行读取失败：${cause instanceof Error ? cause.message : "未知错误"}；${loaded.value ? "保留上次读取的列表" : "下表显示工作台最近摘要"}。`;
+  } finally { runLoading.value = false; }
+}
+onMounted(() => { void loadRuns(); });
 </script>
 
 <template>
@@ -48,6 +76,8 @@ defineProps<{
       <LineChart :size="20" aria-hidden="true" />
       <h2>回测结果</h2>
     </div>
+    <p v-if="runError" role="alert">{{ runError }}</p>
+    <p v-if="runLoading" role="status">正在读取历史运行…</p>
 
     <div class="table-panel full">
       <table>
@@ -62,8 +92,8 @@ defineProps<{
           </tr>
         </thead>
         <tbody>
-          <tr v-for="run in backtests.latest_runs" :key="run.id">
-            <td>{{ run.name }}</td>
+          <tr v-for="run in loaded ? runPage : props.backtests.latest_runs" :key="run.id">
+            <td><RouterLink v-if="loaded" :to="`/backtests/runs/${run.id}`">{{ run.name }}</RouterLink><span v-else>{{ run.name }}</span></td>
             <td>{{ strategyLabel(run.strategy_name) }}</td>
             <td><span :class="statusClass(run.status)">{{ statusLabel(run.status) }}</span></td>
             <td>{{ formatDate(run.start_date) }} - {{ formatDate(run.end_date) }}</td>
@@ -73,5 +103,11 @@ defineProps<{
         </tbody>
       </table>
     </div>
+    <p v-if="loaded && runTotal === 0">暂无历史回测运行。</p>
+    <p v-if="loaded && runTotal > 0">
+      第 {{ runOffset + 1 }}–{{ Math.min(runOffset + 20, runTotal) }} / {{ runTotal }} 条
+      <button type="button" :disabled="runOffset === 0 || runLoading" @click="loadRuns(runOffset - 20)">上一页</button>
+      <button type="button" :disabled="runOffset + 20 >= runTotal || runLoading" @click="loadRuns(runOffset + 20)">下一页</button>
+    </p>
   </section>
 </template>

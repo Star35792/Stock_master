@@ -7,9 +7,10 @@ import { securityTypeLabel } from "../components/operations/formatters";
 import type { FactorDefinition, FactorProfile } from "../types";
 import {
   fetchBacktestFinalHoldingsTyped,
+  preflightFactorSelectionBacktest,
   runFactorSelectionBacktest,
 } from "../factorSelectionApi";
-import type { FactorScoreSpecInput } from "../factorSelectionApi";
+import type { FactorScoreSpecInput, FactorSelectionBacktestRequest, FactorSelectionPreflight } from "../factorSelectionApi";
 
 type FactorDirection = "unconfigured" | "higher" | "lower";
 
@@ -47,6 +48,10 @@ const backtestForm = reactive({
 });
 const isRunningBacktest = ref(false);
 const backtestError = ref<string | null>(null);
+const preflight = ref<FactorSelectionPreflight | null>(null);
+const preflightError = ref("");
+const preflightLoading = ref(false);
+let preflightController: AbortController | null = null;
 const selected = ref<SelectedFactorConfig[]>([]);
 const missingDirectionKeys = ref<string[]>([]);
 const selectionPanel = ref<HTMLElement | null>(null);
@@ -68,6 +73,11 @@ function factorKey(factor: FactorDefinition) {
 }
 
 function invalidateBacktestState() {
+  preflightController?.abort();
+  preflightController = null;
+  preflight.value = null;
+  preflightError.value = "";
+  preflightLoading.value = false;
   backtestRequestId += 1;
   backtestController?.abort();
   backtestController = null;
@@ -86,6 +96,7 @@ function invalidateBacktestState() {
 watch([backtestForm, selected], invalidateBacktestState, { deep: true });
 
 onBeforeUnmount(() => {
+  preflightController?.abort();
   backtestRequestId += 1;
   holdingsRequestId += 1;
   backtestController?.abort();
@@ -124,6 +135,69 @@ function directionSnapshot(
     higher_is_better: spec.higher_is_better,
     direction_source: "manual",
   };
+}
+
+function createBacktestPayload(factorSpecs: FactorScoreSpecInput[]): FactorSelectionBacktestRequest {
+  const interval = Number(backtestForm.rebalance_interval);
+  return {
+    name: backtestForm.name || "工作台选股回测",
+    strategy_name: "factor_selection",
+    factor_specs: factorSpecs,
+    top_n: Number(backtestForm.top_n),
+    signal_lag: 1,
+    rebalance_rule: backtestForm.rebalance_rule,
+    rebalance_interval: backtestForm.rebalance_rule === "every_n_trading_days" ? interval : 1,
+    holding_period: 1,
+    benchmark: backtestForm.benchmark.trim() || null,
+    allowed_security_types: ["stock"],
+    coverage_ratio: "0.8",
+    weighting_mode: "equal_weight_fully_invested",
+    minimum_score_policy: "always_fully_invested",
+    invested_weight: "1",
+    portfolio_constraints: backtestForm.useConstraints ? {
+      max_symbol_weight: backtestForm.max_symbol_weight,
+      max_industry_weight: backtestForm.max_industry_weight,
+      cash_reserve_rate: backtestForm.cash_reserve_rate,
+      security_type_budgets: null,
+    } : null,
+    start_date: backtestForm.start_date,
+    end_date: backtestForm.end_date,
+    adjust_type: "qfq",
+    initial_cash: backtestForm.initial_cash,
+    commission_rate: "0.0003",
+    slippage_bps: "2",
+    lot_size: 100,
+    fee_model_version: "a_share_cost_v1",
+    min_commission: "5",
+    sell_stamp_duty_rate: "0.0005",
+    transfer_fee_rate: "0.00001",
+    exchange_fee_rate: "0.0000487",
+    code_version: "workbench",
+    data_version: "workbench",
+    validation_mode: "none",
+  };
+}
+
+async function checkBacktestReadiness() {
+  if (!selected.value.length || selected.value.some((item) => item.direction === "unconfigured")) {
+    preflightError.value = "请先选择因子并确认方向。";
+    return;
+  }
+  preflightController?.abort();
+  const controller = new AbortController();
+  preflightController = controller;
+  preflight.value = null;
+  preflightError.value = "";
+  preflightLoading.value = true;
+  try {
+    preflight.value = await preflightFactorSelectionBacktest(
+      createBacktestPayload(selected.value.map(toFactorScoreSpec)), controller.signal,
+    );
+  } catch (cause) {
+    if (!controller.signal.aborted) preflightError.value = cause instanceof Error ? cause.message : "预检失败";
+  } finally {
+    if (!controller.signal.aborted) preflightLoading.value = false;
+  }
 }
 
 async function runBacktest() {
@@ -169,48 +243,7 @@ async function runBacktest() {
   backtestController = controller;
   try {
     const result = await runFactorSelectionBacktest(
-      {
-        name: backtestForm.name || "工作台选股回测",
-        strategy_name: "factor_selection",
-        factor_specs: factorSpecs,
-        top_n: topN,
-        signal_lag: 1,
-        rebalance_rule: backtestForm.rebalance_rule,
-        rebalance_interval:
-          backtestForm.rebalance_rule === "every_n_trading_days" ? interval : 1,
-        holding_period: 1,
-        benchmark: backtestForm.benchmark.trim() || null,
-        allowed_security_types: ["stock"],
-        coverage_ratio: "0.8",
-        weighting_mode: "equal_weight_fully_invested",
-        minimum_score_policy: "always_fully_invested",
-        invested_weight: "1",
-        portfolio_constraints: backtestForm.useConstraints
-          ? {
-              max_symbol_weight: backtestForm.max_symbol_weight,
-              max_industry_weight: backtestForm.max_industry_weight,
-              cash_reserve_rate: backtestForm.cash_reserve_rate,
-              security_type_budgets: null,
-            }
-          : null,
-        start_date: backtestForm.start_date,
-        end_date: backtestForm.end_date,
-        adjust_type: "qfq",
-        initial_cash: backtestForm.initial_cash,
-        // 与研究脚本一致的 A 股真实成本合同。
-        commission_rate: "0.0003",
-        slippage_bps: "2",
-        lot_size: 100,
-        fee_model_version: "a_share_cost_v1",
-        min_commission: "5",
-        sell_stamp_duty_rate: "0.0005",
-        transfer_fee_rate: "0.00001",
-        exchange_fee_rate: "0.0000487",
-        code_version: "workbench",
-        data_version: "workbench",
-        validation_mode: "none",
-      },
-      controller.signal,
+      createBacktestPayload(factorSpecs), controller.signal,
     );
     if (requestId !== backtestRequestId) return;
     backtestResult.value = result;
@@ -564,6 +597,17 @@ onMounted(loadDefinitions);
           <label>现金留存率<input v-model="backtestForm.cash_reserve_rate" inputmode="decimal" /></label>
         </template>
       </div>
+      <div class="preflight-panel">
+        <button class="secondary-action" type="button" :disabled="preflightLoading || isRunningBacktest" @click="checkBacktestReadiness">
+          {{ preflightLoading ? "正在检查…" : "运行前检查" }}
+        </button>
+        <p v-if="preflightError" role="alert" class="inline-error">{{ preflightError }}</p>
+        <template v-if="preflight">
+          <strong>{{ preflight.runnable_now ? "当前输入可尝试运行" : "发现运行阻断" }}</strong>
+          <p>检查于 {{ preflight.checked_at }}；正式运行会重新读取并校验数据。{{ preflight.evidence_qualified ? "证据已认证" : "此检查不授予收益认证" }}。</p>
+          <ul><li v-for="item in preflight.checks" :key="item.code"><b>{{ item.status === "passed" ? "通过" : item.status === "blocked" ? "阻断" : "限制" }}</b> · {{ item.detail }}<span v-if="item.next_action">；下一步：{{ item.next_action }}</span></li></ul>
+        </template>
+      </div>
       <p v-if="backtestError" class="inline-error" role="alert">{{ backtestError }}</p>
       <button class="primary-action backtest-run" type="button" :disabled="isRunningBacktest" @click="runBacktest">
         <Play :size="16" />{{ isRunningBacktest ? "回测运行中…（约需数十秒）" : "发起回测" }}
@@ -588,6 +632,7 @@ onMounted(loadDefinitions);
           <p>方向来源：人工预设；因子等权。当前为探索性单次回测（validation_mode=none），未经过训练窗自动选参或样本外验证，不构成收益认证。</p>
         </div>
         <div class="result-actions">
+          <RouterLink :to="`/backtests/runs/${backtestResult.run_id}`" class="secondary-action">查看完整回测详情</RouterLink>
           <button class="secondary-action" type="button" :disabled="isLoadingHoldings" @click="loadBacktestHoldings">
             {{ isLoadingHoldings ? "读取中…" : "查看最终持仓" }}
           </button>

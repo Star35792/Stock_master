@@ -52,7 +52,7 @@ const detailErrorMessage = ref<string | null>(null);
 const limit = ref(5);
 const route = useRoute();
 const activePage = computed(() => String(route.name ?? "overview"));
-const usesOwnPageHeader = computed(() => ["market", "factors", "paper", "price-value"].includes(activePage.value));
+const usesOwnPageHeader = computed(() => ["market", "factors", "paper", "price-value", "backtest-run"].includes(activePage.value));
 
 let activeController: AbortController | null = null;
 let detailController: AbortController | null = null;

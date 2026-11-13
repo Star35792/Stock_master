@@ -2,6 +2,8 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.services import BacktestQueryService
 
 
@@ -39,6 +41,12 @@ class FakeBacktestRepository:
 
     def get_run(self, db: object, *, run_id: int) -> SimpleNamespace | None:
         return None
+
+    def list_equity(self, db: object, **kwargs: object):
+        return [
+            SimpleNamespace(trade_date=date(2026, 7, 1), total_equity=Decimal("100")),
+            SimpleNamespace(trade_date=date(2026, 7, 2), total_equity=Decimal("110")),
+        ], 2
 
     def list_trades(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
         self.trade_kwargs = kwargs
@@ -153,6 +161,48 @@ def test_backtest_query_service_calculates_benchmark_excess_return() -> None:
     assert result.benchmark == "000300.SH"
     assert result.benchmark_total_return == Decimal("0.05")
     assert result.excess_return == Decimal("0.05")
+
+
+@pytest.mark.parametrize("available_days", [
+    (date(2026, 7, 2), date(2026, 7, 3)),
+    (date(2026, 7, 1), date(2026, 7, 3)),
+    (date(2026, 7, 1), date(2026, 7, 2)),
+])
+def test_benchmark_rejects_missing_equity_date(available_days) -> None:
+    repository = FakeBacktestRepository()
+    repository.get_run = lambda db, *, run_id: SimpleNamespace(
+        id=run_id, status="success", parameters={"benchmark": "000300.SH"},
+    )
+    repository.list_equity = lambda db, **kwargs: ([
+        SimpleNamespace(trade_date=date(2026, 7, 1), total_equity=Decimal("100")),
+        SimpleNamespace(trade_date=date(2026, 7, 2), total_equity=Decimal("105")),
+        SimpleNamespace(trade_date=date(2026, 7, 3), total_equity=Decimal("110")),
+    ], 3)
+    class PartialDailyBars:
+        def list_by_symbol(self, db, **kwargs):
+            return [
+                SimpleNamespace(trade_date=day, close=Decimal("100"))
+                for day in available_days
+            ], len(available_days)
+
+    with pytest.raises(ValueError, match="benchmark dates do not cover"):
+        BacktestQueryService(
+            backtest_repository=repository,
+            performance_repository=FakePerformanceRepository(),
+            daily_bar_repository=PartialDailyBars(),
+        ).get_benchmark_comparison(object(), run_id=1)
+
+
+def test_benchmark_requires_configuration() -> None:
+    repository = FakeBacktestRepository()
+    repository.get_run = lambda db, *, run_id: SimpleNamespace(
+        id=run_id, status="success", parameters={},
+    )
+    with pytest.raises(ValueError, match="benchmark is not configured"):
+        BacktestQueryService(
+            backtest_repository=repository,
+            performance_repository=FakePerformanceRepository(),
+        ).get_benchmark_comparison(object(), run_id=1)
 
 
 def test_backtest_query_service_compares_successful_runs() -> None:

@@ -15,6 +15,7 @@ from app.schemas.strategy import (
     CombinedEquityCurveRead,
     FactorSelectionBacktestRequest,
     FactorSelectionBacktestResult,
+    FactorSelectionPreflightRead,
     RollingBacktestResultRead,
     RollingFactorSelectionBacktestRequest,
     RollingWindowRead,
@@ -28,6 +29,7 @@ from app.services.price_value_backtest import PriceValueBacktestService
 from app.services.price_value_research import PriceValueResearchService
 from app.services.price_value_screen import PriceValueScreenService
 from app.services.price_value_tracking import PriceValueForwardTrackingService
+from app.services.research_preflight import check_factor_selection
 from app.services.training_factor_selector import build_training_selection_policy
 from app.services.value_investing_screen import ValueInvestingScreenService
 from app.strategies import FactorScoreSpec
@@ -207,6 +209,20 @@ def run_factor_selection_backtests_batch(
                 )
             )
     return results
+
+
+@router.post("/factor-selection/backtests/preflight", response_model=FactorSelectionPreflightRead)
+def preflight_factor_selection_backtest(
+    payload: FactorSelectionBacktestRequest,
+    db: DatabaseSession,
+) -> FactorSelectionPreflightRead:
+    """Read-only point-in-time preview; the actual run always rechecks inputs."""
+    return FactorSelectionPreflightRead.model_validate(check_factor_selection(
+        db,
+        payload=payload,
+        service=service,
+        portfolio_constraints=_to_portfolio_constraints(payload.portfolio_constraints),
+    ))
 
 
 @router.post(

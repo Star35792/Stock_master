@@ -57,6 +57,32 @@ export interface FactorSelectionBacktestResult {
   position_snapshots: number;
 }
 
+export interface FactorSelectionPreflight {
+  rule_version: string;
+  checked_at: string;
+  input_sha256: string;
+  runnable_now: boolean;
+  evidence_qualified: boolean;
+  checks: Array<{ code: string; status: "passed" | "blocked" | "caveat"; detail: string; next_action: string }>;
+}
+
+export async function preflightFactorSelectionBacktest(
+  payload: FactorSelectionBacktestRequest,
+  signal: AbortSignal,
+): Promise<FactorSelectionPreflight> {
+  const response = await fetch("/api/v1/strategy-research/factor-selection/backtests/preflight", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new Error(translateDetail(body?.detail));
+  }
+  return response.json() as Promise<FactorSelectionPreflight>;
+}
+
 const requestErrors: Record<string, string> = {
   "only signal_lag=1 is supported": "当前仅支持 T+1 信号执行。",
   "only holding_period=1 is supported": "当前仅支持持有 1 期。",

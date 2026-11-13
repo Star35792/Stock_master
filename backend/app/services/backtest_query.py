@@ -57,23 +57,33 @@ class BacktestQueryService:
         benchmark = run.parameters.get("benchmark")
         if not benchmark:
             raise ValueError("benchmark is not configured for this backtest")
+        equities, equity_total = self.backtest_repository.list_equity(
+            artifacts_db, run_id=run_id, limit=5000, offset=0
+        )
+        if equity_total < 2 or equity_total > len(equities):
+            raise ValueError("strategy equity dates are insufficient for benchmark comparison")
+        equity_dates = [row.trade_date for row in equities]
+        if equity_dates != sorted(set(equity_dates)):
+            raise ValueError("strategy equity dates are invalid for benchmark comparison")
         bars = self.daily_bar_repository.list_by_symbol(
             db,
             symbol=benchmark.upper(),
             adjust_type=run.parameters.get("adjust_type", "qfq"),
-            start_date=run.start_date,
-            end_date=run.end_date,
+            start_date=equity_dates[0],
+            end_date=equity_dates[-1],
             quality_status="trusted",
             limit=5000,
             offset=0,
         )[0]
-        if len(bars) < 2:
-            raise ValueError("trusted benchmark data is insufficient")
+        if [bar.trade_date for bar in bars] != equity_dates:
+            raise ValueError("trusted benchmark dates do not cover strategy equity dates")
         first_close = bars[0].close
         last_close = bars[-1].close
+        if first_close <= 0 or equities[0].total_equity <= 0:
+            raise ValueError("benchmark comparison requires positive starting values")
         benchmark_return = last_close / first_close - Decimal(1)
-        strategy_return = run.total_return
-        periods = len(bars) - 1
+        strategy_return = equities[-1].total_equity / equities[0].total_equity - Decimal(1)
+        periods = len(equity_dates) - 1
         strategy_annualized = self._annualized_return(strategy_return, periods)
         benchmark_annualized = self._annualized_return(benchmark_return, periods)
         return BacktestBenchmarkRead(

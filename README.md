@@ -153,6 +153,7 @@ curl http://127.0.0.1:8000/health
 - `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。可选 `quantile_backtest` 在每个测试窗内做分层回测。返回 `RollingBacktestResult`：各窗 `windows` + 跨窗拼接的 `combined` 组合净收益曲线（重叠窗 fail-closed 拒绝拼接、各窗仍独立可用）+ 非可交易声明）
 - `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源。可选 `quantile_backtest`：`split_factor_name/version` + `n_layers`(2–20) + `max_assets_per_layer` 按 split 因子在决策日横截面分桶；当前仅接受 `weighting_mode=equal_weight_fully_invested`，其他模式 fail-fast，逐桶等权多头跑净收益曲线与 top–bottom 统计收益差；换层以 `explicit_zero_exit_v2` 显式退出旧成员，分层分支独立读取并双快照校验全量证券行情，结果内嵌主运行 `parameters.quantile_backtest` / `quantile_data_snapshot` 并随响应返回 `quantile`）
 - `POST /api/v1/strategy-research/factor-selection/backtests/batch`
+- `POST /api/v1/strategy-research/factor-selection/backtests/preflight`（与单次因子选股回测使用同一请求体，只读预演因子、调仓日、可信未复权行情、公司行为及日频引擎；返回检查时间、输入 SHA-256、`runnable_now`、`evidence_qualified` 与逐项原因。预检不创建研究运行，正式运行仍重新校验；当前不覆盖 rolling 与分层附加结果）
 - 价格价值研究：`POST /api/v1/strategy-research/price-value/evaluate`
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`
 - 全市场相对估值初筛：`GET /api/v1/strategy-research/price-value/screen/latest`、`GET /api/v1/strategy-research/price-value/screen/tracking`、`GET /api/v1/strategy-research/price-value/profit-status`
@@ -166,7 +167,7 @@ curl http://127.0.0.1:8000/health
   - `screen/tracking` 使用不可变 cohort sidecar 读取冻结的优先名单、达标池与原条件池，按真实形成日后的首个共同交易日收盘开始，固定观察 5/20/60 个交易日。成员等权冻结、不补入、不再平衡；可信前复权行情缺失的成员仍保留在分母并把池标为不完整。返回毛观察收益、固定比例成本后结果、相对原条件池差异、覆盖和输入哈希；补采 cohort 单独标识。该接口是动态只读前向观察，不改写原报告或哈希，不是历史回测、真实组合收益或策略认证。
   - 精选另要求供应商 PE≤20、PB≤2、上市至少 730 天、20 日平均成交额至少 5000 万元、最近三年逐年盈利、较 MA20 偏离不超过 8%，主期及已核验更新期 ROE 为正；周期行业与异常 ROE 需复核。排序和全部规则见价值策略文档。当前名单始终须通过鲜度和基础准入；这些规则只安排研究工作量，未完成绝对估值或样本外收益验证。
 - 回测运行：`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`.../trades`、`.../equity`、`.../positions`、`.../performance`（strategy 产物存独立 `data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
-- 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
+- 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐，双方收益均按首末净值日期窗口计算；缺失返回 422，不提供不可比超额收益）、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
 - 回测最终持仓（组合草案预填源）：`GET /api/v1/backtests/runs/{run_id}/final-holdings`
 
 ### 组合、风控与模拟盘

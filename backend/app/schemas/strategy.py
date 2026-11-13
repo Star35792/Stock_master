@@ -246,6 +246,22 @@ class FactorSelectionBacktestRequest(BaseModel):
         return self
 
 
+class FactorSelectionPreflightCheckRead(BaseModel):
+    code: str
+    status: Literal["passed", "blocked", "caveat"]
+    detail: str
+    next_action: str
+
+
+class FactorSelectionPreflightRead(BaseModel):
+    rule_version: str
+    checked_at: datetime
+    input_sha256: str
+    runnable_now: bool
+    evidence_qualified: bool
+    checks: list[FactorSelectionPreflightCheckRead]
+
+
 class FactorSelectionBacktestResult(BaseModel):
     run_id: int
     name: str
