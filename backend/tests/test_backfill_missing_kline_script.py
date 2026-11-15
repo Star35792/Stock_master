@@ -1,6 +1,8 @@
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.maintenance import backfill_missing_kline
 
 
@@ -12,14 +14,14 @@ class _SessionContext:
         return False
 
 
-def test_cli_prints_diagnostic_and_partial_status(monkeypatch, capsys) -> None:
-    result = SimpleNamespace(
+def _result(status: str) -> SimpleNamespace:
+    return SimpleNamespace(
         batch_no=None,
         expected_rows=0,
         fetched_rows=0,
         inserted_rows=0,
         skipped_rows=0,
-        status="partial",
+        status=status,
         missing_rows=1,
         partial_rows=0,
         suspect_rows=1,
@@ -35,27 +37,47 @@ def test_cli_prints_diagnostic_and_partial_status(monkeypatch, capsys) -> None:
         conflicting_response_rows=0,
         source_error_count=0,
     )
+
+
+def _args(*, strict: bool = False) -> list[str]:
+    args = [
+        "--symbols",
+        "600000.SH",
+        "--start-date",
+        date(2026, 1, 5).isoformat(),
+        "--end-date",
+        date(2026, 1, 5).isoformat(),
+    ]
+    return [*args, "--strict"] if strict else args
+
+
+def _stub_service(monkeypatch, *, status: str) -> None:
+    result = _result(status)
     monkeypatch.setattr(backfill_missing_kline, "SessionLocal", _SessionContext)
     monkeypatch.setattr(
         backfill_missing_kline,
         "MissingDailyBarBackfillService",
         lambda: SimpleNamespace(backfill=lambda db, **kwargs: result),
     )
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "backfill_missing_kline.py",
-            "--symbols",
-            "600000.SH",
-            "--start-date",
-            date(2026, 1, 5).isoformat(),
-            "--end-date",
-            date(2026, 1, 5).isoformat(),
-        ],
-    )
 
-    assert backfill_missing_kline.main() == 0
+
+def test_cli_prints_diagnostic_and_partial_status(monkeypatch, capsys) -> None:
+    _stub_service(monkeypatch, status="partial")
+
+    assert backfill_missing_kline.main(_args()) == 0
     output = capsys.readouterr().out
     assert "status=partial" in output
     assert "suspect_rows=1" in output
     assert "unresolved_rows=1" in output
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_exit_code"),
+    [("success", 0), ("partial", 1), ("failed", 1)],
+)
+def test_cli_strict_exit_code_follows_final_status(
+    monkeypatch, status: str, expected_exit_code: int
+) -> None:
+    _stub_service(monkeypatch, status=status)
+
+    assert backfill_missing_kline.main(_args(strict=True)) == expected_exit_code
