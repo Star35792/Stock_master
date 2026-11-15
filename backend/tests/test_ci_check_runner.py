@@ -84,3 +84,27 @@ def test_missing_executable_fails_clearly(runner, monkeypatch, capsys):
     monkeypatch.setattr(runner["shutil"], "which", lambda name: None)
     assert runner["main"](["--scope", "frontend"]) == 127
     assert "Missing executable on PATH: npm" in capsys.readouterr().out
+
+
+def test_frontend_checks_fall_back_to_pnpm_when_npm_is_missing(
+    runner, monkeypatch, capsys
+):
+    calls = []
+
+    def find_executable(name):
+        return {"npm": None, "pnpm": r"C:\runtime\pnpm.cmd"}.get(name)
+
+    def succeed(command, *, cwd, check):
+        calls.append((command, cwd, check))
+
+    monkeypatch.setattr(runner["shutil"], "which", find_executable)
+    monkeypatch.setattr(runner["subprocess"], "run", succeed)
+
+    assert runner["main"](["--scope", "frontend"]) == 0
+    assert [command for command, _, _ in calls] == [
+        [r"C:\runtime\pnpm.cmd", "run", "--if-present", "test"],
+        [r"C:\runtime\pnpm.cmd", "run", "build"],
+    ]
+    assert all(cwd == RUNNER.parents[1] / "frontend" for _, cwd, _ in calls)
+    assert all(check is True for _, _, check in calls)
+    assert capsys.readouterr().out.count("Using pnpm fallback for npm") == 2
