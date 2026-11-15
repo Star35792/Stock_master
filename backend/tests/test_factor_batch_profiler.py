@@ -125,6 +125,7 @@ def test_batch_profiler_runs_active_factors_and_skips_derived() -> None:
     assert job_log.created[0]["metadata"]["candidate_count"] == 2
     assert job_log.created[0]["metadata"]["size_factor_name"] == "market_cap"
     assert job_log.created[0]["metadata"]["size_factor_version"] == "v1"
+    assert job_log.created[0]["metadata"]["_job_lease"]["version"] == "process_slot_v1"
     assert {call["size_factor_name"] for call in cross_section.calls} == {"market_cap"}
     assert {call["size_factor_version"] for call in cross_section.calls} == {"v1"}
     code_versions = {str(call["code_version"]) for call in cross_section.calls}

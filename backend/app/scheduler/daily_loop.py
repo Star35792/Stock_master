@@ -45,6 +45,7 @@ from app.scheduler.factor_pipeline import (
 from app.services import HithinkDailySyncResult
 from app.services.adjustment_build import AdjustmentBuildService
 from app.services.auto_data_sync import MIN_STOCK_COVERAGE_RATE, completed_daily_cutoff
+from app.services.job_lease import merge_job_lease_metadata
 from app.services.release import ReleaseService
 
 logger = logging.getLogger(__name__)
@@ -157,12 +158,16 @@ def run_daily_loop(
                 db,
                 job_name="daily_loop",
                 job_type="schedule",
-                metadata={
-                    "gate_status": "blocked",
-                    "publish_eligible": False,
-                    "reason_codes": ["CALENDAR_MISSING"],
-                    "target_trade_date": today.isoformat(),
-                },
+                metadata=merge_job_lease_metadata(
+                    db,
+                    {
+                        "gate_status": "blocked",
+                        "publish_eligible": False,
+                        "reason_codes": ["CALENDAR_MISSING"],
+                        "target_trade_date": today.isoformat(),
+                    },
+                    repository=repo,
+                ),
             )
             repo.finish(db, job_log=job, status="failed", error_message=error_message)
             db.commit()
@@ -177,12 +182,16 @@ def run_daily_loop(
                 db,
                 job_name="daily_loop",
                 job_type="schedule",
-                metadata={
-                    "gate_status": "skipped",
-                    "publish_eligible": False,
-                    "reason_codes": ["MARKET_CLOSED"],
-                    "target_trade_date": today.isoformat(),
-                },
+                metadata=merge_job_lease_metadata(
+                    db,
+                    {
+                        "gate_status": "skipped",
+                        "publish_eligible": False,
+                        "reason_codes": ["MARKET_CLOSED"],
+                        "target_trade_date": today.isoformat(),
+                    },
+                    repository=repo,
+                ),
             )
             repo.finish(
                 db,
@@ -204,18 +213,22 @@ def run_daily_loop(
             db,
             job_name="daily_loop",
             job_type="schedule",
-            metadata={
-                "symbols_count": len(resolved_symbols),
-                "sync_days": sync_days,
-                "factor_lookback_days": factor_lookback_days,
-                "sync_adjust_type": sync_adjust_type,
-                "factor_adjust_type": factor_adjust_type,
-                "refresh_reference_data": refresh_reference_data,
-                "code_version": code_version,
-                "adjustment_version": adjustment_version,
-                "target_trade_date": today.isoformat(),
-                "sync_skipped": skip_sync,
-            },
+            metadata=merge_job_lease_metadata(
+                db,
+                {
+                    "symbols_count": len(resolved_symbols),
+                    "sync_days": sync_days,
+                    "factor_lookback_days": factor_lookback_days,
+                    "sync_adjust_type": sync_adjust_type,
+                    "factor_adjust_type": factor_adjust_type,
+                    "refresh_reference_data": refresh_reference_data,
+                    "code_version": code_version,
+                    "adjustment_version": adjustment_version,
+                    "target_trade_date": today.isoformat(),
+                    "sync_skipped": skip_sync,
+                },
+                repository=repo,
+            ),
         )
         db.commit()
 

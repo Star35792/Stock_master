@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.database.session import SessionLocal
 from app.models.factor import FactorRun, FactorValue
 from app.models.system import JobLog
+from app.services.job_lease import JOB_LEASE_KEY
 from app.services.job_logging import logged_job
 
 JOB_NAME = "price_value_research_factor_cleanup"
@@ -27,7 +28,11 @@ def cleanup_research_factor(db: Session, *, run_id: int, output_dir: Path) -> di
         select(JobLog).where(JobLog.job_name == JOB_NAME, JobLog.status == "success")
     ):
         if (job.metadata_ or {}).get("factor_run_id") == run_id:
-            return dict(job.metadata_ or {})
+            return {
+                key: value
+                for key, value in (job.metadata_ or {}).items()
+                if key != JOB_LEASE_KEY
+            }
 
     prep = next(
         (

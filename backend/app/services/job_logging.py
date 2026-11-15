@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.system import JobLog
 from app.repositories.system import JobLogRepository
+from app.services.job_lease import merge_job_lease_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def logged_job(
     batch_id: int | None = None,
     metadata: dict[str, Any] | None = None,
     repository: JobLogRepository | None = None,
-    on_failure: Callable[[Session, JobLog, Exception], None] | None = None,
+    on_failure: Callable[[Session, JobLog, BaseException], None] | None = None,
 ) -> Generator[JobLog]:
     """在 ``system.job_log`` 中记录一次任务的生命周期。
 
@@ -38,12 +39,17 @@ def logged_job(
     部分成功。抛出异常时标记 ``failed`` 并重新抛出。
     """
     repo = repository or JobLogRepository()
+    leased_metadata = merge_job_lease_metadata(
+        db,
+        metadata,
+        repository=repo,
+    )
     job = repo.create(
         db,
         job_name=job_name,
         job_type=job_type,
         batch_id=batch_id,
-        metadata=metadata,
+        metadata=leased_metadata,
     )
     db.commit()
     logger.info("Job started: %s (%s) id=%s", job_name, job_type, job.id)
@@ -62,7 +68,7 @@ def logged_job(
         )
         db.commit()
         logger.info("Job %s: %s id=%s", status, job_name, job.id)
-    except Exception as exc:  # noqa: BLE001 - log and re-raise
+    except BaseException as exc:  # audit interrupts too, then re-raise
         db.rollback()
         if on_failure is not None:
             on_failure(db, job, exc)

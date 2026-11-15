@@ -7,10 +7,11 @@ from app.api.routes import health_router
 from app.config.settings import settings
 from app.database.positions_session import initialize_positions_database
 from app.database.research_session import initialize_research_database
-from app.database.session import initialize_database
+from app.database.session import SessionLocal, initialize_database
 from app.scheduler.auto_data_sync import AutoDataSyncWorker
 from app.scheduler.price_value_input_prep import PriceValueInputPrepWorker
 from app.scheduler.price_value_screen import PriceValueScreenWorker
+from app.services.job_lease import recover_abandoned_jobs
 
 
 @asynccontextmanager
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     initialize_database()
     initialize_positions_database()
     initialize_research_database()
+    recover_abandoned_jobs(SessionLocal)
     worker = AutoDataSyncWorker(settings)
     input_worker = PriceValueInputPrepWorker(settings)
     screen_worker = PriceValueScreenWorker(settings)

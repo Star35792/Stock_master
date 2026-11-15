@@ -435,6 +435,7 @@ def test_daily_loop_skips_curated_build_by_default(
     assert result.failed is False
     assert result.curated_result is None
     assert result.curated_error is None
+    assert job_log_repo.jobs[0].metadata_["_job_lease"]["version"] == "process_slot_v1"
     assert job_log_repo.jobs[0].metadata_.get("curated_rebuilt") is None
 
 

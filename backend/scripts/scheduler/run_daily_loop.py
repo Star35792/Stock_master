@@ -6,6 +6,7 @@ import sys
 
 from app.database.session import SessionLocal, initialize_database
 from app.scheduler.daily_loop import run_daily_loop
+from app.services.job_lease import recover_abandoned_jobs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     initialize_database()
+    recover_abandoned_jobs(SessionLocal)
     result = run_daily_loop(
         symbols=_parse_symbols(args.symbols),
         sync_days=args.sync_days,

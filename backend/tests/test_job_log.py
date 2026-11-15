@@ -103,6 +103,8 @@ def test_logged_job_marks_success_on_normal_exit() -> None:
     assert len(repo.created) == 1
     assert repo.created[0]["job_name"] == "test_job"
     assert repo.created[0]["job_type"] == "import"
+    assert repo.created[0]["metadata"]["key"] == "value"
+    assert repo.created[0]["metadata"]["_job_lease"]["version"] == "process_slot_v1"
     assert len(repo.finished) == 1
     assert repo.finished[0]["status"] == "success"
     assert repo.finished[0]["rows_read"] == 10
@@ -148,3 +150,20 @@ def test_logged_job_uses_partial_when_status_set() -> None:
 
     assert repo.finished[0]["status"] == "partial"
     assert repo.finished[0]["rows_inserted"] == 7
+
+
+def test_logged_job_audits_base_exception_before_reraising() -> None:
+    session = FakeSession()
+    repo = FakeJobLogRepository()
+
+    with pytest.raises(KeyboardInterrupt):
+        with logged_job(
+            session,
+            job_name="test_job",
+            job_type="schedule",
+            repository=repo,
+        ):
+            raise KeyboardInterrupt
+
+    assert repo.finished[0]["status"] == "failed"
+    assert repo.finished[0]["error_message"] == "KeyboardInterrupt: "

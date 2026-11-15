@@ -5,6 +5,7 @@
 ## 保留边界
 
 - `backend/data/stock_master.duckdb` 是控制面与市场事实库；`research.duckdb` 保存策略产物，`positions.db` 保存手工持仓流水。三者职责不同。主库 WAL 可能含已提交而未 checkpoint 的事务，不得直接删除；`.guard` 锁对象也不得按年龄删除。
+- `backend/data/.job_leases/` 最多保留 32 个固定 `process-slot-*.lock.guard`，是 `metadata.job_log` 进程租约的稳定锁对象，不是可按年龄清理的临时文件。活动进程另有同名短生命周期 PID 诊断文件，正常退出或恢复占槽时移除；槽位耗尽必须拒绝新 `running`，不得改为按任务生成无限文件或绕过租约。
 - `backend/data/warm/curated/prices_qfq` 是当前发布的复权价格物化。切换时旧目录只作短期回退，确认新目录可读后才可回收。
 - `backend/data/warm/exported` 是温层历史和研究估值明细的事实源。最新可消费 release 由成功 summary 选择，逐表沿 `base_release_tag` 继承；snapshot 截断同表父链，delta 继续叠加。不能按日期、目录数量或数据库 `lake.release.is_active` 单独判断可删。研究估值采集的 raw 页记录只有哈希与元数据，不能凭它重建被删的 Parquet 明细。
 - 必要的 raw 来源证据、审计日志、研究与回测引用须保留。估值筛选只留最新全量报告及冻结 cohort；旧任务日志保留日期、状态、数量、快照哈希等摘要，清除旧文件路径引用后再删旧报告。旧报告将不能精确回看。

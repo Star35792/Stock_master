@@ -26,6 +26,7 @@ from app.factors.profile_evidence import (
 from app.repositories.factor import FactorDefinitionRepository, FactorProfileRepository
 from app.repositories.system import JobLogRepository
 from app.services.factor_cross_section import FactorCrossSectionService
+from app.services.job_lease import merge_job_lease_metadata
 
 #: 默认计算远期收益时使用的复权口径，与研究回测默认一致。
 DEFAULT_ADJUST_TYPE = "qfq"
@@ -248,16 +249,20 @@ class FactorBatchProfilerService:
             job_name="factor_batch_profiler",
             job_type="schedule",
             batch_id=parent_job_id,
-            metadata={
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "adjust_type": adjust_type,
-                "categories": sorted(categories) if categories else None,
-                "excluded_categories": sorted(excluded) if excluded else None,
-                "size_factor_name": size_factor_name,
-                "size_factor_version": size_factor_version,
-                "candidate_count": len(candidates),
-            },
+            metadata=merge_job_lease_metadata(
+                db,
+                {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "adjust_type": adjust_type,
+                    "categories": sorted(categories) if categories else None,
+                    "excluded_categories": sorted(excluded) if excluded else None,
+                    "size_factor_name": size_factor_name,
+                    "size_factor_version": size_factor_version,
+                    "candidate_count": len(candidates),
+                },
+                repository=self.job_log_repository,
+            ),
         )
         db.commit()
 

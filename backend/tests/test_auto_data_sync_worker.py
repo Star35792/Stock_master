@@ -202,12 +202,17 @@ def test_lifespan_initializes_then_starts_and_stops_worker(monkeypatch):
             events.append("stop")
 
     monkeypatch.setattr(main, "initialize_database", lambda: events.append("database"))
+    monkeypatch.setattr(
+        main,
+        "recover_abandoned_jobs",
+        lambda _factory: events.append("recovery"),
+    )
     monkeypatch.setattr(main, "AutoDataSyncWorker", Worker)
 
     async def scenario():
         async with main.lifespan(main.create_app()):
-            assert events == ["database", "start"]
-        assert events == ["database", "start", "stop"]
+            assert events == ["database", "recovery", "start"]
+        assert events == ["database", "recovery", "start", "stop"]
 
     asyncio.run(scenario())
 
@@ -224,6 +229,7 @@ def test_health_is_available_while_startup_sync_is_waiting(monkeypatch):
     monkeypatch.setattr(main.settings, "auto_data_sync_enabled", True)
     monkeypatch.setattr(main.settings, "hithink_finance_api_key", "test-key")
     monkeypatch.setattr(main, "initialize_database", lambda: None)
+    monkeypatch.setattr(main, "recover_abandoned_jobs", lambda _factory: None)
     monkeypatch.setattr(scheduler, "run_auto_data_sync", sync)
     with TestClient(main.create_app()) as client:
         try:

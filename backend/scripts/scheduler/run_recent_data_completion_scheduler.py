@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import logging
 
+from app.database.session import SessionLocal, initialize_database
 from app.scheduler import create_recent_data_completion_scheduler
+from app.services.job_lease import recover_abandoned_jobs
 
 
 def _parse_symbols(value: str) -> list[str]:
@@ -37,6 +39,8 @@ def main() -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    initialize_database()
+    recover_abandoned_jobs(SessionLocal)
     scheduler = create_recent_data_completion_scheduler(
         symbols=_parse_symbols(args.symbols),
         hour=args.hour,
