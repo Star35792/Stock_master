@@ -1,1 +1,3 @@
 /deliverables/research/evidence/value-investing/*.json text eol=crlf
+frontend/bun.lock text eol=lf
+frontend/.bun-version text eol=lf

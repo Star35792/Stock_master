@@ -49,8 +49,8 @@ def test_backend_checks_run_the_full_suite_once(runner):
 def test_frontend_checks_keep_workflow_tests_and_build(runner):
     steps = runner["check_steps"]("frontend")
     assert [command for _, command in steps] == [
-        ["npm", "run", "--if-present", "test"],
-        ["npm", "run", "build"],
+        ["bun", "test"],
+        ["bun", "run", "build"],
     ]
     assert all(directory == RUNNER.parents[1] / "frontend" for directory, _ in steps)
     assert runner["check_steps"]("all") == (runner["check_steps"]("backend") + steps)
@@ -83,16 +83,19 @@ def test_failure_stops_remaining_checks_and_preserves_exit_code(runner, monkeypa
 def test_missing_executable_fails_clearly(runner, monkeypatch, capsys):
     monkeypatch.setattr(runner["shutil"], "which", lambda name: None)
     assert runner["main"](["--scope", "frontend"]) == 127
-    assert "Missing executable on PATH: npm" in capsys.readouterr().out
+    assert "Missing executable on PATH: bun" in capsys.readouterr().out
 
 
-def test_frontend_checks_fall_back_to_pnpm_when_npm_is_missing(
+def test_frontend_checks_require_bun_without_package_manager_fallback(
     runner, monkeypatch, capsys
 ):
+    """The frontend has a single runtime: bun never falls back to npm or pnpm."""
     calls = []
 
     def find_executable(name):
-        return {"npm": None, "pnpm": r"C:\runtime\pnpm.cmd"}.get(name)
+        return {"bun": None, "npm": r"C:\runtime\npm.cmd", "pnpm": r"C:\runtime\pnpm.cmd"}.get(
+            name
+        )
 
     def succeed(command, *, cwd, check):
         calls.append((command, cwd, check))
@@ -100,11 +103,6 @@ def test_frontend_checks_fall_back_to_pnpm_when_npm_is_missing(
     monkeypatch.setattr(runner["shutil"], "which", find_executable)
     monkeypatch.setattr(runner["subprocess"], "run", succeed)
 
-    assert runner["main"](["--scope", "frontend"]) == 0
-    assert [command for command, _, _ in calls] == [
-        [r"C:\runtime\pnpm.cmd", "run", "--if-present", "test"],
-        [r"C:\runtime\pnpm.cmd", "run", "build"],
-    ]
-    assert all(cwd == RUNNER.parents[1] / "frontend" for _, cwd, _ in calls)
-    assert all(check is True for _, _, check in calls)
-    assert capsys.readouterr().out.count("Using pnpm fallback for npm") == 2
+    assert runner["main"](["--scope", "frontend"]) == 127
+    assert calls == []
+    assert "Missing executable on PATH: bun" in capsys.readouterr().out

@@ -8,17 +8,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def resolve_executable(name: str) -> tuple[str | None, str]:
-    executable = shutil.which(name)
-    if executable is not None or name != "npm":
-        return executable, name
-
-    # Codex's Windows runtime exposes pnpm but not always npm. Both package
-    # managers accept the `run` commands used below, so prefer npm and use the
-    # PATH-provided pnpm shim only when npm is genuinely unavailable.
-    return shutil.which("pnpm"), "pnpm"
-
-
 def check_steps(scope: str) -> list[tuple[Path, list[str]]]:
     steps = []
     if scope in {"all", "backend"}:
@@ -63,8 +52,8 @@ def check_steps(scope: str) -> list[tuple[Path, list[str]]]:
     if scope in {"all", "frontend"}:
         steps.extend(
             [
-                (REPO_ROOT / "frontend", ["npm", "run", "--if-present", "test"]),
-                (REPO_ROOT / "frontend", ["npm", "run", "build"]),
+                (REPO_ROOT / "frontend", ["bun", "test"]),
+                (REPO_ROOT / "frontend", ["bun", "run", "build"]),
             ]
         )
     return steps
@@ -79,12 +68,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"==> {directory.name}: {' '.join(command)}", flush=True)
         if args.list:
             continue
-        executable, resolved_name = resolve_executable(command[0])
+        executable = shutil.which(command[0])
         if executable is None:
             print(f"Missing executable on PATH: {command[0]}", flush=True)
             return 127
-        if resolved_name != command[0]:
-            print(f"Using {resolved_name} fallback for {command[0]}", flush=True)
         basetemp_arg = next(
             (part for part in command if part.startswith("--basetemp=")), None
         )
