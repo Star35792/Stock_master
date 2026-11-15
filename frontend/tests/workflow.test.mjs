@@ -6,6 +6,8 @@ import { compileScript, parse } from '@vue/compiler-sfc';
 import ts from 'typescript';
 import * as vue from 'vue';
 
+import { fetchPortfolioPlanDrift, PortfolioDriftApiError } from '../src/api.ts';
+
 const require = createRequire(import.meta.url);
 
 // Compile the actual SFC setup and run it against controlled API responses.
@@ -122,6 +124,78 @@ test('switching books clears holdings, drift and notices immediately', () => {
   assert.equal(page.holdings.value, null);
   assert.equal(page.drift.value, null);
   assert.equal(page.notice.value, null);
+});
+
+test('missing trusted prices clear old drift and show the affected symbols', async () => {
+  class StructuredDriftError extends Error {
+    constructor(message, code, symbols) {
+      super(message);
+      this.code = code;
+      this.symbols = symbols;
+    }
+  }
+  const page = bookPage({
+    PortfolioDriftApiError: StructuredDriftError,
+    fetchPortfolioPlanDrift: async () => {
+      throw new StructuredDriftError(
+        'legacy-compatible detail',
+        'portfolio_drift_missing_trusted_prices',
+        ['000001.SZ', '600000.SH'],
+      );
+    },
+  });
+  page.driftPlanId.value = '3';
+  page.drift.value = { plan_id: 2 };
+
+  await page.handleFetchDrift();
+
+  assert.equal(page.drift.value, null);
+  assert.equal(
+    page.actionError.value,
+    '以下非零持仓缺少可信价格，暂不能计算组合偏离：000001.SZ、600000.SH。请先补齐或修复可信行情后重试。',
+  );
+});
+
+test('portfolio drift API error parsing supports new, legacy and non-JSON responses', async () => {
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    new Response(JSON.stringify({
+      detail: 'missing prices',
+      code: 'portfolio_drift_missing_trusted_prices',
+      symbols: ['600000.SH'],
+    }), { status: 422, headers: { 'content-type': 'application/json' } }),
+    new Response(JSON.stringify({ detail: 'legacy detail' }), {
+      status: 422,
+      headers: { 'content-type': 'application/json' },
+    }),
+    new Response('upstream unavailable', { status: 503 }),
+  ];
+  globalThis.fetch = async () => responses.shift();
+  try {
+    await assert.rejects(
+      () => fetchPortfolioPlanDrift(3, { positionBookId: 1 }),
+      error => error instanceof PortfolioDriftApiError
+        && error.message === 'missing prices'
+        && error.status === 422
+        && error.code === 'portfolio_drift_missing_trusted_prices'
+        && error.symbols[0] === '600000.SH',
+    );
+    await assert.rejects(
+      () => fetchPortfolioPlanDrift(3, { positionBookId: 1 }),
+      error => error instanceof PortfolioDriftApiError
+        && error.message === 'legacy detail'
+        && error.code === null
+        && error.symbols.length === 0,
+    );
+    await assert.rejects(
+      () => fetchPortfolioPlanDrift(3, { positionBookId: 1 }),
+      error => error instanceof PortfolioDriftApiError
+        && error.message === 'Plan drift failed with 503'
+        && error.status === 503,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('paper account analysis ignores delayed responses for previous account', async () => {

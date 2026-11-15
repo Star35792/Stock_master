@@ -10,6 +10,7 @@ import {
   fetchPositionBooks,
   fetchPositionTrades,
   fetchPortfolioPlanDrift,
+  PortfolioDriftApiError,
   updatePositionBook,
 } from "../api";
 import type { PortfolioPlanDrift, PositionBook, PositionBookHoldings, PositionTrade } from "../types";
@@ -288,7 +289,15 @@ async function handleFetchDrift() {
   } catch (error) {
     if (generation !== driftRequestGeneration) return;
     drift.value = null;
-    actionError.value = error instanceof Error ? error.message : "偏离检测失败";
+    if (
+      error instanceof PortfolioDriftApiError
+      && error.code === "portfolio_drift_missing_trusted_prices"
+      && error.symbols.length > 0
+    ) {
+      actionError.value = `以下非零持仓缺少可信价格，暂不能计算组合偏离：${error.symbols.join("、")}。请先补齐或修复可信行情后重试。`;
+    } else {
+      actionError.value = error instanceof Error ? error.message : "偏离检测失败";
+    }
   } finally {
     if (generation === driftRequestGeneration) driftLoading.value = false;
   }

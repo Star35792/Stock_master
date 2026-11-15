@@ -34,7 +34,18 @@ LOT_SIZE = 100
 
 
 class PortfolioDriftValidationError(ValueError):
-    pass
+    """Invalid drift request with optional machine-readable diagnostics."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        symbols: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.symbols = symbols
 
 
 class PortfolioDriftService:
@@ -107,7 +118,9 @@ class PortfolioDriftService:
         if missing_price_symbols:
             raise PortfolioDriftValidationError(
                 "portfolio drift was not calculated because non-zero holdings "
-                "lack trusted prices: " + ", ".join(missing_price_symbols)
+                "lack trusted prices: " + ", ".join(missing_price_symbols),
+                code="portfolio_drift_missing_trusted_prices",
+                symbols=tuple(missing_price_symbols),
             )
 
         positions_market_value = sum(

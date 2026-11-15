@@ -2,11 +2,13 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 
 from app.api.dependencies import DatabaseSession, PositionsDatabaseSession
 from app.config.settings import settings
 from app.portfolio import PortfolioAsset, PortfolioConstraints, PortfolioRiskBudget
 from app.schemas.portfolio import (
+    PortfolioDriftErrorRead,
     PortfolioPlanCreateRequest,
     PortfolioPlanDriftRead,
     PortfolioPlanRead,
@@ -132,7 +134,19 @@ def get_portfolio_risk_readiness(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@router.get("/{plan_id}/drift", response_model=PortfolioPlanDriftRead)
+@router.get(
+    "/{plan_id}/drift",
+    response_model=PortfolioPlanDriftRead,
+    responses={
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+            "model": PortfolioDriftErrorRead,
+            "description": (
+                "Portfolio drift domain validation error. Query validation keeps "
+                "FastAPI's standard 422 envelope."
+            ),
+        }
+    },
+)
 def get_portfolio_plan_drift(
     db: DatabaseSession,
     positions_db: PositionsDatabaseSession,
@@ -140,7 +154,7 @@ def get_portfolio_plan_drift(
     position_book_id: Annotated[int | None, Query(gt=0)] = None,
     paper_account_id: Annotated[int | None, Query(gt=0)] = None,
     threshold: Annotated[Decimal, Query(gt=0, le=1)] = Decimal("0.02"),
-) -> PortfolioPlanDriftRead:
+) -> PortfolioPlanDriftRead | JSONResponse:
     """Compare plan target weights with actual holdings (real book or paper)."""
     try:
         return drift_service.get_drift(
@@ -153,7 +167,22 @@ def get_portfolio_plan_drift(
         )
     except (PortfolioPlanNotFound, PaperAccountNotFound) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except (PortfolioDriftValidationError, PositionBookNotFound) as exc:
+    except PortfolioDriftValidationError as exc:
+        if exc.code is not None:
+            payload = PortfolioDriftErrorRead(
+                detail=str(exc),
+                code=exc.code,
+                symbols=list(exc.symbols),
+            )
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content=payload.model_dump(),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except PositionBookNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

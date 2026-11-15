@@ -243,3 +243,11 @@ class PortfolioPlanDriftRead(BaseModel):
     total_equity: Decimal
     summary: PortfolioDriftSummaryRead
     rows: list[PortfolioDriftRowRead]
+
+
+class PortfolioDriftErrorRead(BaseModel):
+    """Machine-readable domain error for portfolio drift diagnostics."""
+
+    detail: str
+    code: Literal["portfolio_drift_missing_trusted_prices"]
+    symbols: list[str]

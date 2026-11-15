@@ -5,7 +5,7 @@
 ## 命令（工作目录 `backend/`）
 
 - 依赖：Python 3.13（`.python-version`，`requires-python >=3.13,<3.14`），`uv sync --extra dev`。
-- 本地全门（与 CI 同一入口）：`uv run --extra dev python ../scripts/ci_check.py --scope backend`。当前基线：1,608 通过 / 2 按预期跳过 / 约 116s。
+- 本地全门（与 CI 同一入口）：`uv run --extra dev python ../scripts/ci_check.py --scope backend`。当前基线：1,609 通过 / 2 按预期跳过 / 约 116s。
 - 只 lint：`uv run --extra dev ruff check app tests scripts ../scripts/ci_check.py`（line-length 100、`select = E,F,I,UP,B`）。
 - 只测试：`uv run --extra dev pytest -q --basetemp=.pytest_tmp/ci`。必须带仓库内 `--basetemp`：宿主的批量删除守卫会在 unlink 预算耗尽时中止进程，把无关用例变成非断言型假失败。
 - 起服务：`uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1`。只能用单 worker：三个后台 worker 在 `lifespan` 内启动，多进程会各自重复跑同步与筛选任务。

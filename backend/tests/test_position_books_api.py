@@ -331,10 +331,23 @@ def test_plan_drift_rejects_stale_position_valuation_over_http(monkeypatch) -> N
     response = client.get(f"/api/v1/portfolio/plans/3/drift?position_book_id={book_id}")
 
     assert response.status_code == 422
-    assert response.json()["detail"] == (
-        "portfolio drift was not calculated because non-zero holdings "
-        "lack trusted prices: 600000.SH"
-    )
+    assert response.json() == {
+        "detail": (
+            "portfolio drift was not calculated because non-zero holdings "
+            "lack trusted prices: 600000.SH"
+        ),
+        "code": "portfolio_drift_missing_trusted_prices",
+        "symbols": ["600000.SH"],
+    }
+
+
+def test_plan_drift_openapi_documents_machine_readable_422() -> None:
+    operation = client.app.openapi()["paths"][
+        "/api/v1/portfolio/plans/{plan_id}/drift"
+    ]["get"]
+
+    schema = operation["responses"]["422"]["content"]["application/json"]["schema"]
+    assert schema["$ref"].endswith("/PortfolioDriftErrorRead")
 
 
 def test_plan_drift_requires_exactly_one_source() -> None:

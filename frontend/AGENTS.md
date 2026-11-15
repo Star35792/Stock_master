@@ -6,7 +6,7 @@
 
 - 唯一运行时是 **Bun**，版本 pin 在 `.bun-version`（当前 1.4.2）。不使用 npm / pnpm / yarn：`scripts/ci_check.py` 的前端步骤只认 PATH 上的 `bun`，缺失即退出 127 且不做包管理器回退（有契约测试锁定）。
 - 安装：`bun install --frozen-lockfile`（锁文件 `bun.lock` 已入库，`.gitattributes` 强制 LF）。
-- 测试：`bun test` → `tests/workflow.test.mjs`，当前 17 项。
+- 测试：`bun test` → `tests/workflow.test.mjs`，当前 19 项。
 - 构建：`bun run build` = `vue-tsc --noEmit && vite build`。
 - 本地全门（与 CI 同一入口）：`python ../scripts/ci_check.py --scope frontend`（需 Python 3.13 与 bun 同在 PATH；CI 用 `oven-sh/setup-bun@v2` + `bun-version-file: frontend/.bun-version`）。
 - 开发服务器：`bun run dev`（Vite，绑定 127.0.0.1）。

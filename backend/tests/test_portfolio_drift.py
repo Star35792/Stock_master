@@ -145,8 +145,10 @@ def _drift_service(
 
 def test_drift_requires_exactly_one_source() -> None:
     service = _drift_service()
-    with pytest.raises(PortfolioDriftValidationError, match="exactly one"):
+    with pytest.raises(PortfolioDriftValidationError, match="exactly one") as exc_info:
         service.get_drift(None, None, plan_id=3)
+    assert exc_info.value.code is None
+    assert exc_info.value.symbols == ()
     with pytest.raises(PortfolioDriftValidationError, match="exactly one"):
         service.get_drift(None, None, plan_id=3, position_book_id=5, paper_account_id=7)
 
@@ -203,8 +205,14 @@ def test_paper_drift_rejects_non_zero_holding_without_trusted_price() -> None:
             "portfolio drift was not calculated because non-zero holdings "
             "lack trusted prices: 600000.SH"
         ),
-    ):
+    ) as exc_info:
         service.get_drift(None, None, plan_id=3, paper_account_id=7)
+    assert exc_info.value.code == "portfolio_drift_missing_trusted_prices"
+    assert exc_info.value.symbols == ("600000.SH",)
+    assert str(exc_info.value) == (
+        "portfolio drift was not calculated because non-zero holdings "
+        "lack trusted prices: 600000.SH"
+    )
 
 
 def test_book_drift_rejects_all_missing_prices_in_stable_order() -> None:
@@ -223,8 +231,10 @@ def test_book_drift_rejects_all_missing_prices_in_stable_order() -> None:
     with pytest.raises(
         PortfolioDriftValidationError,
         match="lack trusted prices: 000001.SZ, 600000.SH",
-    ):
+    ) as exc_info:
         service.get_drift(None, None, plan_id=3, position_book_id=5)
+    assert exc_info.value.code == "portfolio_drift_missing_trusted_prices"
+    assert exc_info.value.symbols == ("000001.SZ", "600000.SH")
 
 
 def test_drift_rejects_missing_price_for_holding_outside_plan() -> None:

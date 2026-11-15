@@ -515,10 +515,35 @@ export async function fetchPortfolioPlanDrift(
     headers: { Accept: "application/json" },
   });
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? `Plan drift failed with ${response.status}`);
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: unknown;
+      code?: unknown;
+      symbols?: unknown;
+    } | null;
+    const message = typeof payload?.detail === "string"
+      ? payload.detail
+      : `Plan drift failed with ${response.status}`;
+    const code = typeof payload?.code === "string" ? payload.code : null;
+    const symbols = Array.isArray(payload?.symbols)
+      ? payload.symbols.filter((value): value is string => typeof value === "string")
+      : [];
+    throw new PortfolioDriftApiError(message, response.status, code, symbols);
   }
   return response.json() as Promise<PortfolioPlanDrift>;
+}
+
+export class PortfolioDriftApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly symbols: string[];
+
+  constructor(message: string, status: number, code: string | null, symbols: string[]) {
+    super(message);
+    this.name = "PortfolioDriftApiError";
+    this.status = status;
+    this.code = code;
+    this.symbols = symbols;
+  }
 }
 
 export async function fetchBacktestFinalHoldings(
