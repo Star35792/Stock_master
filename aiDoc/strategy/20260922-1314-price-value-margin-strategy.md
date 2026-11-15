@@ -541,6 +541,8 @@ CAGR 口径为 `power(last/base, 1/3) - 1`，**基数必须为正**否则为 `NU
 | 筛选实跑（名单、命中统计、主因表） | `python -m scripts.research.screen_value_investing --output outputs\value_investing_20261109.json` | 同名 JSON + Markdown，含 `snapshot_hash`、`kernel_version`、`reason_counts` |
 | 连接器研究卡 | `python -m scripts.research.capture_value_investing_observations --observations ../deliverables/research/evidence/value-investing/value_investing_observations_20261109.json --screen outputs\value_investing_20261109.json --output outputs\value_investing_card_20261109.md` | 研究卡 Markdown + JSON |
 
+筛选 CLI 会先在内存生成同批 JSON 与 Markdown，再各自写入目标目录内的唯一临时文件并 `fsync`；发布时先替换 Markdown、最后替换作为权威提交点的 JSON。正常写入或替换失败会清理临时文件，若 JSON 替换失败会恢复旧 Markdown。临时增长上界为一组待发布 JSON/Markdown，成功或失败后均不保留；两个独立路径不宣称具备异常断电下的跨文件事务原子性。
+
 口径定义（阈值表与实跑共用，两处数字因此逐项相同）：
 
 - **样本**：控制面 `fundamental.financial_statement`，`report_date <= 目标日`；按 `(symbol, statement_type, period_end)` 去重取 `report_date` 最新一行。趋势窗口为 FY(目标年−4) 至 FY(目标年−1) 四个年报期。

@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +27,102 @@ from app.database.session import SessionLocal, engine, initialize_database
 from app.services.value_investing_screen import ValueInvestingScreenService
 from app.strategies.registry import register_all_strategy_definitions
 from app.utils.duckdb_write_lock import duckdb_write_lock
+
+
+def _report_paths(output: Path) -> tuple[Path, Path]:
+    json_path = output
+    markdown_path = output.with_suffix(".md")
+    if json_path == markdown_path:
+        raise ValueError("--output must not be a .md path")
+    return json_path, markdown_path
+
+
+def _stage_bytes(target: Path, content: bytes) -> Path:
+    """Durably stage one complete file beside its target."""
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=target.parent,
+        prefix=f".{target.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        temporary_path.unlink(missing_ok=True)
+        raise
+    return temporary_path
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist directory entries where the platform exposes directory fsync."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _restore_markdown(path: Path, previous: bytes | None) -> None:
+    if previous is None:
+        path.unlink(missing_ok=True)
+        return
+    temporary = _stage_bytes(path, previous)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _publish_report_files(
+    json_path: Path,
+    markdown_path: Path,
+    *,
+    json_text: str,
+    markdown_text: str,
+) -> None:
+    """Publish complete report files without exposing truncated content.
+
+    Both payloads are staged and synced before either target changes. Markdown
+    is replaced first and JSON last, making the authoritative JSON report the
+    commit point. A normal second-replace failure restores the old Markdown;
+    two independent paths still cannot form a power-loss atomic transaction.
+    """
+    if json_path.parent.resolve() != markdown_path.parent.resolve():
+        raise ValueError("report JSON and Markdown must share one directory")
+    if json_path.resolve() == markdown_path.resolve():
+        raise ValueError("report JSON and Markdown paths must be distinct")
+
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    staged: list[Path] = []
+    try:
+        staged_json = _stage_bytes(json_path, json_text.encode("utf-8"))
+        staged.append(staged_json)
+        staged_markdown = _stage_bytes(markdown_path, markdown_text.encode("utf-8"))
+        staged.append(staged_markdown)
+
+        previous_markdown = markdown_path.read_bytes() if markdown_path.exists() else None
+        os.replace(staged_markdown, markdown_path)
+        staged.remove(staged_markdown)
+        try:
+            os.replace(staged_json, json_path)
+            staged.remove(staged_json)
+        except BaseException:
+            _restore_markdown(markdown_path, previous_markdown)
+            raise
+        _fsync_directory(json_path.parent)
+    finally:
+        for temporary in staged:
+            temporary.unlink(missing_ok=True)
 
 
 def _ensure_registered() -> None:
@@ -271,7 +369,7 @@ def _summary_markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--as-of",
@@ -285,17 +383,20 @@ def main() -> int:
         default=Path("outputs/value_investing_latest.json"),
         help="JSON report path; a Markdown summary is written next to it.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    json_path, markdown_path = _report_paths(args.output)
 
     _ensure_registered()
     report = ValueInvestingScreenService().run(as_of=args.as_of)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    json_text = json.dumps(report, ensure_ascii=False, indent=2, default=str)
+    markdown_text = _summary_markdown(report)
+    _publish_report_files(
+        json_path,
+        markdown_path,
+        json_text=json_text,
+        markdown_text=markdown_text,
     )
-    markdown_path = args.output.with_suffix(".md")
-    markdown_path.write_text(_summary_markdown(report), encoding="utf-8")
 
     print(
         json.dumps(
@@ -316,7 +417,7 @@ def main() -> int:
                     "removed_by_quality_gate"
                 ),
                 "snapshot_hash": report["snapshot_hash"],
-                "output": str(args.output),
+                "output": str(json_path),
                 "markdown": str(markdown_path),
             },
             ensure_ascii=False,
