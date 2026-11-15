@@ -274,6 +274,69 @@ def test_plan_drift_happy_path_over_http(monkeypatch) -> None:
     assert payload["summary"]["off_threshold_count"] == 1
 
 
+def test_plan_drift_rejects_stale_position_valuation_over_http(monkeypatch) -> None:
+    created = client.post("/api/v1/position-books", json={"name": "缺价账本", "cash": "1000"})
+    book_id = created.json()["id"]
+
+    plan = SimpleNamespace(
+        id=3,
+        name="draft",
+        total_equity=Decimal("2500"),
+        target_cash=Decimal("250"),
+    )
+    targets = [
+        SimpleNamespace(
+            symbol="600000.SH",
+            security_type="stock",
+            industry="银行",
+            final_weight=Decimal("0.4"),
+        )
+    ]
+    drift_module = __import__("app.api.routes.portfolio", fromlist=["drift_service"])
+    monkeypatch.setattr(
+        drift_module.drift_service,
+        "plan_repository",
+        SimpleNamespace(
+            get_with_targets=lambda db, *, plan_id: (
+                (plan, targets) if plan_id == 3 else (None, [])
+            )
+        ),
+    )
+    stale = SimpleNamespace(
+        symbol="600000.SH",
+        quantity=150,
+        cost_basis=Decimal("1500"),
+        average_cost=Decimal("10"),
+        price=None,
+        price_as_of=None,
+        price_quality_status=None,
+        price_stale=True,
+        market_value=Decimal("1500"),
+        unrealized_pnl=None,
+        unrealized_pnl_pct=None,
+        realized_pnl=Decimal("0"),
+        extras={},
+    )
+    monkeypatch.setattr(
+        drift_module.drift_service.position_book_service,
+        "get_valuation",
+        lambda positions_db, market_db, *, book_id: (
+            SimpleNamespace(id=book_id, name="缺价账本", cash_quants=10_000_000),
+            Decimal("1000"),
+            {"600000.SH": stale},
+            None,
+        ),
+    )
+
+    response = client.get(f"/api/v1/portfolio/plans/3/drift?position_book_id={book_id}")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "portfolio drift was not calculated because non-zero holdings "
+        "lack trusted prices: 600000.SH"
+    )
+
+
 def test_plan_drift_requires_exactly_one_source() -> None:
     response = client.get("/api/v1/portfolio/plans/1/drift")
     assert response.status_code == 422

@@ -74,15 +74,33 @@ def _target(symbol="600000.SH", weight="0.4"):
     )
 
 
-def _valuation(symbol="600000.SH", quantity=150, price="10"):
+def _valuation(
+    symbol="600000.SH",
+    quantity=150,
+    price="10",
+    price_as_of=date(2026, 7, 21),
+):
     return SymbolValuation(
         symbol=symbol,
         quantity=quantity,
         cost_basis=Decimal("1000"),
         average_cost=Decimal("10"),
         price=Decimal(price),
-        price_as_of=date(2026, 7, 21),
+        price_as_of=price_as_of,
+        price_quality_status="trusted",
+        price_stale=False,
         market_value=Decimal(quantity) * Decimal(price),
+    )
+
+
+def _stale_valuation(symbol="600000.SH", quantity=150):
+    cost_basis = Decimal(quantity) * Decimal("10")
+    return SymbolValuation(
+        symbol=symbol,
+        quantity=quantity,
+        cost_basis=cost_basis,
+        average_cost=Decimal("10"),
+        market_value=cost_basis,
     )
 
 
@@ -172,20 +190,107 @@ def test_book_drift_flags_overweight_and_sizes_target_lots() -> None:
     assert report.price_as_of == date(2026, 7, 21)
 
 
-def test_paper_drift_flags_underweight_and_handles_missing_price() -> None:
+def test_paper_drift_rejects_non_zero_holding_without_trusted_price() -> None:
     service = _drift_service(
         plan=_plan(),
         targets=[_target(symbol="600000.SH", weight="0.9")],
         prices={},
     )
-    report = service.get_drift(None, None, plan_id=3, paper_account_id=7)
 
-    assert report.source == "paper_account"
-    assert report.source_id == 7
+    with pytest.raises(
+        PortfolioDriftValidationError,
+        match=(
+            "portfolio drift was not calculated because non-zero holdings "
+            "lack trusted prices: 600000.SH"
+        ),
+    ):
+        service.get_drift(None, None, plan_id=3, paper_account_id=7)
+
+
+def test_book_drift_rejects_all_missing_prices_in_stable_order() -> None:
+    service = _drift_service(
+        plan=_plan(),
+        targets=[_target()],
+        book_valuation=StubBookValuation(
+            "1000",
+            {
+                "600000.SH": _stale_valuation("600000.SH"),
+                "000001.SZ": _stale_valuation("000001.SZ"),
+            },
+        ),
+    )
+
+    with pytest.raises(
+        PortfolioDriftValidationError,
+        match="lack trusted prices: 000001.SZ, 600000.SH",
+    ):
+        service.get_drift(None, None, plan_id=3, position_book_id=5)
+
+
+def test_drift_rejects_missing_price_for_holding_outside_plan() -> None:
+    service = _drift_service(
+        plan=_plan(),
+        targets=[_target()],
+        book_valuation=StubBookValuation(
+            "1000",
+            {
+                "600000.SH": _valuation(),
+                "000001.SZ": _stale_valuation("000001.SZ"),
+            },
+        ),
+    )
+
+    with pytest.raises(PortfolioDriftValidationError, match="000001.SZ"):
+        service.get_drift(None, None, plan_id=3, position_book_id=5)
+
+
+def test_zero_quantity_stale_valuation_does_not_block_drift() -> None:
+    service = _drift_service(
+        plan=_plan(),
+        targets=[_target()],
+        book_valuation=StubBookValuation(
+            "1000",
+            {
+                "600000.SH": _valuation(),
+                "000001.SZ": _stale_valuation("000001.SZ", quantity=0),
+            },
+        ),
+    )
+
+    report = service.get_drift(None, None, plan_id=3, position_book_id=5)
+
+    assert report.rows[0].direction == "sell"
+
+
+def test_old_but_trusted_price_does_not_block_drift() -> None:
+    service = _drift_service(
+        plan=_plan(),
+        targets=[_target()],
+        book_valuation=StubBookValuation(
+            "1000",
+            {"600000.SH": _valuation(price_as_of=date(2026, 7, 1))},
+            price_as_of=date(2026, 7, 1),
+        ),
+    )
+
+    report = service.get_drift(None, None, plan_id=3, position_book_id=5)
+
+    assert report.price_as_of == date(2026, 7, 1)
+    assert report.rows[0].direction == "sell"
+
+
+def test_plan_only_target_without_price_keeps_direction_but_not_quantity() -> None:
+    service = _drift_service(
+        plan=_plan(total="2500", target_cash="250"),
+        targets=[_target(weight="0.4")],
+        book_valuation=StubBookValuation("2500", {}),
+    )
+
+    report = service.get_drift(None, None, plan_id=3, position_book_id=5)
+
     row = report.rows[0]
-    # No trusted bar: valuation falls back to cost basis 1500, cash 1000 -> 2500.
-    assert row.current_weight == Decimal("0.6000000000")
-    assert row.drift == Decimal("-0.3000000000")
+    assert row.current_weight == Decimal("0E-10")
+    assert row.drift == Decimal("-0.4000000000")
     assert row.direction == "buy"
     assert row.target_quantity is None
     assert "no trusted price for lot sizing" in row.reasons

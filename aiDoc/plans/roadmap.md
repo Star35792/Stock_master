@@ -480,7 +480,7 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 真实持仓账本存独立 SQLite `data/positions.db`（存储边界修订见 `aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）：`position_book`（账本/现金）、`position_trade`（买卖流水，整数最小单位金额 + 幂等键）；持仓数量、平均成本（含买入费用）、已实现盈亏由流水按 `(trade_date, id)` 重放推导。
 - 持仓分析 API：`GET /api/v1/position-books/{book_id}/holdings` 输出逐仓成本/现价/浮盈/收益率/权重、集中度（HHI/Top5/最大单票）与行业暴露；估值取 DuckDB `market` 最新可信未复权收盘，缺价按成本估值并标记 `price_stale`。
 - 模拟盘只读分析：`GET /api/v1/paper-accounts/{id}/positions`、`GET /api/v1/paper-accounts/{id}/performance`（净值曲线 + 累计/年化收益、最大回撤、日波动率；快照含 gap 时显式标记 approximate）。
-- 偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=` 比较草案最终权重与真实/模拟持仓权重，输出增持/减持/持有方向与整手目标数量建议，不生成订单。
+- 偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=` 比较草案最终权重与真实/模拟持仓权重，输出增持/减持/持有方向与整手目标数量建议，不生成订单；任一非零持仓缺可信价格时 fail-closed 为 422，不以成本价代替当前市值生成方向。
 - 前端新增「持仓分析」页（账本管理、记一笔、持仓分析、行业暴露、偏离检测）；模拟盘页内嵌持仓与净值绩效面板；组合草案支持「从持仓账本预填」。
 
 阶段门（沿用阶段 2 验收，未达成不勾选）：

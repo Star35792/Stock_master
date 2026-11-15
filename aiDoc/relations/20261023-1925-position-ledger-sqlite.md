@@ -15,7 +15,7 @@
    - 真实持仓账本 → 独立 SQLite 文件 `data/positions.db`（`settings.positions_db_path`），表 `position_book`、`position_trade`，金额用整数最小单位（0.0001 元的 quants）保存，满足「核心金融数据不用浮点」的项目规则。
    - 其余一切（raw/market/factor/strategy/portfolio/risk/trade/lake/metadata）保持 DuckDB 单库不变；温层 Parquet 不变。
 3. **估值口径跨库但同源**：账本持仓的估值价格取 DuckDB `market` 可信层最新未复权收盘（trusted/manual_fixed、非 suspect），与 paper 权益快照同一纪律。SQLite 只存事实（流水），不存估值结果。
-4. **只读分析 + 建议式偏离**：持仓盈亏/集中度/行业暴露全部实时推导，不落库；组合草案偏离检测（`GET /portfolio/plans/{id}/drift`）输出方向与目标数量建议，不生成订单。
+4. **只读分析 + 建议式偏离**：持仓盈亏/集中度/行业暴露全部实时推导，不落库；组合草案偏离检测（`GET /portfolio/plans/{id}/drift`）输出方向与目标数量建议，不生成订单。持仓分析允许缺价时按成本降级展示并标记 `price_stale`；偏离建议会用持仓市值形成全组合权重，任一非零持仓缺可信价格时必须整体返回 422，不能让成本价污染总权益、现金权重与增减持方向。
 5. **边界不变**：不连接券商、不做实盘自动化交易、不引入真实账户只读适配器。账本靠人工记账，卖出校验净持仓非负，删除流水会重放推导。
 
 ## 为什么 SQLite 合理（相对原评估的修订理由）

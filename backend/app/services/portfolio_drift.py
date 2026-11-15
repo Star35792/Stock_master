@@ -96,6 +96,20 @@ class PortfolioDriftService:
             )
             source, source_id = "paper_account", account.id
 
+        missing_price_symbols = sorted(
+            {
+                symbol
+                for symbol, valuation in valuations.items()
+                if valuation.quantity > 0
+                and (valuation.price is None or valuation.price_stale)
+            }
+        )
+        if missing_price_symbols:
+            raise PortfolioDriftValidationError(
+                "portfolio drift was not calculated because non-zero holdings "
+                "lack trusted prices: " + ", ".join(missing_price_symbols)
+            )
+
         positions_market_value = sum(
             (valuation.market_value for valuation in valuations.values()), Decimal()
         )

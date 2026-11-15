@@ -175,7 +175,7 @@ curl http://127.0.0.1:8000/health
 路由文件：`portfolio.py`、`paper_accounts.py`、`approvals.py`、`position_books.py`
 
 - 组合草案：`POST /api/v1/portfolio/plans`（需 `Idempotency-Key`）、`GET /api/v1/portfolio/plans/{plan_id}`、`GET /api/v1/portfolio/plans/{plan_id}/risk-readiness`
-- 草案偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=&threshold=`（只读建议，不生成订单）
+- 草案偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=&threshold=`（只读建议，不生成订单；任一非零持仓缺可信价格时返回 422，不输出方向或目标数量）
 - 正式风控评估：`POST /api/v1/portfolio/plans/{plan_id}/risk-evaluations`（需 `Idempotency-Key`）
 - Paper 账户：`GET /api/v1/paper-accounts`、`GET /api/v1/paper-accounts/{account_id}/ledger-audit`、`GET /api/v1/paper-accounts/{account_id}/positions`、`GET /api/v1/paper-accounts/{account_id}/performance`
 - 净值快照：`POST /api/v1/paper-accounts/{account_id}/equity-snapshots`（需 `Idempotency-Key`）、`GET /api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}`
