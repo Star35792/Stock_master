@@ -27,20 +27,24 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 - 人工修复必须写审计记录，不允许静默覆盖。
 - 系统只产出选股与持仓建议，所有真实下单由人工在外部终端完成；平台内的模拟执行仅用于持仓推演。
 
-技术栈：Python 3.13、FastAPI、SQLAlchemy 2.x、DuckDB（单库 + 本地 Parquet 温层）、Pandas/Polars、Backtrader、Plotly、Vue 3 + TypeScript + Vite。
+技术栈：Python 3.13、FastAPI、SQLAlchemy 2.x、DuckDB + duckdb-engine（单库 + 本地 Parquet 温层）、APScheduler、Pandas/AKShare（`data` 可选依赖组）、Vue 3 + TypeScript + Vite + Bun。
+
+回测是仓库内自研的日频事件引擎（合同版本 `daily_event_v4`），不使用 Backtrader。`backtest`（`backtrader`）与 `viz`（`plotly`）两个可选依赖组在 `app/`、`scripts/`、`tests/` 中已无任何 import，仅作为历史声明保留；此前技术栈里写的 Polars 并不在 `backend/pyproject.toml` 依赖中。
 
 ## 2. 安装步骤
 
-准备 Python 3.13、uv 和 Node.js（版本见 `frontend/.nvmrc`），然后执行：
+准备 Python 3.13、uv 和 Bun（版本见 `frontend/.bun-version`），然后执行：
 
 ```powershell
 uv sync --project backend --extra dev --extra data
 # 仅首次创建；保留已有配置
 if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
 cd frontend
-npm ci
+bun install --frozen-lockfile
 cd ..
 ```
+
+前端唯一运行时是 Bun：不再需要 Node.js，也不再维护 `package-lock.json`，锁文件为 `frontend/bun.lock`。
 
 Linux/macOS 创建配置可用 `test -f backend/.env || cp backend/.env.example backend/.env`。
 在 `backend/.env` 中配置所需数据源凭据。可选依赖组见 `backend/pyproject.toml`：`data`、`backtest`、`viz`、`dev`、`all`；相关版本由 `backend/uv.lock` 记录。
@@ -65,11 +69,11 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 
 ```powershell
 cd frontend
-npm run dev
+bun run dev
 ```
 
 默认地址为 `http://127.0.0.1:5173`；若端口被占用，以 Vite 输出为准。
-`frontend/vite.config.ts` 将 `/api` 和 `/health` 代理至 `http://127.0.0.1:8000`，可通过 `STOCK_MASTER_API_URL` 覆盖。生产构建执行 `npm run build`。
+`frontend/vite.config.ts` 将 `/api` 和 `/health` 代理至 `http://127.0.0.1:8000`，可通过 `STOCK_MASTER_API_URL` 覆盖。生产构建执行 `bun run build`（即 `vue-tsc --noEmit && vite build`），回归测试执行 `bun test`。
 
 ### 日常与离线任务
 
@@ -89,7 +93,7 @@ npm run dev
 回测详情、利润状态、基准比较及回测失败重跑计划的产物读取使用独立研究库；研究忙时沿用 409。组合页“复制回测目标权重”使用期末总权益作为零现仓预算，不复制历史实际数量。通用日频回测对持仓证券开市日缺可信行情返回明确错误，不静默填价；历史运行保持不变。
 
 - 检查命令唯一维护在 `scripts/ci_check.py`，本地和 `.github/workflows/ci.yml` 共用。
-- 后端对 `app/`、`tests/`、`backend/scripts/` 和统一检查脚本执行 Ruff，再运行一次完整 pytest，自动收集 `tests/` 下的测试。标记为 `production_data` 的只读生产数据审计默认跳过，避免 CI 或本地单测隐式读取 `data/stock_master.duckdb`；显式设置 `RUN_PRODUCTION_DATA_AUDIT=1` 后单独运行，数据库路径可用 `PRODUCTION_CONTROL_PLANE_PATH` 指定，此时路径不存在或数据库无法只读打开会直接失败而不是静默跳过。前端执行 package.json 中已配置的 `test` 脚本（未配置则跳过），再执行类型检查/构建；任一步失败立即返回非零状态。
+- 后端对 `app/`、`tests/`、`backend/scripts/` 和统一检查脚本执行 Ruff，再运行一次完整 pytest，自动收集 `tests/` 下的测试。标记为 `production_data` 的只读生产数据审计默认跳过，避免 CI 或本地单测隐式读取 `data/stock_master.duckdb`；显式设置 `RUN_PRODUCTION_DATA_AUDIT=1` 后单独运行，数据库路径可用 `PRODUCTION_CONTROL_PLANE_PATH` 指定，此时路径不存在或数据库无法只读打开会直接失败而不是静默跳过。前端依次执行 `bun test`（`frontend/tests/*.test.mjs`）与 `bun run build`（类型检查 + 产物构建）；PATH 上没有 `bun` 时直接返回 127，不回退到 npm 或 pnpm。任一步失败立即返回非零状态。
 - 从仓库根目录执行（Windows、Linux、macOS 通用）：
 
   ```powershell
@@ -166,7 +170,7 @@ curl http://127.0.0.1:8000/health
   - `selection.rule_impact` 在同一份 v7 输入上构造“仅移除净利润 TTM 门槛”的反事实，分别统计 TTM 非正、缺失/冲突、混合原因及名单变化；它用于归因新增门槛，不把不同观察时刻的旧报告差异归因给单一规则。
   - `screen/tracking` 使用不可变 cohort sidecar 读取冻结的优先名单、达标池与原条件池，按真实形成日后的首个共同交易日收盘开始，固定观察 5/20/60 个交易日。成员等权冻结、不补入、不再平衡；可信前复权行情缺失的成员仍保留在分母并把池标为不完整。返回毛观察收益、固定比例成本后结果、相对原条件池差异、覆盖和输入哈希；补采 cohort 单独标识。该接口是动态只读前向观察，不改写原报告或哈希，不是历史回测、真实组合收益或策略认证。
   - 精选另要求供应商 PE≤20、PB≤2、上市至少 730 天、20 日平均成交额至少 5000 万元、最近三年逐年盈利、较 MA20 偏离不超过 8%，主期及已核验更新期 ROE 为正；周期行业与异常 ROE 需复核。排序和全部规则见价值策略文档。当前名单始终须通过鲜度和基础准入；这些规则只安排研究工作量，未完成绝对估值或样本外收益验证。
-- 回测运行：`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`.../trades`、`.../equity`、`.../positions`、`.../performance`（strategy 产物存独立 `data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
+- 回测运行：`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`.../trades`、`.../equity`、`.../positions`、`.../performance`（strategy 产物存独立 `backend/data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
 - 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐；新运行使用经复核的运行时基准快照，返回 `input_source=run_snapshot`；旧运行返回 `current_market_unversioned`，其结果可能随可信行情修订变化。缺失返回 422）、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
 - 回测最终持仓（组合草案预填源）：`GET /api/v1/backtests/runs/{run_id}/final-holdings`
 
@@ -211,13 +215,13 @@ curl http://127.0.0.1:8000/health
 
 前端路由定义在 `frontend/src/router.ts`，已挂载页面路径：
 
-`/overview`、`/market`、`/factors`、`/price-value`、`/backtests`、`/positions`、`/portfolio`、`/paper`、`/quality`、`/operations`、`/alerts`、`/failures`（`/` 重定向到 `/overview`，未匹配路径同样重定向）。
+`/overview`、`/market`、`/factors`、`/price-value`、`/backtests`、`/positions`、`/portfolio`、`/paper`、`/quality`、`/operations`、`/alerts`、`/failures`（`/` 重定向到 `/overview`，未匹配路径同样重定向）；回测详情独立路由 `/backtests/runs/:runId`。
 
-页面实现在 `frontend/src/pages/`：`MarketPage.vue`、`FactorPage.vue`、`PriceValuePage.vue`、`PositionsPage.vue`、`PaperTradingPage.vue`、`WorkspaceRoutePage.vue` 及其 `components/` 子目录；API 封装在 `frontend/src/api.ts`、`priceValueApi.ts`、`priceValueBacktestApi.ts`、`priceValueScreenApi.ts`。
+页面实现在 `frontend/src/pages/`：`WorkspaceRoutePage.vue` 按 `page` prop 渲染上述 12 个工作区路由，`BacktestRunPage.vue` 承载回测详情，业务页面组件为 `MarketPage.vue`、`FactorPage.vue`、`PriceValuePage.vue`、`PositionsPage.vue`、`PaperTradingPage.vue`，另有页面内 `components/` 与运维专用 `src/components/operations/`；API 封装在 `frontend/src/api.ts`、`factorSelectionApi.ts`、`priceValueApi.ts`、`priceValueBacktestApi.ts`、`priceValueScreenApi.ts`。
 
 ## 5. 关键配置说明
 
-配置通过 `pydantic-settings` 加载，环境变量文件为 `backend/.env`（模板 `backend/.env.example`），定义在 `backend/app/config/settings.py`。
+配置通过 `pydantic-settings` 加载，环境变量文件为 `backend/.env`（模板 `backend/.env.example`），定义在 `backend/app/config/settings.py`。下表默认值都是**相对当前工作目录**的路径，因此后端命令一律从 `backend/` 启动；从仓库根运行会静默另建一份空库并跳过 `backend/.env`（实际文件位于 `backend/data/`）。
 
 | 配置项 | 说明 | 代码默认值 |
 | --- | --- | --- |
@@ -302,36 +306,49 @@ A：仓库当前没有 Alembic 迁移目录；完整 pytest 包含 `tests/test_s
 ## 附：目录结构（当前仓库真实结构）
 
 ```text
+AGENTS.md           # AI 协作规则唯一真源（分层嵌套：根 + 各模块）
+AGENT.MD            # 兼容入口，只指向 AGENTS.md
 backend/
-├── app/            # FastAPI 应用代码（api / services / repositories / models / database / scheduler / factors / strategies / backtest / portfolio / risk / lake）
-├── data/           # 本地数据与数据湖文件
-├── scripts/        # 导入、因子、维护、调度入口
+├── app/            # FastAPI 应用代码（api / schemas / services / repositories / models / database / config / scheduler / data_sources / lake / market / factors / indicators / strategies / backtest / portfolio / risk / trade / utils）
+├── data/           # 三库与温层的实际位置：stock_master.duckdb、research.duckdb、positions.db、warm/、raw_landing/、hithink_dumps/
+├── scripts/        # 导入、因子、维护、修复、调度与研究脚本入口
 ├── sql/            # SQL 资源
-├── tests/          # 后端测试
+├── tests/          # 后端测试（pytest `testpaths`）
+├── AGENTS.md       # 后端模块规则
 ├── pyproject.toml  # Python 项目配置（uv 管理）
 └── uv.lock
 
 frontend/
-├── src/            # Vue3 前端工作台（pages / components / api 封装 / router）
+├── src/            # Vue3 工作台（pages / components / api 封装 / router）
+├── tests/          # `bun test` 回归用例
+├── bun.lock        # Bun 锁文件
+├── .bun-version    # Bun 版本锁定
 ├── package.json
 ├── vite.config.ts
-└── .nvmrc          # Node 版本锁定
+└── AGENTS.md       # 前端模块规则
 
 libs/
-└── hithink_sdk/    # 独立 HiThink SDK / toolkit 包
+├── AGENTS.md       # 依赖层模块规则
+├── a_stock_data/   # 把 a-stock-data 的 SKILL.md 内嵌代码净化为可 import 模块（被后端 import）
+└── hithink_sdk/    # 上游 HiThink MarketDB SDK 副本（后端不 import 它）
 
-aiDoc/              # 项目文档与正式设计记录（文档唯一真源入口为 AGENT.MD）
-data/               # DuckDB 单库文件
 scripts/
-└── ci-check.sh     # 本地 CI 检查脚本
+├── ci_check.py     # 本地与 CI 共用的唯一检查门
+├── ci-check.sh     # Bash 兼容入口
+└── AGENTS.md       # 共享脚本模块规则
+
+aiDoc/              # 项目文档、正式设计记录与 AI 协作 reference
+deliverables/       # 入库的研究产物与证据
+data/               # 仓库根 cwd 下产生的锁 guard 残留目录（正常运行的数据都在 backend/data/）
 .github/workflows/
 └── ci.yml
 ```
 
 ## 附：文档入口
 
-- `AGENT.MD` —— 本仓库 AI 协作规则唯一真源
-- `AGENTS.md` —— 兼容适配层
+- `AGENTS.md` —— 本仓库 AI 协作规则唯一真源（分层嵌套）
+- `AGENT.MD` —— 兼容入口，只指向 `AGENTS.md`
+- `backend/AGENTS.md`、`frontend/AGENTS.md`、`scripts/AGENTS.md`、`libs/AGENTS.md` —— 模块规则
 - `aiDoc/README.md` —— 文档导航入口
 - `aiDoc/plans/roadmap.md` —— 路线图与阶段计划
 - `aiDoc/relations/trusted-daily-data-center.md` —— 可信数据中心架构

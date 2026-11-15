@@ -268,7 +268,7 @@ V1 稳定后已经扩展出的能力：
 
 存储已从 PostgreSQL 单库切换到 DuckDB 分层湖（clean cut，不搬运历史分析数据）。当前实际形态：
 
-- 主 DuckDB（`data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor`、`portfolio/risk -> trade` 与控制面（物理表如 `metadata.job_log`，历史逻辑域称 `system`）。`strategy` 回测与训练产物存独立 `data/research.duckdb`，手工真实持仓账本存 SQLite `data/positions.db`；估值仍消费主库可信行情。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
+- 主 DuckDB（`backend/data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor`、`portfolio/risk -> trade` 与控制面（物理表如 `metadata.job_log`，历史逻辑域称 `system`）。`strategy` 回测与训练产物存独立 `data/research.duckdb`，手工真实持仓账本存 SQLite `data/positions.db`；估值仍消费主库可信行情。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
 - `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release）。`curated/prices_qfq` 已接入 `daily_loop`：置真 `factor_reads_curated` 且 `adjust_type='qfq'` 时，先从 warm history + control hot window 构建临时数据集，因子通过绑定该临时路径的 `CuratedDailyBarReader` 计算。发布闸门通过后先切换正式目录并暂留旧树，两条 release 激活事务提交成功后才回收旧树；激活或提交失败则回滚数据库并恢复旧树，新树退回暂存供诊断。关闭开关时仍走 ORM。其余 curated 数据集仍由离线脚本驱动。
 - 容量边界：本机只保留各职责的必要事实，不自动复制整库。`curated/prices_qfq` 的旧物化目录仅在发布切换期间临时存在，发布失败恢复旧目录，发布成功删除本次明确替换的旧目录。普通构建不按名称或年龄自动清理历史暂存、替换或备份目录；清理前必须核验活动任务、当前读路径、manifest/行数和研究审计引用。温层 `exported` 的有效父链、增量层和被研究/审计引用的 release 必须保留，不能按时间直接清空。
 - 持续写入边界：HiThink API 的回看窗口和公司行为 dump 重跑按同源业务键与内容版本幂等写入 `raw`，旧值修订仍新增版本；可信日线只有字段或选中来源变化时才更新。离线 Parquet 分区压缩经行数核验后切换，旧文件只在成功发布后回收。主库必要的新交易日与有效温层 delta 仍会随事实增长，不能用按年龄删 raw 或有效 release 伪造容量稳定。
@@ -312,7 +312,7 @@ API 启动后的日线维护由 `scheduler/auto_data_sync.py` 的后台线程执
 
 **估值历史研究层（2026-10-26）**。上一段的禁止针对的是「发布到 `market` 可信层」，研究层另有落点：估值历史补采发布为温层 Parquet 研究表 `research.valuation_history`，由 `scripts/ingest/eastmoney/collect_valuation_history.py` 执行，判定标准见 `aiDoc/modules/schema-plan.md` §17。它按交易日逐日通过双闸门才发布——价格与可信日线**零容差**逐笔一致，且供应商股票池覆盖可信个股池不低于 95%（分母只含 `security_type='stock'`）；任一标的不符或同一 `(symbol, trade_date)` 出现重复，该交易日即被拒收。供应商分页必须用复合排序 `sortColumns=TRADE_DATE,SECURITY_CODE` + `sortTypes=1,1`：只按 `TRADE_DATE` 排序时服务端对同一交易日内部的行序不作保证，实测跨页重复 571 键并同量丢行，会以「覆盖率不足」的形式伪装成供应商缺数据。
 
-该表的全部行 `pit_verified=false`：它们是今天对历史日期的观测，不是当时可知的证据。字段级判定为 `close` / `pe_ttm` / `ps_ttm` / 股本市值类为真 PIT，`pb_mrq` 按报告期末切换、最多前视 120 天因而**不可**作为可交易证据。消费路径是 `WarmResearchReadRepository.list_valuation_history` → `scripts/factors/compute_value_factor_ic.py` → `factor.factor_profile`；ORM 孪生 `app/repositories/research_valuation.py` 读控制面 `market.valuation_snapshot`，两处刻意的不等价（`pb_mrq` 报 `None`、`pit_verified` 报 `true`）由测试固定。ST 历史时点与行业时点仍不可得——供应商历史行的证券简称与行业板块是**当前值**（2018 与 2026 变化数均为 0），字段因此直接不取。详见 `aiDoc/data/20261026-valuation-history-backfill.md`。
+该表的全部行 `pit_verified=false`：它们是今天对历史日期的观测，不是当时可知的证据。字段级判定为 `close` / `pe_ttm` / `ps_ttm` / 股本市值类为真 PIT，`pb_mrq` 按报告期末切换、最多前视 120 天因而**不可**作为可交易证据。消费路径是 `WarmResearchReadRepository.list_valuation_history` → `scripts/factors/compute_value_factor_ic.py` → `factor.factor_profile`；ORM 孪生 `app/repositories/research_valuation.py` 读控制面 `market.valuation_snapshot`，两处刻意的不等价（`pb_mrq` 报 `None`、`pit_verified` 报 `true`）由测试固定。**ST 历史时点仍不可得**——供应商历史行的证券简称是**当前值**（2018 与 2026 变化数均为 0），字段因此直接不取；该结论只约束证券简称本身。**行业时点已补齐（2026-11-11）**：同一「历史行只有当前值」的缺陷曾把行业也判为不可得，那只否证「用东财 `BOARD_NAME` 反推」这条路；现由 `market.security_industry_history` 的申万时点区间修复，行业因子读数按生效区间回推、缺区间显式回退当前标签（行业族与财务族把回退标的写入运行元数据，估值行业内分位与截面中性化路径只回退不记录），详见 `20261111-1810-industry-point-in-time-history.md`。详见 `aiDoc/data/20261026-valuation-history-backfill.md`。
 
 ### A 股公司行为日期补证据边界（2026-10-27）
 

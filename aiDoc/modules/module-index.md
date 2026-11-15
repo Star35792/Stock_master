@@ -9,8 +9,13 @@
 | `factors` | 因子分类常量与因子定义目录预注册（registry） |
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |
 | `models` | ORM 表结构 |
-| `data_sources` | HiThink、Eastmoney、Xueqiu 等外部来源适配 |
-| `scheduler` | 工作日同步、近期补齐、因子批量计算日级调度，以及 `daily_loop` 数据→因子闭环编排；所有调度入口写入 `system.job_log` |
+| `data_sources` | HiThink、Eastmoney、Xueqiu、Tencent 行情/估值、TDX 官方行情（经 `libs/a_stock_data` 净化加载）、申万行业、基金与证据采集（公司行为/退市/换手率）适配；只做获取与初步解析，不直接写 `market` |
+| `schemas` | 请求/响应 Pydantic 合同，含费用模型版本白名单等取值约束 |
+| `config` | `settings.py`（pydantic-settings，读 `backend/.env`，含 `source_code_version()` 代码摘要）与 `data_contracts.py`（跨层数据合同版本常量，如复权因子可信来源） |
+| `indicators` | 指标计算公共能力，供因子与策略复用 |
+| `utils` | 跨层工具：`duckdb_write_lock.py`（域写锁）、`discard.py`（安全废弃）、`symbol.py` 等 |
+| `services.job_lease` | 任务进程 OS 租约（每进程占 32 个固定槽之一）与孤儿 `running` 收敛：只有对应锁可取得时才写 `failed + completion_status=unknown`；旧版无租约记录由 `scripts.maintenance.reconcile_legacy_running_jobs` 显式收敛 |
+| `scheduler` | 工作日同步、近期补齐、因子批量计算日级调度，以及 `daily_loop` 数据→因子闭环编排；所有调度入口写入 `system.job_log`。随 API 进程只启动 3 个 worker（`auto_data_sync`、`price_value_input_prep`、`price_value_screen`，见 `app/main.py` lifespan，因此服务必须单 worker 运行）；`create_daily_loop_scheduler` / `create_daily_sync_scheduler` / `create_factor_pipeline_scheduler` 是 cron 工厂但仓内无调用方，须显式用 `backend/scripts/scheduler/` 下对应脚本运行，当前只有 `create_recent_data_completion_scheduler` 有仓内入口 |
 | `lake` | Parquet/DuckDB 离线数据湖 |
 | `backtest` | 日频事件回测内核 |
 | `services.backtest` / `services.backtest_query` / `services.backtest_snapshot` | 回测执行编排、结果查询与比较、确定性输入快照分别维护；`services.backtest.BacktestQueryService` 保留兼容导入，快照字段、版本及哈希序列化口径不变 |
@@ -51,7 +56,7 @@
 - `portfolio`：组合计划和目标。
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
 - `trade`：本地模拟推演账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
-- `positions`（独立 SQLite `data/positions.db`）：手工记账的真实持仓账本（`position_book`/`position_trade`）；持仓与盈亏由流水重放推导，估值价格取 DuckDB `market` 可信层。
+- `positions`（独立 SQLite `backend/data/positions.db`）：手工记账的真实持仓账本（`position_book`/`position_trade`）；持仓与盈亏由流水重放推导，估值价格取 DuckDB `market` 可信层。
 - `lake`：内容寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
 - `system`（业务模块名，物理 schema 为 `metadata`）：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline`、`factor_batch_profiler` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录，新 running 必须绑定进程租约，孤儿 running 只按 OS 锁证据收敛。
 
@@ -59,4 +64,4 @@
 
 - 新增/改动 schema 域：更新 `aiDoc/modules/schema-plan.md`。
 - 新增 API：更新 `README.md` 核心 API 面。
-- 新增模块或改变职责：更新本文件和 `AGENT.MD` 仓库概览。
+- 新增模块或改变职责：更新本文件和对应模块的 `AGENTS.md`（根 `AGENTS.md` 只保留跨模块规则，不再维护仓库概览清单）。
