@@ -1,3 +1,12 @@
+---
+doc_type: decision
+status: partially_superseded
+as_of: 2026-11-06
+superseded_by:
+  - relations/20261112-1341-local-storage-retention-and-cleanup.md
+note: >-
+  ATTACH 无损恢复手法仍在用；WAL 处置与备份口径以本地存储保留与清理决策为准。
+---
 # ADR：不可回放 WAL 的无损恢复与预防
 
 > 后续策略覆盖（2026-11-12）：下文记录事故当时的自动备份流程；当前 `recover_duckdb_wal.py` 不再复制 DB/WAL，恢复后仍须校验行数并写审计。WAL 是已提交事务的组成部分，不得为节省空间直接删除。

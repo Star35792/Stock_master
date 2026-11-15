@@ -1,3 +1,12 @@
+---
+doc_type: decision
+status: partially_superseded
+as_of: 2026-11-09
+superseded_by:
+  - relations/20261112-1341-local-storage-retention-and-cleanup.md
+note: >-
+  CTAS 压缩与序列/索引恢复流程仍在位；文中测试基线与空间数字是当日快照。
+---
 # ADR：控制面主库空闲空间回收与索引/序列恢复
 
 > 后续策略覆盖（2026-11-12）：下文备份清单是历史执行记录；当前 `compact_control_plane.py` 不再生成长期全库备份，切换时的旧文件仅保留到校验完成。`slim_metadata_db.py` 同样不再默认复制整库。

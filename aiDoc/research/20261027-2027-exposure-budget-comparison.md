@@ -1,3 +1,8 @@
+---
+doc_type: evidence
+status: snapshot
+as_of: 2026-10-27
+---
 # 单因子研究策略仓位预算对照（2026-10-27）
 
 ## 结论

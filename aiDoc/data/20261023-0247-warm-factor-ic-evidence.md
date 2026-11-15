@@ -1,3 +1,12 @@
+---
+doc_type: evidence
+status: partially_superseded
+as_of: 2026-10-23
+superseded_by:
+  - research/20261027-2122-strategy-readiness-audit.md
+note: >-
+  IC 数字是 v2-qfq-2y 旧口径下的日级快照，因子池资格以 2026-10-27 审计为准。
+---
 # 温层因子回填与 IC 证据（2026-10-22 首轮）
 
 本文件记录把因子计算与 IC 证据从「控制面热窗口」搬到「Parquet 温层」的回填策略、实测结果和偏差声明。所有数字只描述对应窗口的样本，不构成可对外表述的策略收益。

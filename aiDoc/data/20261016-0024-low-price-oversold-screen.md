@@ -1,3 +1,8 @@
+---
+doc_type: evidence
+status: snapshot
+as_of: 2026-10-16
+---
 # 低价超跌反弹选股二次筛选报告
 
 **数据日期**：2026-10-14（`backend/data/stock_master.duckdb` 最新交易日）  

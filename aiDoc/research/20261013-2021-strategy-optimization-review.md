@@ -1,3 +1,10 @@
+---
+doc_type: analysis
+status: partially_superseded
+as_of: 2026-10-13
+note: >-
+  评审建议为当时切片，落地情况以 roadmap 与各 ADR 为准。
+---
 # 策略优化建议：基于订阅知识库因子池与项目现状的差距分析
 
 > 日期：2026-10-13

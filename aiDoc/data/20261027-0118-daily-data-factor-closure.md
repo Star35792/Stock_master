@@ -1,3 +1,12 @@
+---
+doc_type: evidence
+status: partially_superseded
+as_of: 2026-10-27
+superseded_by:
+  - relations/20261111-1810-industry-point-in-time-history.md
+note: >-
+  数据→因子闭环链路继续有效；其中行业族按当前标签口径的部分已被时点区间交付取代。
+---
 # 2026-10-27 日线与因子数据闭环证据
 
 ## 1. 结论

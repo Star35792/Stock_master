@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-11-03
+---
 # 因子画像输入身份闸门
 
 ## 结论

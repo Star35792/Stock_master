@@ -94,7 +94,7 @@ def _row_count(con: duckdb.DuckDBPyConnection, schema: str, table: str) -> int:
 def _write_audit(database: Path, wal_size: int) -> None:
     """Record the recovery in the ``metadata`` domain.
 
-    AGENT.MD requires that a manual repair is auditable, so the recovery is
+    AGENTS.md requires that a manual repair is auditable, so the recovery is
     written as a job-log entry rather than only printed to stdout.
     """
     try:

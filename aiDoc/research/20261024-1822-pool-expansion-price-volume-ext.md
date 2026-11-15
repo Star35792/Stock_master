@@ -1,3 +1,8 @@
+---
+doc_type: evidence
+status: snapshot
+as_of: 2026-10-24
+---
 # 价量候选池扩容首跑：默认门槛重新可用 + seg2022 转正 + 2024-2026 段仍 fail-closed
 
 - 日期：2026-10-24

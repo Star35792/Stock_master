@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-11-02
+---
 # 因子多周期有效观测数资格闸门
 
 ## 结论

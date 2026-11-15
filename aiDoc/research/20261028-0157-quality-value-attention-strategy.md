@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-10-28
+---
 # 双低一高研究选股策略 v1
 
 ## 状态与边界

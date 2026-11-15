@@ -4,14 +4,15 @@
 
 ## 使用规则
 
-1. 先读 `AGENT.MD` 和本文件。
+1. 先读根 `AGENTS.md`，再读编辑目标所在目录链上的模块 `AGENTS.md`（模块清单以根 `AGENTS.md` 的「作用域与读取顺序」为准，不在本文件复制），最后读本文件。
 2. 根据任务类型只读下方相关 reference。
 3. 只有任务触碰对应边界时，才继续打开深入设计文档。
-4. 完成代码任务前做一次文档影响检查：能力、API、schema、架构、路线、数据规则或长期记忆发生变化，就同步对应文档。
+4. 引用任何带时间戳前缀的文档前，先看它头部的 YAML `status`；批量判断口径新旧读[文档状态索引](20261115-1649-doc-status-index.md)。无时间戳前缀的 living docs 才承载当前状态。
+5. 完成代码任务前做一次文档影响检查：能力、API、schema、架构、路线、数据规则或长期记忆发生变化，就同步对应文档。
 
 ## 长期协作机制
 
-长期协作团队的唯一规则真源在 `AGENT.MD` 的“长期协作团队”小节。进入非平凡开发任务时，主代理应按项目经理、产品经理、前端工程师、后端工程师、金融专家五个资深角色推进；能启动子代理就恢复对应角色，不能启动时由主代理逐角色审查并明确降级。
+长期协作团队的唯一规则真源在根 `AGENTS.md` 的“长期协作团队”小节。进入非平凡开发任务时，主代理应按项目经理、产品经理、前端工程师、后端工程师、金融专家五个资深角色推进；能启动子代理就恢复对应角色，不能启动时由主代理逐角色审查并明确降级。
 
 默认推进顺序：项目经理定优先级，产品经理定价值和验收，金融专家定风控与交易边界，后端工程师定 API、审计和幂等，前端工程师定操作流和工程结构，最后由主代理整合实现、验证并做文档影响检查。
 
@@ -44,6 +45,7 @@
 | 调仓频率与净收益（20 交易日调仓平台复现） | [调仓频率净收益证据](research/20261024-1205-rebalance-frequency-net-return.md) | [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md) P3 |
 | 策略自演进（训练窗自动选参、rolling 选参策略） | [训练窗自动选参计划](plans/20261024-1522-training-window-selection-plan.md) | `aiDoc/plans/roadmap.md` V4.1、[首次实跑证据](research/20261024-1706-training-window-selection-first-run.md) |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
+| 某份时间戳文档现在是否还作数、谁取代了谁 | [文档状态索引](20261115-1649-doc-status-index.md) | 该文档头部的 YAML frontmatter（状态真源） |
 | 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | `aiDoc/plans/decision-review-protocol.md`、本文件长期协作机制小节 |
 
 ## 推荐阅读顺序
@@ -68,6 +70,7 @@
 
 ## 更新原则
 
-- `AGENT.MD` 是 AI 协作规则唯一真源。
+- 根 `AGENTS.md` 是 AI 协作规则唯一真源，并按 AGENTS.md 分层嵌套约定在各模块目录放 `AGENTS.md`；`AGENT.MD` 只是兼容入口，不承载规则。
 - `aiDoc/` 是项目文档唯一目录，按主题拆分，入口文件只负责导航。
 - 不要把临时过程写进项目文档；只把会影响后续实现的稳定结论写进去。
+- 带时间戳前缀的文档是**决策与证据的历史层**，正文一旦落定不再回改事实数字；它是否仍然作数只由头部 YAML `status` / `as_of` / `superseded_by` / `note` 表达，改动状态后重新生成[文档状态索引](20261115-1649-doc-status-index.md)。当前状态只写在 living docs（`roadmap.md`、`system-map.md`、`module-index.md`、`schema-plan.md`、`memory/README.md` 等无时间戳文件）与代码里。

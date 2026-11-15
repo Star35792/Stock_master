@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-10-24
+---
 # 分层回测与多窗口组合净收益曲线
 
 日期：2026-10-24

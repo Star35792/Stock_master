@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-10-23
+---
 # ADR：真实持仓账本采用独立 SQLite 存储
 
 - 日期：2026-10-23

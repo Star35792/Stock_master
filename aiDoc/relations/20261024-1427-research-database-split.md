@@ -1,3 +1,10 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-10-24
+note: >-
+  决策不变；文中「6 张表」现为 7 张，研究库另含 strategy.external_observation。
+---
 # ADR：strategy 回测产物拆分独立 research.duckdb
 
 - 日期：2026-10-24

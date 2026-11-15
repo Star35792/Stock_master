@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-11-11
+---
 # ADR：日线「采集时点」守卫——盘中快照不得发布为可信收盘
 
 - 日期：2026-11-11

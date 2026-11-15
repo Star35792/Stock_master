@@ -1,3 +1,12 @@
+---
+doc_type: decision
+status: partially_superseded
+as_of: 2026-10-21
+superseded_by:
+  - relations/20261109-1648-control-plane-compaction-and-index-recovery.md
+note: >-
+  决策在位，文中的容量与行数数字是当日执行快照。
+---
 # 2026-10-21 数据库拆分第三阶段：扩展温层表 + 修复索引复制
 
 ## 背景

@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-11-11
+---
 # 多源对账激活与独立第二源接入
 
 - 日期：2026-11-11

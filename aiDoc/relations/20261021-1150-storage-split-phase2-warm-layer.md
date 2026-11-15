@@ -1,3 +1,13 @@
+---
+doc_type: decision
+status: partially_superseded
+as_of: 2026-10-21
+superseded_by:
+  - relations/20261109-1648-control-plane-compaction-and-index-recovery.md
+  - relations/20261112-1341-local-storage-retention-and-cleanup.md
+note: >-
+  决策在位，文中的容量与行数数字是当日执行快照。
+---
 # 2026-10-21 数据库拆分第二阶段：控制面瘦身 + WarmLayerStore 统一读路径
 
 ## 背景

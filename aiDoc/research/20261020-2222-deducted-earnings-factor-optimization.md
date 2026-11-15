@@ -1,3 +1,8 @@
+---
+doc_type: decision
+status: current
+as_of: 2026-10-20
+---
 # 策略优化切片：补扣非净利润估值因子
 
 > 日期：2026-10-20

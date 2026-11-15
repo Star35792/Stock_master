@@ -1,3 +1,14 @@
+---
+doc_type: analysis
+status: partially_superseded
+as_of: 2026-11-11
+superseded_by:
+  - relations/20261111-1458-multi-source-reconciliation-activation.md
+  - relations/20261111-1531-tencent-valuation-source.md
+  - relations/20261111-1810-industry-point-in-time-history.md
+note: >-
+  评估结论中的 P0/P1 已由同日两份决策落地，P3 行业时点历史已由 20261111-1810 交付；其余分期建议仍未执行。
+---
 # a-stock-data 接入评估：数据补充与可靠性提升
 
 - 时间：2026-11-11

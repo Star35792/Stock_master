@@ -1,3 +1,12 @@
+---
+doc_type: decision
+status: partially_superseded
+as_of: 2026-11-11
+superseded_by:
+  - relations/20261112-1005-tencent-quote-day-roll.md
+note: >-
+  接入决策在位；取哪一天收盘的判定被行情日滚动决策修正。
+---
 # 腾讯行情接入：估值的第二独立源与 TTM PE 补齐
 
 日期：2026-11-11

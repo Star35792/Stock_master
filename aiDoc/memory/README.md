@@ -5,13 +5,19 @@
 ## 稳定事实
 
 - 用户希望 vibe coding 时由 AI 主动维护产品、架构、代码规则、计划和记忆文档，不要让用户手动追文档。
-- 项目文档采用 `AGENT.MD` 作为 AI 协作规则唯一真源，`aiDoc/` 作为唯一项目文档目录，同时承载正式设计和轻量 reference。
+- 项目文档采用分层嵌套的 `AGENTS.md` 作为 AI 协作规则唯一真源（根 `AGENTS.md` 承载跨模块规则，`backend/`、`frontend/`、`scripts/`、`libs/` 各自的 `AGENTS.md` 承载模块规则，就近优先），`AGENT.MD` 仅为兼容入口、不承载规则；`aiDoc/` 仍是唯一项目文档目录，同时承载正式设计和轻量 reference。
 - 当前项目已经进入较大体量阶段，默认应通过 reference 精确读取相关文档，避免每次全量读取。
 - 日级数据→因子闭环由 `app/scheduler/daily_loop.py` 编排：行情同步完成后，按开关暂存构建 `curated/prices_qfq`，因子绑定暂存输入计算，经认证后发布并激活 market/curated release；失败不发布，任务留痕于物理 `metadata.job_log`（业务域称 system）。存储细节见 [系统关系](../relations/system-map.md)。
 - **存储偏好：本机只保留必要事实的单份权威数据，不做自动备份。** `backend/data/stock_master.duckdb` 是主事实库；研究库、手工 SQLite 账本、有效温层 release 链各自保存不同事实，不是主库备份。旧全库副本、过期 staging 和可重建缓存应有清理路径；清理前核对 active/父链/审计引用。2026-10-13 曾清理 6 个历史全量副本（31.6 GiB），背景见 `aiDoc/relations/20261013-2207-storage-diagnosis-and-plan.md`。
 - 用户明确选择估值筛选仅保留最新全量报告及跟踪 cohort；历史 `price_value_screen` 任务只需留日期、状态、数量和快照哈希摘要，不需保留旧报告 JSON，并接受旧全量报告无法精确回看的影响。
 - 2026-11-12 主库压缩实跑暴露过普通索引丢失；现行 `compact_control_plane.py` 已改为复制源库全部显式索引，索引复制或 ORM 唯一约束恢复失败时拒绝发布，并在 `free_blocks=0` 时跳过无收益重建。压缩后仍用 `restore_indexes --dry-run` 核对覆盖；旧文档中“每次必须手工恢复 63 个普通索引”是修复前的历史操作记录。
 - 2026-10-13 存储诊断中的 `market.daily_bar.qfq` 行是 `none × adjustment_factor` 的确定性产物（1036 万行中 99.99% 可精确复现），属于可派生的存储冗余；但 `app/lake/curated.py` 与 `app/services/adjustment_build.py` 直接读这些行，移除前必须同步改造读取路径。
+- CodeGraph 已为本仓库建好代码图谱索引（本地 `.codegraph/`，全部 gitignore，不进 git）：687/692 个代码文件入图，仅 `backend/outputs/*.py` 未索引；`aiDoc/` 文档层不入图，仍按 reference 读取。Qoder 已注册 user 作用域 MCP 连接器 `codegraph`（stdio，单工具 `codegraph_explore`，一次调用返回相关符号源码 + 调用路径，等价于 Read）。踩坑：`PATH` 上的 npm `codegraph` 是旧版 0.9.8，`status` 会漏报待同步文件；应使用本机 1.6.2（`C:/Users/liuzu/AppData/Local/codegraph/current/bin/codegraph.cmd`），且它需要显式把 node 加进 `PATH`。后台 daemon 可能已退出（watchdog 自杀），CLI 使用前先跑一次 `codegraph sync`（秒级）。
+- 2026-11-15 后端门实跑基线：`scripts/ci_check.py --scope backend`（Ruff + pytest）通过 1,608 项、按预期跳过 2 项，约 116s。`aiDoc/plans/roadmap.md` 里的「226 项通过」是 2026-07-22 PostgreSQL/Alembic 旧阶段快照，不得再作为当前验收基线引用。
+- 前端运行时自 2026-11-15 起全量迁移到 **Bun**（含 CI）：版本 pin 在 `frontend/.bun-version`（1.4.2），锁文件 `frontend/bun.lock` 已入库并由 `.gitattributes` 固定 LF，`package-lock.json` 与 `.nvmrc` 已删除。门为 `bun test` + `bun run build`（17 项前端测试），`scripts/ci_check.py` 只认 PATH 上的 `bun`，缺失即退出 127 且**不回退** npm/pnpm（有契约测试锁定）。踩坑：`vue-tsc` 3.3.7 在 Bun 运行时下对 `./App.vue` 报 3 次 TS2307，而真实 node 与单独 `vite build` 均正常——是 vue-tsc/Bun 兼容缺陷，3.3.14 已修复，`package.json` 须保持 `^3.3.14`；另一坑：`test` 脚本若仍写 `node --test`，Bun 会报 "Cannot use test outside of the test runner"。
+- **库路径与 `.env` 都按当前工作目录解析**（`app/config/settings.py` 默认值是 `data/...` 相对路径，`env_file=".env"` 同样相对）：从仓库根运行不会报错，而是静默另建一份空 `data/stock_master.duckdb`、另一把 `data/research_write.lock` 并跳过 `backend/.env`。任何后端命令一律从 `backend/` 起（`scripts/ci_check.py` 自己 `cwd=` 各步目录，是唯一与工作目录无关的入口）。
+- Windows 上裸 `python` 可能是商店别名（`WindowsApps`），只会静默失败或开商店页；本仓库统一用 `uv run --project backend python ...`，CI 与本地同一口径。
+- 文档状态索引是**生成物**：`scripts/doc_status_index.py` 从各时间戳文档 frontmatter 生成 `aiDoc/20261115-1649-doc-status-index.md`，`--check` 只比不写；`backend/tests/test_doc_status_index.py` 锁住缺 frontmatter、悬空 `superseded_by` 与索引漂移三类违约，它跑在 backend 全量 pytest 内因此已随 CI 生效。`superseded_by` 路径相对 `aiDoc/`。
 
 ## 工作偏好
 
@@ -22,7 +28,7 @@
 ## 已知风险
 
 - 文档容易低估代码进度，尤其是 V4 研究入口、V6 工作台、上层代理因子、schema 扩展和数据工具边界。
-- 行业/政策类因子目前仍可能依赖当前行业标签；生产评分前需要历史行业映射。
+- 行业时点已于 2026-11-11 补齐真实变迁史：`market.security_industry_history` 由申万归属变动表写入 11,963 条生效区间 / 5,585 只标的（source `sw_industry_history`，采集服务 `app/services/industry_history_collection.py`，适配层 `app/data_sources/sw_industry.py`），行业族因子与估值行业内分位按目标交易日时点标签取值。旧口径「当前标签回填（`current_label_backfill_20261024`）」只在缺区间时回退；行业族与财务族把 `fallback_symbols` 写入运行元数据，估值行业内分位与截面中性化路径（`factor_cross_section.py`、`valuation_factors.py`）只回退、不写元数据。**ST 历史时点仍不可得**，与行业不再是同一缺口，不得再合并表述。
 - 财务因子已有公告日次日生效及报表修订留痕；供应商历史首次可得时间与完整修订证据仍须单独认证，不能把消费日期守卫当作全历史 PIT 证明。
 - 估值/财务消费时间边界不同：估值按交易日 `<=` 读取供次日信号使用，财报公告日严格 `<` 才生效；这是消费守卫，不是供应商历史首次可得性认证。补采的 `research.valuation_history` 仍为 `pit_verified=false`，不能仅凭日期过滤认定无前视。
 - 估值数据：Eastmoney clist 接口可免 cookie 批量取当前总市值/流通市值/PE/PB（f20/f21/f9/f23），但不支持指定历史日期；东方财富估值分析日期接口可返回指定交易日的 PE_TTM/PB_MRQ 等供应商记录，按入口分别采集到 raw 留痕或温层 `research.valuation_history` 研究表；不能把 raw-only 补采脚本与温层发布混为一谈。历史接口不提供可认证的首次可得时间或修订版本，故回填尚不能用于历史全市场收益回测。Xueqiu kline 入口需要 cookie，是否配置以运行环境为准。
@@ -32,7 +38,7 @@
 - 温层连接不要 ATTACH 控制面 DuckDB：DuckDB 禁止同一文件被两个句柄打开（其一为读写）时报 `Unique file handle conflict`。用 `attach_control=False` 建纯 Parquet 连接，控制面读取继续走已打开的 ORM session。
 - **DuckDB 跨进程写互斥**：当前采用 `app/utils/duckdb_write_lock.py` 的 OS 互斥锁，常驻 `.guard` 文件维持稳定锁对象，PID 文件仅作诊断；不得按年龄抢占活跃锁或删除 `.guard`。主库与研究库分域协调；API 研究库初始化及请求同样使用研究锁。早期 `O_EXCL`/stale 抢占描述已被取代，当前边界见 [系统关系](../relations/system-map.md)。
 - **拆库迁移的两个坑**（2026-10-24，`migrate_strategy_to_research.py`）：①旧表经兼容桥 ALTER 追加的列在物理尾部，列序与 ORM 目标表不一致，`INSERT SELECT *` 会把 artifact_hash 塞进时间戳列报 Conversion Error——必须按目标列名显式 SELECT（`information_schema.columns`，注意 catalog 名是 `current_database()` 不是 'main'）；②ORM 的 sequence 建在库默认 schema（`nextval` 不带前缀），迁移后要在 research 库默认 schema `DROP+CREATE SEQUENCE START max(id)+1`（DuckDB 无 ALTER SEQUENCE RESTART），否则新插入从 1 开始撞主键。
-- **P2 偏差源回填的两个近似假设**（2026-10-24，影响一切消费这些表的数字解读）：①涨跌停回填（控制面 97% 覆盖）对历史期 ST 用 name 前缀近似当前期——主板 ST 的 5% 带宽在历史上被高估为 10%（偏宽松方向）；②行业时点表是「当前标签回填」（source=`current_label_backfill_20261024`，5,579 只、effective_from=上市日），假设行业从未变更。真实历史数据接入后用 `record_interval` 追加区间即可，无需重建。
+- **P2 偏差源回填的两个近似假设**（2026-10-24，影响一切消费这些表的数字解读）：①涨跌停回填（控制面 97% 覆盖）对历史期 ST 用 name 前缀近似当前期——主板 ST 的 5% 带宽在历史上被高估为 10%（偏宽松方向）；②行业时点表在 2026-10-24 只是「当前标签回填」（source=`current_label_backfill_20261024`，5,579 只、effective_from=上市日，假设行业从未变更），该近似已于 2026-11-11 由申万真实生效区间替换，但 2026-10-24 至 2026-11-11 之间产出的行业相关数字仍带此近似，解读时要追溯运行日期。
 - DuckDB `corr()` 对退化分组返回 **NaN 而不是 NULL**，写进 `DECIMAL` 列会抛 `Conversion Error: Could not cast value nan`。任何 SQL 聚合结果写入定点列之前都要先过滤 NaN/inf。
 - 涨跌停价格不能用「涨跌幅≈10%」反推校验：当日收盘涨 10% 不等于收盘价等于涨停价。正确校验是不变式 `high <= limit_up` 且 `low >= limit_down`（剔除上市前 5 个交易日后真实违规率 0.092%）。推导锚点必须是当日自身的 `pre_close`，不能用前一行的 `close`（除权除息日两者不等）。
 - 因子方向不能靠直觉设定：本轮实测 7 个价量因子里 `momentum_20`/`momentum_60`/`liquidity_20` 的 RankIC 显著为负（IR 在 -0.26~-0.33），默认预设给它们「越高越好」导致回测亏损。任何因子进策略前先查 `factor.factor_profile` 的 RankIC 符号。
@@ -45,7 +51,7 @@
 - **温层 partial release 的历史缺陷已修复**：2026-10-24 曾只有一层父回退，孙 release 会丢失祖先独有表；当前 `WarmLayerStore.table_globs` 沿 `base_release_tag` 多级父链读取，逐表遇 snapshot 截止、delta 继续叠加。父链仍有 16 层上限；发布前须检查深度和全部父节点有效，不能以超限后不可见为由删除祖先数据。
 - **DuckDB 窗口帧在分区边界会截断**（2026-10-24）：`AVG/SUM/MIN ... OVER (ROWS BETWEEN n PRECEDING ...)` 在行数不足时按现有行数算（不返回 NULL），与 ORM 因子实现的 fail-closed（窗口不满返回 None）语义不同。温层 SQL 回填新因子必须加 `count(*) OVER frame = n` 满帧守卫（`abnormal_volume_pressure` 踩过）；LAG 天然无此问题（越界返回 NULL）。
 - **东财估值历史分页必须复合排序**（2026-10-26 踩坑）：`RPT_VALUEANALYSIS_DET` 只按 `TRADE_DATE` 排序时，服务端对**同一交易日内部**的行序不作保证，跨页会重复并丢行——实测 8 个交易日的分页在第 1、2 页之间重复 571 个 `(symbol, trade_date)` 键并同量丢行，且这种缺口会以「覆盖率不足」伪装成供应商数据缺失（曾误判为 0.907 < 0.95 门槛）。必须用 `sortColumns=TRADE_DATE,SECURITY_CODE` + `sortTypes=1,1`（`sortTypes=1` 报"字段和顺序数量不一致"，`sortTypes=["1","1"]` 报"不能为非数字类型"，只有 `"1,1"` 可用）。任何带分页的供应商历史回补都要先验证「相邻页无重复键」。
-- **供应商在历史行上返回当前值**（2026-10-26 实证）：`SECURITY_NAME_ABBR`（证券简称）与 `BOARD_NAME`（行业板块）在 2018→2026 全样本上**零变化**，即历史行的名称与行业也是当前值。取回来就是静默前视——ST 历史时点与行业时点历史因此**不可得**，只能挂账，不能靠"用名称反推历史"绕过。
+- **供应商在历史行上返回当前值**（2026-10-26 实证）：`SECURITY_NAME_ABBR`（证券简称）与 `BOARD_NAME`（行业板块）在 2018→2026 全样本上**零变化**，即历史行的名称与行业也是当前值。取回来就是静默前视——**ST 历史时点**因此不可得，只能挂账，不能靠"用名称反推历史"绕过。同一论证曾把行业时点也判为不可得，但那只否证「用东财 `BOARD_NAME` 反推」这一条路：2026-11-11 已改由独立的申万归属变动表补齐真实行业区间，见 `aiDoc/relations/20261111-1810-industry-point-in-time-history.md`。教训：**「某字段不可得」只约束该字段，不要外推成「该事实不可得」。**
 - **`PB_MRQ` 按报告期末切换，最前视 120 天**（2026-10-26）：与 `PE_TTM`（按披露日切换，真 PIT）不同，`PB_MRQ` 在报告期末当天即为真值，而披露滞后 28~120 天。用它做价值因子会系统性高估"便宜"程度，属于**向上偏乐观**的前视。字段级判定与偏差方向登记见 `aiDoc/data/20261026-valuation-history-backfill.md` §4。
 - **宿主环境有批量删除守卫**（2026-10-26）：单进程累计删除约 50 个文件后，`unlink`/`rmtree` 曾被 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 拦截。优先避免按页产生临时文件；`app/utils/discard.py` 将废弃目录移出读取路径后尝试清理，清理失败要显式留痕并在后续维护中处理，不能把 `.trash/` 当长期保留层。2026-11-12 在 Codex 中删除单个旧备份时，命令启动前又返回 `blocked by policy`，具体策略来源未暴露；不可用改名、脚本包装或别的工具绕过该拦截。
 - **DuckDB WAL 被强杀后无法回放**（2026-10-26 首次记录，2026-11-06 修正）：采集进程被 `timeout`/SIGTERM 强杀会留下 `.duckdb.wal`，之后**任何**连接（包括只读）报 `INTERNAL Error: Failure while replaying WAL file: Calling DatabaseManager::GetDefaultDatabase with no default database set`。DB 本体完好。`CHECKPOINT` 可把已提交 WAL 折入数据库文件，但不会收缩数据库文件；空闲块回收需经过已校验的重建流程。
@@ -54,7 +60,7 @@
   - **已修复**（2026-11-06，三层）：①模型层 37 处序列主键列补 `server_default=text("nextval('<seq>')")`（此前仅 9 处有），`CREATE TABLE` 带默认值是安全的，新库首次初始化**零毒 ALTER**；②`app/database/session.py::ensure_duckdb_sequences` 改为先读 `information_schema.columns.column_default`，默认值等价则跳过 DDL，比较走归一化（去空白/大小写/schema 前缀），不一致时打 WARNING；③`initialize_database` 末尾调用公共 `checkpoint_duckdb()` 把 schema DDL 折进文件，`slim_metadata_db.py` 也调用同一函数（它绕过 `initialize_database`，否则是未覆盖路径）。checkpoint 失败只记 WARNING 不阻断启动。
   - **DuckDB 的 `information_schema` 与 `duckdb_sequences()` 跨所有 attached catalog**：查询必须带 `table_catalog = current_database()` / `database_name = current_database()`，否则 ATTACH 同名表时 `scalar_one_or_none()` 抛 `MultipleResultsFound`。
   - **任务孤儿恢复已改为 OS 租约判定**（2026-11-15）：新 `metadata.job_log` 的 `running` 必须带 `_job_lease=process_slot_v1`，每进程占 32 个固定槽之一。只有对应 OS 锁可取得时才自动写 `failed + completion_status=unknown`；时间、PID、缺 guard 和坏元数据均不构成死亡证据。`failed + unknown` 只代表 owner 进程已退出、不代表当日缺数（补跑或后续运行可能已覆盖该日 trusted/release）。旧版无租约记录用 `reconcile_legacy_running_jobs --job-ids --operator --reason`（默认 dry-run）；带租约但槽不可核验（缺 guard / 元数据非法）额外加 `--confirm-owner-exited`，活锁与可自动恢复的记录即便带此参数仍被拒绝。`--list` 只读分类。恢复只改审计状态，不推断副作用已回滚，不清理 raw/release/WAL/研究产物。占槽恢复仅在会话无待写事务时执行。
-- **DuckDB 不收缩文件，空闲空间只涨不落**（2026-11-09 记录）：删除行只把块标记为可复用，后续写入复用但**文件体积永不回落**。判据是「表块数 × 256 KiB ≪ 文件大小」——实测控制面 1240 块（≈310 MiB）却占 2002 MiB 文件，**84% 是空闲空间**。排查空间问题先算这个比值，不要直接归因于"数据增长"。回收只能靠 CTAS 重写文件。
+- **DuckDB 不收缩文件，空闲空间只涨不落**（2026-11-09 记录，2026-11-12 更正判据）：删除行只把块标记为可复用，后续写入复用但**文件体积永不回落**。空闲判据必须用 `PRAGMA database_size` 的 `free_blocks`（主库实测 `free_blocks=0`，即满载、无可回收空间；对照实验：删 75% 行后升到 23）。**不要**再用「表块数 × 256 KiB ≪ 文件大小」估算：`pragma_storage_info` 的 `block_id` 漏掉压缩段溢出到 `additional_block_ids` 的块，实测低估 7.3 倍（1,421 块 vs 真实 7,256 块），据此会报出假的「86% 可回收」。排查空间问题先看 `free_blocks`，不要直接归因于"数据增长"。回收只能靠已校验的 CTAS 重写流程。
   - **两个瘦身脚本分工明确**：`slim_metadata_db.py` 把大表历史**搬出**控制面（数据行变少）；`compact_control_plane.py`（2026-11-09 新增）只**回收已删除行的空闲空间**（数据行完全不变）。后者还顺带修复了前者遗留的索引/序列丢失问题。
   - **CTAS 重建会丢序列、唯一索引与列默认值**（既存缺陷，非本次引入）：压缩前的原始库索引数 = 0、序列数 = 0（`pre-slim`/`pre-compact` 备份均如此）。`slim_metadata_db.py` 的索引/默认值复制逻辑在 ATTACH 场景下因 `current_database()` 解析到错误 catalog 而**静默失败**。后果比空间更严重：repository 层的 `ON CONFLICT` upsert 在无唯一索引时**静默失去去重保证**。压缩脚本已显式恢复 40 个序列（`ensure_duckdb_sequences`，起始值严格 > 各表 `max(id)`）与 20 张表的唯一约束。
   - **ATTACH 场景的 catalog 限定是必需且易错的**（2026-11-09 踩坑）：必须写三段式 `"catalog"."schema"."table"`，写 `target.schema.table` 报「schema does not exist」；`information_schema` **不可**三段式限定，要写 `FROM information_schema.columns WHERE table_catalog = 'source'`；源库的 `CREATE SEQUENCE x` 不带 catalog 前缀，直接执行会把序列建到 source 库，须改写为 `CREATE SEQUENCE target.x`（`_qualify_sequence_ddl`）。
@@ -71,4 +77,4 @@
 - **空截面必须 fail-closed，不能写入**（2026-10-26）：`FactorCrossSectionService._write_profiles` 原先会为「有宇宙无因子值」的交易日写 `observation_count=0` 的行，`upsert` 会把它**覆盖**到既有的有效证据行上。零观测的行不携带任何信息，一律跳过。
 - **因子池分级需联合检查**：IC、覆盖率、端点收益、定义 PIT、生命周期和画像证据资格共同约束核心池。`pit_status` / `status` 不等于 `is_active`，后者仅控制批量画像。2026-10-26 的“4→1”是旧口径历史结果；[2026-10-27 资格审计](../research/20261027-2122-strategy-readiness-audit.md)记录 `core=0`，不能沿用“唯一核心”结论；数值仅代表该日审计快照。
 - **`value_pe_ttm` 已退役，方向性错误**（2026-10-26）：`PE_TTM` 在亏损股为负（样本 26.51%），`-PE_TTM` 把深度亏损公司映射成大正数，最便宜五分位 100% 是亏损股（645,112 行）；限定 `PE_TTM>0` 后它与 `1/PE_TTM` 是同一单调变换（595/595 天 Spearman = 1.000）。退役证据留在 `v1-valhist` 供审计，修正后发布到 `v2-valhist`。**价值因子的方向必须先看端点价差符号再定**。
-- **通用价值因子必须排除金融行业**（2026-10-26）：银行/保险/券商（实测 122 只个股）的 PB/PE 口径与制造业不可跨行业横截面比较，且天然便宜会主导"最便宜"分位。统一用 `app/services/financial_sector.py::is_financial_industry` 过滤，IC 脚本提供 `--keep-financial-industry` 开关以便做对照实验。注意行业标签是**当前**行业（供应商不提供时点行业历史），属已知偏差。
+- **通用价值因子必须排除金融行业**（2026-10-26）：银行/保险/券商（实测 122 只个股）的 PB/PE 口径与制造业不可跨行业横截面比较，且天然便宜会主导"最便宜"分位。统一用 `app/services/financial_sector.py::is_financial_industry` 过滤，IC 脚本提供 `--keep-financial-industry` 开关以便做对照实验。行业标签自 2026-11-11 起按目标交易日的申万时点区间取值；只有回退行仍带「当前行业」偏差，判断依据是该行的 `source`。

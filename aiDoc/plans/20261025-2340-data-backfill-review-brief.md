@@ -1,3 +1,12 @@
+---
+doc_type: plan
+status: partially_superseded
+as_of: 2026-10-25
+superseded_by:
+  - relations/20261111-1810-industry-point-in-time-history.md
+note: >-
+  方案 C 的行业时点部分已于 2026-11-11 落地；ST 历史与指数成分历史序列仍为待决选项。
+---
 # 数据补齐 · 事实基线与候选方案（评审输入）
 
 **编制时间**：2026-10-25

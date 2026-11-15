@@ -1,3 +1,13 @@
+---
+doc_type: analysis
+status: partially_superseded
+as_of: 2026-10-15
+superseded_by:
+  - data/20261016-0024-low-price-oversold-screen.md
+  - relations/20261111-1810-industry-point-in-time-history.md
+note: >-
+  本文所列「行业时点」缺口已于 2026-11-11 由申万生效区间交付关闭；ST 与退市时点缺口继续挂账。
+---
 # A 股历史时点属性缺口分析
 
 **日期**：2026-10-15

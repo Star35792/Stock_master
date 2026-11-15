@@ -1,3 +1,10 @@
+---
+doc_type: analysis
+status: partially_superseded
+as_of: 2026-07-22
+note: >-
+  缺口清单大量条目已在后续 ADR 中关闭，引用前先核对当前 roadmap 现状章节。
+---
 # 量化平台"跑起来"差距分析
 
 - 日期：2026-07-22

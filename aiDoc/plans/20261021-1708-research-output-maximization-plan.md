@@ -1,3 +1,12 @@
+---
+doc_type: plan
+status: partially_superseded
+as_of: 2026-10-21
+superseded_by:
+  - plans/20261025-2340-data-backfill-review-brief.md
+note: >-
+  优先级与工作量估算为计划快照，执行事实以补齐复核简报与其后的 ADR 为准。
+---
 # 研究产出最大化行动计划
 
 **制定时间**：2026-10-21

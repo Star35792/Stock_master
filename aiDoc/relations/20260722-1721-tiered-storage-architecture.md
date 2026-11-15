@@ -1,3 +1,14 @@
+---
+doc_type: decision
+status: partially_superseded
+as_of: 2026-07-22
+superseded_by:
+  - relations/20261023-1925-position-ledger-sqlite.md
+  - relations/20261024-1427-research-database-split.md
+  - relations/20261112-1341-local-storage-retention-and-cleanup.md
+note: >-
+  分层思路仍在位；具体库划分与清理策略由后续三份决策取代。
+---
 # 分层存储架构
 
 > 历史决策与后续覆盖：本文的“纯 DuckDB 单库、无 SQLite”是最初决策；当前增加了 [SQLite 持仓账本](20261023-1925-position-ledger-sqlite.md) 与 [独立研究 DuckDB](20261024-1427-research-database-split.md)。本文旧的备份和持久副本建议也已由本机单份保留策略覆盖。当前存储及温层发布状态以 [系统关系](system-map.md) 为准，以下原始取舍保留供追溯。

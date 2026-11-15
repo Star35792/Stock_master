@@ -1,3 +1,12 @@
+---
+doc_type: config
+status: partially_superseded
+as_of: 2026-07-22
+superseded_by:
+  - ../AGENTS.md
+note: >-
+  文中引用的规则真源 AGENT.MD 已降级为兼容入口，协作规则与长期小组口径以仓库根 AGENTS.md 为准；本文保留为历史小组配置。
+---
 # 自主推进智能体小组
 
 - 建立日期：2026-07-22

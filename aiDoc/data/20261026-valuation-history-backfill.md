@@ -1,3 +1,12 @@
+---
+doc_type: evidence
+status: partially_superseded
+as_of: 2026-10-26
+superseded_by:
+  - relations/20261111-1810-industry-point-in-time-history.md
+note: >-
+  §7「行业时点不可得」只否证东财 BOARD_NAME 这一条路径，已被 2026-11-11 申万区间交付取代；估值字段级 PIT 判定与偏差登记继续有效。
+---
 # 估值历史回填（2026-10-26）
 
 本文记录本轮「数据补齐」中**估值历史序列**的采集、发布与消费，以及每个字段的**时点（PIT）有效性**判定和**偏差方向**登记。

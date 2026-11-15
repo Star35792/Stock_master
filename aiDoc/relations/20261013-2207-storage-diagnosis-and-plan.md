@@ -1,3 +1,12 @@
+---
+doc_type: plan
+status: withdrawn
+as_of: 2026-10-13
+superseded_by:
+  - relations/20261112-1341-local-storage-retention-and-cleanup.md
+note: >-
+  保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。
+---
 # 存储占用诊断与优化方案
 
 > 后续策略覆盖（2026-11-12）：本文的“保留灾备副本”“滚动备份”“直接清理 WAL”及“保留 30 份筛选快照”均为历史建议，已废止；当前用户要求本地只保留必要事实单份、不自动备份，筛选仅保留最新报告与 cohort。WAL 可能含未 checkpoint 的已提交事务，绝不可直接删除。当前规则见 `AGENT.MD`，存储事实源见 [系统关系](system-map.md)。
