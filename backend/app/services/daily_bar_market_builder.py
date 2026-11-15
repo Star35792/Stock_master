@@ -217,12 +217,7 @@ class DailyBarMarketBuildService:
         source_counts: dict[tuple[str, date, str], int] = {}
 
         for key, rows in raw_groups.items():
-            if len(rows) < 2:
-                source_counts[key] = len(rows)
-                continue
-
             sorted_rows = sorted(rows, key=lambda row: (row.source_name, row.id))
-            source_counts[key] = len(sorted_rows)
 
             # A bar captured inside its own session is an incomplete day, not a
             # second opinion.  It is already demoted to suspect on provenance
@@ -242,6 +237,13 @@ class DailyBarMarketBuildService:
                 for row in sorted_rows
                 if not is_pre_close_capture(getattr(row, "imported_at", None), row.trade_date)
             ]
+            # ``source_count`` is provenance for the selected market row and
+            # stays schema-compatible at >= 1.  Extra opinions count only when
+            # their latest observation is settled and actually participates in
+            # reconciliation; an intraday snapshot is not a second opinion.
+            source_counts[key] = max(
+                1, len({row.source_name for row in settled_rows})
+            )
             for left, right in combinations(settled_rows, 2):
                 comparison = _compare_candidates(left, right)
                 self.compare_repository.upsert_pair(db, **comparison)

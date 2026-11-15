@@ -97,7 +97,7 @@
 | `turnover_rate` | `numeric(12,6)` | 否 | 换手率，百分比口径 |
 | `amplitude` | `numeric(12,6)` | 否 | 振幅，百分比口径 |
 | `source_name` | `varchar(50)` | 是 | 最终采用的数据源名称 |
-| `source_count` | `integer` | 是 | 参与对账的数据源数量 |
+| `source_count` | `integer` | 是 | `max(1, 该键最新且实际参与结算后对账的唯一来源名称数)`；1 是 schema 保底，盘中快照不增加计数，也不表示已有一个结算后来源 |
 | `quality_score` | `numeric(5,2)` | 是 | 数据质量评分，0-100 |
 | `quality_status` | `varchar(20)` | 是 | `trusted` / `suspect` / `rejected` / `manual_fixed` |
 | `is_suspect` | `boolean` | 是 | 是否可疑 |

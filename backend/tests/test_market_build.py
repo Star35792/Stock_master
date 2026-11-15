@@ -197,6 +197,101 @@ def test_market_build_promotes_consistent_multi_source_candidate() -> None:
     assert db.committed is True
 
 
+def test_source_count_excludes_intraday_observation() -> None:
+    settled = _raw_bar(
+        id=1,
+        source_name="hithink_finance_dump",
+        imported_at=datetime(2026, 7, 17, 18, 0, tzinfo=SHANGHAI),
+    )
+    intraday = _raw_bar(
+        id=2,
+        source_name="hithink_finance",
+        imported_at=datetime(2026, 7, 17, 11, 0, tzinfo=SHANGHAI),
+    )
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    compare_repository = FakeCompareRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([settled, intraday], settled),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        compare_repository=compare_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=FakeIssueRepository(),  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.trusted_count == 1
+    assert market_repository.calls[0]["source_count"] == 1
+    assert compare_repository.calls == []
+
+
+def test_source_count_includes_only_settled_sources() -> None:
+    settled_a = _raw_bar(
+        id=1,
+        source_name="hithink_finance_dump",
+        imported_at=datetime(2026, 7, 17, 18, 0, tzinfo=SHANGHAI),
+    )
+    settled_b = _raw_bar(
+        id=2,
+        source_name="tdx_official",
+        imported_at=datetime(2026, 7, 17, 18, 5, tzinfo=SHANGHAI),
+    )
+    intraday = _raw_bar(
+        id=3,
+        source_name="hithink_finance",
+        imported_at=datetime(2026, 7, 17, 11, 0, tzinfo=SHANGHAI),
+    )
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    compare_repository = FakeCompareRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository(
+            [settled_a, settled_b, intraday], settled_a
+        ),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        compare_repository=compare_repository,  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=FakeIssueRepository(),  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.trusted_count == 1
+    assert market_repository.calls[0]["source_count"] == 2
+    assert len(compare_repository.calls) == 1
+    assert {
+        compare_repository.calls[0]["source_a"],
+        compare_repository.calls[0]["source_b"],
+    } == {"hithink_finance_dump", "tdx_official"}
+
+
+def test_intraday_only_candidate_keeps_source_count_floor_and_is_suspect() -> None:
+    intraday = _raw_bar(
+        id=1,
+        source_name="hithink_finance",
+        imported_at=datetime(2026, 7, 17, 11, 0, tzinfo=SHANGHAI),
+    )
+    db = FakeDb()
+    market_repository = FakeMarketRepository()
+    service = DailyBarMarketBuildService(
+        raw_repository=FakeRawRepository([intraday], intraday),  # type: ignore[arg-type]
+        market_repository=market_repository,  # type: ignore[arg-type]
+        compare_repository=FakeCompareRepository(),  # type: ignore[arg-type]
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+        trading_calendar_repository=FakeTradingCalendarRepository(),  # type: ignore[arg-type]
+        issue_repository=FakeIssueRepository(),  # type: ignore[arg-type]
+    )
+
+    result = service.build_from_raw(db)  # type: ignore[arg-type]
+
+    assert result.suspect_count == 1
+    assert market_repository.calls[0]["source_count"] == 1
+    assert market_repository.calls[0]["quality_status"] == "suspect"
+
+
 def test_market_repository_does_not_overwrite_manual_fix() -> None:
     engine = create_engine("duckdb:///:memory:")
     with engine.begin() as connection:
