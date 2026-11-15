@@ -1,0 +1,59 @@
+{
+  "manifest_version": 1,
+  "artifact_set": "value_investing_reference_evidence_20261110",
+  "manifest_created_at": "2026-11-15T13:08:39+08:00",
+  "artifact_class": "research_evidence",
+  "authority": "non_authoritative",
+  "temporal_status": "frozen_historical",
+  "evidence_level": "research_only",
+  "reference_trade_date": "2026-11-10",
+  "point_in_time_verified": false,
+  "ex_post_research": true,
+  "allowed_consumers": [
+    "human_research_review",
+    "research_card_reproduction",
+    "migration_integrity_validation"
+  ],
+  "prohibited_uses": [
+    "factor_gate",
+    "current_shortlist",
+    "execution",
+    "production_runtime_input"
+  ],
+  "artifacts": [
+    {
+      "path": "deliverables/research/evidence/value-investing/value_investing_observations_20261109.json",
+      "origin_path": "backend/outputs/value_investing_observations_20261109.json",
+      "bytes": 13448,
+      "sha256": "0e7f8bab67cf5ac9e1014314ce694f94d68742381c5bef6f09320898e9025734",
+      "role": "external_research_observations",
+      "captured_at": "2026-11-10T16:46:00+08:00",
+      "observation_count": 18,
+      "origin_commit": "42b4f34681272a1fd67954292c0791eebadb01f6"
+    },
+    {
+      "path": "deliverables/research/evidence/value-investing/value_investing_20261110_reference.json",
+      "origin_path": "backend/outputs/value_investing_20261110_reference.json",
+      "bytes": 16299748,
+      "sha256": "d9284d1d7bf9dfdd625140344cd4c598f12724b3c00a6cc05f38176a8d5a14dd",
+      "role": "frozen_value_screen_reference",
+      "generated_at": "2026-11-11T20:17:55.112212+08:00",
+      "target_trade_date": "2026-11-10",
+      "embedded_snapshot_hash": "a1f1f65b05900975c9cea3d53edfd84c8914bf30092f69229201b9fdf09ec110",
+      "origin_commit": "1c805c109f289b01a829c12504cd1211f97d85fd"
+    }
+  ],
+  "constraints": {
+    "factor_gate_eligible": false,
+    "execution_eligible": false,
+    "authoritative_runtime_source": false,
+    "retention": "single tracked copy; runtime outputs remain ignored"
+  },
+  "limitations": [
+    "These files preserve research evidence and do not certify point-in-time completeness or investment performance.",
+    "The frozen screen was generated after its reference trade date and is an ex-post research artifact, not evidence that its inputs were available before or during that session.",
+    "Batch capture time and repository hashes do not prove each external observation's publication time, first market-visible time, timezone, or revision history.",
+    "External observations are research-card context only and never enter the selection gate.",
+    "The frozen screen is a historical reference snapshot and must not be treated as a current shortlist or investment advice."
+  ]
+}

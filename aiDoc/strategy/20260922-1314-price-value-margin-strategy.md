@@ -539,7 +539,7 @@ CAGR 口径为 `power(last/base, 1/3) - 1`，**基数必须为正**否则为 `NU
 |---|---|---|
 | 阈值依据表（全市场分布） | `python -m scripts.research.measure_value_trap_thresholds` | stdout 指标表（连跌计数、负债率分位数） |
 | 筛选实跑（名单、命中统计、主因表） | `python -m scripts.research.screen_value_investing --output outputs\value_investing_20261109.json` | 同名 JSON + Markdown，含 `snapshot_hash`、`kernel_version`、`reason_counts` |
-| 连接器研究卡 | `python -m scripts.research.capture_value_investing_observations --observations outputs\value_investing_observations_20261109.json --screen outputs\value_investing_20261109.json --output outputs\value_investing_card_20261109.md` | 研究卡 Markdown + JSON |
+| 连接器研究卡 | `python -m scripts.research.capture_value_investing_observations --observations ../deliverables/research/evidence/value-investing/value_investing_observations_20261109.json --screen outputs\value_investing_20261109.json --output outputs\value_investing_card_20261109.md` | 研究卡 Markdown + JSON |
 
 口径定义（阈值表与实跑共用，两处数字因此逐项相同）：
 
@@ -549,7 +549,9 @@ CAGR 口径为 `power(last/base, 1/3) - 1`，**基数必须为正**否则为 `NU
 - **`roe_3y`**：三年累计归母净利 ÷ 三个年报期末股东权益合计均值 ÷ 3（服务 SQL 见 `app/services/value_investing_screen.py`）。
 - **保守锚**：`V_low = min(EPS_norm × PE_p25, BPS × PB_p25)`，分位数取自身历史正值样本、最近秩下取整（内核 `app/strategies/value_investing.py`）。
 
-外部数据（仅研究卡，**永不进闸门**）：NeoData `financial_indicators`（`roe_average`、`revenue_3y_cagr`、`parent_net_profit_3y_cagr`）、`company_profile`、`company_research`；westock `data_consensus` / `data_rating` / `data_report`。观测快照落研究库 `strategy.external_observation`（唯一键 `(symbol, source, observation_type, as_of_date)`），来源文件 `outputs/value_investing_observations_20261109.json`。
+外部数据（仅研究卡，**永不进闸门**）：NeoData `financial_indicators`（`roe_average`、`revenue_3y_cagr`、`parent_net_profit_3y_cagr`）、`company_profile`、`company_research`；westock `data_consensus` / `data_rating` / `data_report`。观测快照落研究库 `strategy.external_observation`（唯一键 `(symbol, source, observation_type, as_of_date)`），来源文件迁入 `deliverables/research/evidence/value-investing/value_investing_observations_20261109.json`。同目录的 `value_investing_20261110_reference.json` 是以 2026-11-10 为目标交易日、于次日生成的事后冻结研究产物：批次采集时间不能证明每条外部观测的发布、首次市场可见或修订时点，因而不具备 PIT 证明，也不是当前名单、投资建议或可执行输入。`manifest.json` 固定两份证据的字节数、SHA-256、捕获时点、原始提交与 research-only 限制。
+
+“当前名单”只能来自筛选 API 或筛选脚本针对**最新完成交易日**新生成的运行报告，并继续受当次可信数据、策略版本和质量闸门约束；不得从 `deliverables/research/evidence/` 读取或恢复。
 
 回归测试：`backend/tests/test_value_investing_trap_gate.py`（连跌 SQL 语义与闸门行为）、`test_value_investing_strategy.py`（注册表与内核）、`test_value_investing_research_card.py`（研究卡装配）。
 

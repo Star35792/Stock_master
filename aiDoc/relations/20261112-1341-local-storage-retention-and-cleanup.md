@@ -50,6 +50,11 @@ cohort 派生，支持 `--dry-run`）。
 
 后续将 `backend/outputs/` 整体列入 `.gitignore`，避免新生成的本地报告再次入库；
 原先已受 Git 跟踪的文件不会因此自动退役，仍须按引用和用途逐个审查。
+2026-11-15 已将两份仍需长期保留的价值研究证据从该运行时目录原位迁入
+`deliverables/research/evidence/value-investing/`，并用 `manifest.json` 绑定字节数、
+SHA-256、用途、时点和 research-only 限制；manifest 同时将其标记为非权威、
+事后冻结、PIT 未证明且禁止被生产运行时、因子闸门、当前名单或执行链消费。
+迁移未复制 16.3 MB 参考快照，旧路径不再保留。
 
 ### 保留边界（执行后核对通过）
 
