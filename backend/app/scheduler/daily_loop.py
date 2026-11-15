@@ -18,6 +18,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.config.data_contracts import (
+    PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+    PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
+)
 from app.config.settings import settings
 from app.database.session import SessionLocal, engine
 from app.lake import CuratedLayer, DataLake
@@ -108,7 +112,7 @@ def run_daily_loop(
     factor_adjust_type: str = "qfq",
     refresh_reference_data: bool = False,
     code_version: str = "local",
-    adjustment_version: str = "v1",
+    adjustment_version: str = PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
     target_date: date | None = None,
     skip_sync: bool = False,
     collect_alternative_data: bool = True,
@@ -292,7 +296,7 @@ def run_daily_loop(
                     )
                 adjustment = AdjustmentBuildService().rebuild_qfq(
                     db,
-                    source_name="hithink_finance_dump",
+                    source_name=PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
                     version=adjustment_version,
                 )
                 db.commit()
@@ -328,7 +332,7 @@ def run_daily_loop(
             try:
                 curated_result = CuratedLayer(DataLake()).build_prices_qfq_from_db(
                     db_path,
-                    factor_source_name="hithink_finance_dump",
+                    factor_source_name=PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
                     factor_version=adjustment_version,
                     connection=warm_con,
                     publish=False,
@@ -388,7 +392,7 @@ def run_daily_loop(
             release_service = ReleaseService()
             market_checksum = _compute_market_qfq_checksum(
                 db,
-                source_name="hithink_finance_dump",
+                source_name=PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
                 version=adjustment_version,
             )
             market_result = _market_qfq_result(db)
@@ -419,11 +423,12 @@ def run_daily_loop(
                     UPDATE market.adjustment_factor
                     SET release_id = :release_id
                     WHERE adjust_type = 'qfq'
-                      AND source_name = 'hithink_finance_dump'
+                      AND source_name = :source_name
                       AND version = :version
                 """),
                 {
                     "release_id": market_release.release_id,
+                    "source_name": PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
                     "version": adjustment_version,
                 },
             )
@@ -535,7 +540,7 @@ def run_daily_loop(
                     db,
                     today,
                     code_version=code_version,
-                    qfq_source_name="hithink_finance_dump",
+                    qfq_source_name=PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
                     qfq_version=adjustment_version,
                 )
                 job.metadata_ = {
@@ -752,8 +757,8 @@ def create_daily_loop_scheduler(
 def _compute_market_qfq_checksum(
     db: Session,
     *,
-    source_name: str = "hithink_finance_dump",
-    version: str = "v1",
+    source_name: str = PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+    version: str = PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
 ) -> str:
     """Hash canonical forward-adjusted rows in deterministic key order.
 
@@ -820,8 +825,8 @@ def _gather_certification_metadata(
     target_date: date,
     *,
     code_version: str,
-    qfq_source_name: str = "hithink_finance_dump",
-    qfq_version: str = "v1",
+    qfq_source_name: str = PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+    qfq_version: str = PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
 ) -> dict:
     """Collect data certification metadata and run publish gate checks.
 

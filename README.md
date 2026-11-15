@@ -131,7 +131,7 @@ curl http://127.0.0.1:8000/health
 - `GET /api/v1/daily-bar-source-compares`
 - `GET /api/v1/manual-corrections`
 - `GET /api/v1/corporate-actions`
-- `GET /api/v1/adjustment-factors`
+- `GET /api/v1/adjustment-factors`（默认 `scope=production`，固定返回可信生产复权因子 `hithink_finance_dump@v1`；审计历史来源、版本或非可信状态须显式使用 `scope=all`）
 
 ### 因子
 

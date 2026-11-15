@@ -202,6 +202,12 @@ import 零网络请求。
 - 任何不带 version 过滤直接读该表的查询（如 `api/routes/adjustment_factors.py`）
   都会读到重复行。
 
+2026-11-15 已收紧只读 API：`GET /api/v1/adjustment-factors` 默认
+`scope=production`，固定使用与 QFQ 构建相同的
+可信 `hithink_finance_dump@v1`；只有显式 `scope=all` 才能审计历史来源、
+版本或非可信质量状态。
+该修复没有删除下列历史行，也没有把它们重新解释为可信生产因子。
+
 ### 5.2 缺陷二：多源对账与数据源注册表休眠
 
 - `_reconcile_sources` 因 `source_name` 过滤永不触发；

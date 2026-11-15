@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.api.routes import (
+    adjustment_factors as adjustment_factors_module,
     approvals as approvals_module,
     backtests as backtests_module,
     daily_bars as daily_bars_module,
@@ -1146,6 +1147,80 @@ def test_adjustment_factors_reject_reversed_date_range() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "start_date must be earlier than or equal to end_date"
+
+
+def test_adjustment_factors_default_to_the_production_contract(monkeypatch) -> None:
+    captured: dict = {}
+
+    def list_adjustment_factors(db, **kwargs):
+        captured.update(kwargs)
+        return {"items": [], "total": 0, "limit": kwargs["limit"], "offset": kwargs["offset"]}
+
+    monkeypatch.setattr(
+        adjustment_factors_module.service,
+        "list_adjustment_factors",
+        list_adjustment_factors,
+    )
+
+    response = client.get("/api/v1/adjustment-factors")
+
+    assert response.status_code == 200
+    assert captured["source_name"] == "hithink_finance_dump"
+    assert captured["version"] == "v1"
+    assert captured["quality_status"] == "trusted"
+
+
+def test_adjustment_factors_all_scope_preserves_history_filters(monkeypatch) -> None:
+    captured: dict = {}
+
+    def list_adjustment_factors(db, **kwargs):
+        captured.update(kwargs)
+        return {"items": [], "total": 0, "limit": kwargs["limit"], "offset": kwargs["offset"]}
+
+    monkeypatch.setattr(
+        adjustment_factors_module.service,
+        "list_adjustment_factors",
+        list_adjustment_factors,
+    )
+
+    response = client.get(
+        "/api/v1/adjustment-factors",
+        params={
+            "scope": "all",
+            "source_name": "daily_loop",
+            "version": "local-test",
+            "quality_status": "suspect",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["source_name"] == "daily_loop"
+    assert captured["version"] == "local-test"
+    assert captured["quality_status"] == "suspect"
+
+
+def test_adjustment_factors_reject_historical_filter_in_production_scope() -> None:
+    response = client.get(
+        "/api/v1/adjustment-factors",
+        params={"source_name": "daily_loop", "version": "local-test"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "historical adjustment-factor source/version/status require scope=all"
+    )
+
+
+def test_adjustment_factors_reject_non_trusted_status_in_production_scope() -> None:
+    response = client.get(
+        "/api/v1/adjustment-factors",
+        params={"quality_status": "suspect"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "historical adjustment-factor source/version/status require scope=all"
+    )
 
 
 def test_trading_calendar_rejects_reversed_date_range() -> None:

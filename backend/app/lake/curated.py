@@ -28,6 +28,10 @@ from uuid import uuid4
 
 import duckdb
 
+from app.config.data_contracts import (
+    PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+    PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
+)
 from app.lake.data_lake import DataLake, _compact_partitions
 from app.lake.qfq import create_qfq_view
 from app.lake.security_type import security_type_case_sql
@@ -144,8 +148,8 @@ class CuratedLayer:
         *,
         daily_table: str = "market.daily_bar",
         trusted_filter: str = "quality_status = 'trusted' AND adjust_type = 'none'",
-        factor_source_name: str = "hithink_finance_dump",
-        factor_version: str | None = "v1",
+        factor_source_name: str = PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+        factor_version: str | None = PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
         connection: duckdb.DuckDBPyConnection | None = None,
         publish: bool = True,
     ) -> CuratedDatasetResult:

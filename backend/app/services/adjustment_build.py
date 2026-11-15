@@ -4,6 +4,11 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.config.data_contracts import (
+    PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+    PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
+)
+
 
 @dataclass(frozen=True)
 class AdjustmentBuildResult:
@@ -18,8 +23,8 @@ class AdjustmentBuildService:
         self,
         db: Session,
         *,
-        source_name: str = "hithink_finance_dump",
-        version: str = "v1",
+        source_name: str = PRODUCTION_ADJUSTMENT_FACTOR_SOURCE,
+        version: str = PRODUCTION_ADJUSTMENT_FACTOR_VERSION,
         qfq_start_date: date | None = None,
         release_id: str | None = None,
     ) -> AdjustmentBuildResult:
