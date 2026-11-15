@@ -193,6 +193,20 @@ curl http://127.0.0.1:8000/health
 - `GET /api/v1/operations/failures/{failure_type}/{failure_id}`
 - `GET /api/v1/operations/failures/{failure_type}/{failure_id}/rerun-plan`
 
+新建任务日志在 `metadata._job_lease` 中绑定本机进程 OS 租约。API 和长期调度器启动时只对“租约锁已释放”的 `running` 记录自动收敛为 `failed`，并固定标记 `completion_status=unknown`；这只证明持有进程已经退出，不表示任务没有产生部分副作用，也不会自动删除或回滚 raw、release、WAL 或研究产物。活锁、未知租约和旧版无租约记录一律保留，不按运行时长或 PID 猜测。占槽恢复只在本进程会话没有待写事务时执行，绝不提前提交调用方业务写入。
+
+运维记录按 `state` 区分：`auto_recoverable`（占位进程已退出、锁空闲，下次启动自动收敛）与 `live_owner`（仍被活锁持有，禁止手工关闭）都不需人工处理；`guard_missing`、`invalid_lease`、`legacy` 属于自动恢复不会触碰的孤儿，需操作人核验后显式收敛。
+
+在 `backend/` 目录先只读列出所有 running 记录及其可关闭方式，再 dry-run，最后显式应用：
+
+```powershell
+.venv\Scripts\python.exe -m scripts.maintenance.reconcile_legacy_running_jobs --list
+.venv\Scripts\python.exe -m scripts.maintenance.reconcile_legacy_running_jobs --job-ids 101 102 --operator "operator-name" --reason "verified prior process exited"
+.venv\Scripts\python.exe -m scripts.maintenance.reconcile_legacy_running_jobs --job-ids 101 102 --operator "operator-name" --reason "verified prior process exited" --apply
+```
+
+对已带租约但槽不可核验（`guard_missing`/`invalid_lease`）的记录，额外加 `--confirm-owner-exited`；活锁或锁空闲可自动恢复的记录即便加了该参数仍会被拒绝，避免与运行中的 owner 或启动扫描争抢。
+
 ### 前端页面
 
 前端路由定义在 `frontend/src/router.ts`，已挂载页面路径：

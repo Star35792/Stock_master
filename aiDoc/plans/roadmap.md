@@ -510,6 +510,7 @@ Stock Master 的优先级是：先建立可复现、可审计、可回放的量�
 - 因子看板：覆盖率、分布、IC、换手。
 - 回测看板：净值、回撤、持仓、归因。
 - 同步和任务看板：最近运行、失败原因、重跑入口。
+- 新任务日志已绑定有界的本机进程 OS 租约：owner 进程退出后，下一次 API/调度启动将可验证的孤儿 `running` 收敛为 `failed + completion_status=unknown`；活锁保守保留、永不手工关闭，其余不可自动恢复的记录（旧版无租约、缺 guard、租约元数据非法）由 `reconcile_legacy_running_jobs --list` 分类后按精确 ID dry-run/显式收敛。恢复不推断任务副作用已经回滚。
 - `/api/v1/operations/overview` 聚合质量问题、任务日志、因子运行、回测运行和模拟盘状态。
 - `/api/v1/operations/alerts` 汇总当前告警候选，并返回触发规则和建议人工动作；它仍只是只读运维提示，不触发通知、处置或重跑。
 - `/api/v1/operations/failures` 按分类返回最近 N 条未解决质量问题、失败任务、失败因子运行、失败回测和被拒模拟盘订单，并提供各分类 `total`、`limit` 和 `has_more`，用于定位数据源、任务、证券、日期、错误原因和风控拒单规则。

@@ -400,6 +400,8 @@ index(severity)
 | `metadata` | `jsonb` | 否 | 额外信息 |
 | `created_at` | `timestamptz` | 是 | 创建时间 |
 
+`metadata` 中的 `_job_lease` 是基础设施保留键，业务写入使用它会被 repository 拒绝：新建 `running` 记录必须带 `_job_lease.version=process_slot_v1`，`finish` 不允许改写已写入的租约。死亡判定、自动收敛范围和操作人显式出口见 [系统关系](../relations/system-map.md) 的工具边界小节。
+
 ## 13. metadata.data_source
 
 ### 作用
