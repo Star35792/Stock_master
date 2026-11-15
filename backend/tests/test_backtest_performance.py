@@ -51,7 +51,7 @@ def test_performance_analyzer_calculates_metrics_and_exposures() -> None:
 
     assert report.total_return == Decimal("0.2")
     assert report.maximum_drawdown == Decimal("-0.1")
-    assert report.daily_win_rate == Decimal(2) / Decimal(3)
+    assert report.daily_win_rate == Decimal(2) / Decimal(4)
     assert report.profit_loss_ratio is not None
     assert report.turnover_rate == Decimal("100") / Decimal("107.25")
     assert report.symbol_contributions == {"AAA": Decimal("0.2")}
@@ -83,3 +83,15 @@ def test_performance_analyzer_does_not_reuse_stale_position_after_exit() -> None
 
     assert report.symbol_contributions == {"AAA": Decimal("0.2")}
     assert report.industry_exposure == {}
+
+
+def test_first_day_loss_counts_in_drawdown_and_returns() -> None:
+    report = BacktestPerformanceAnalyzer().analyze(
+        run=SimpleNamespace(initial_cash=Decimal("100")),
+        equity_rows=[_equity(date(2026, 7, 1), "90")],
+        trade_rows=[], position_rows=[], industries={},
+    )
+    assert report.total_return == Decimal("-0.1")
+    assert report.maximum_drawdown == Decimal("-0.1")
+    assert report.daily_win_rate == 0
+    assert report.annualized_return < 0

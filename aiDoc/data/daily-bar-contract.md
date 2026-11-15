@@ -173,11 +173,12 @@ Python 清洗和校验阶段如涉及精确比较，应使用 `Decimal` 或明�
 4. `open`、`high`、`low`、`close` 非空且大于 0。
 5. `high >= open`、`high >= close`、`high >= low`。
 6. `low <= open`、`low <= close`、`low <= high`。
-7. `volume` 和 `amount` 不得为负；停牌日无 bar，因此不存在“停牌日成交量为零”的 market 记录。
+7. `volume` 和 `amount` 不得为负；任一字段缺失，或一项为零而另一项为正，只能进入 `suspect`。两项同时为零目前不自动判错（现有可信样本仅见于指数），stock/ETF 是否需要降级须以独立来源和交易状态证据另行定规则。停牌日无 bar，因此不存在“停牌日成交量为零”的 market 记录。
 8. 若 `pre_close` 存在，则 `change_amount` 和 `pct_change` 应可解释。
 9. 若存在多源冲突且超过阈值，不应自动标记为 `trusted`。
 10. `is_suspended` 必须为 `false`；任何来源标记为停牌的 raw 记录不得直接进入 market，应导入 `market.security_status_event` 并生成质量问题。
 11. **采集时点**：所选 raw 行的 `imported_at` 必须不早于该 bar 自身交易日的 `15:30 Asia/Shanghai`，否则只能记为 `suspect`（`INTRADAY_SNAPSHOT` + 每交易日一行 `INTRADAY_SNAPSHOT_BATCH`）。盘中快照数值自洽，只有出处能证伪它；缺失 `imported_at` 不构成盘中采集的证据，不降级。详见 `aiDoc/relations/20261111-0300-intraday-snapshot-guard.md`。
+12. 同一业务键的最新 raw 修订若命中停牌、非法 OHLC、负量额等硬拒绝，已有非人工修复 market 行必须降为 `rejected`、`is_suspect=true`、质量分 0，保留旧价格和 `selected_raw_id` 供审计但立即退出可信消费；不得因旧版本曾经可信而继续供因子或回测读取。`manual_fixed` 仍由独立人工审计保护。大包快速路径必须把全部硬拒绝键交回公共质量构建，不能只靠插入 SQL 过滤后留下旧 trusted 行。
 
 ## 9. raw 与 market 的字段差异
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from hashlib import sha256
@@ -12,6 +13,8 @@ from uuid import uuid4
 import duckdb
 
 from app.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -312,23 +315,67 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _compact_partitions(root: Path, batch_size: int = 30) -> None:
+def _compact_partitions(root: Path) -> None:
     for partition in sorted({path.parent for path in root.rglob("*.parquet")}):
+        if any(part.startswith(".") for part in partition.relative_to(root).parts):
+            continue
         files = list(partition.glob("*.parquet"))
         if len(files) <= 1:
             continue
-        temporary = root.parent / f".compact-{uuid4().hex}.parquet"
-        connection = duckdb.connect()
+        if any(not path.is_file() or path.suffix != ".parquet" for path in partition.iterdir()):
+            raise ValueError(f"partition contains non-Parquet content: {partition}")
+        token = uuid4().hex
+        staged = partition.parent / f".{partition.name}.compact-{token}"
+        retired = partition.parent / f".{partition.name}.replacing-{token}"
+        staged.mkdir()
+        temporary = staged / "data.parquet"
+        target_sql = temporary.as_posix().replace("'", "''")
         try:
-            connection.execute(
-                "COPY (SELECT * FROM read_parquet(?)) TO ? "
-                "(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)",
-                [str(temporary), str(partition / "*.parquet")],
-            )
-        finally:
-            connection.close()
-        # Delete files in small batches to avoid triggering bulk-delete guards.
-        for i in range(0, len(files), batch_size):
-            for path in files[i : i + batch_size]:
-                path.unlink()
-        temporary.replace(partition / "data.parquet")
+            connection = duckdb.connect()
+            try:
+                connection.execute(
+                    "COPY (SELECT * FROM read_parquet(?, hive_partitioning=false)) "
+                    f"TO '{target_sql}' "
+                    "(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)",
+                    [str(partition / "*.parquet")],
+                )
+                source_count = connection.execute(
+                    "SELECT count(*) FROM read_parquet(?, hive_partitioning=false)",
+                    [str(partition / "*.parquet")],
+                ).fetchone()[0]
+                compacted_count = connection.execute(
+                    "SELECT count(*) FROM read_parquet(?)", [str(temporary)]
+                ).fetchone()[0]
+                if source_count != compacted_count:
+                    raise ValueError(f"partition compaction row count changed: {partition}")
+            finally:
+                connection.close()
+        except Exception:
+            try:
+                rmtree(staged)
+            except OSError:
+                logger.warning(
+                    "Could not remove failed partition staging: %s", staged, exc_info=True
+                )
+            raise
+        try:
+            partition.rename(retired)
+        except Exception:
+            try:
+                rmtree(staged)
+            except OSError:
+                logger.warning("Could not remove unpublished partition: %s", staged, exc_info=True)
+            raise
+        try:
+            staged.rename(partition)
+        except Exception:
+            retired.rename(partition)
+            try:
+                rmtree(staged)
+            except OSError:
+                logger.warning("Could not remove unpublished partition: %s", staged, exc_info=True)
+            raise
+        try:
+            rmtree(retired)
+        except OSError:
+            logger.warning("Could not remove retired partition: %s", retired, exc_info=True)

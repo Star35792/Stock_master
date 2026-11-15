@@ -269,7 +269,12 @@ V1 稳定后已经扩展出的能力：
 存储已从 PostgreSQL 单库切换到 DuckDB 分层湖（clean cut，不搬运历史分析数据）。当前实际形态：
 
 - 主 DuckDB（`data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor`、`portfolio/risk -> trade` 与控制面（物理表如 `metadata.job_log`，历史逻辑域称 `system`）。`strategy` 回测与训练产物存独立 `data/research.duckdb`，手工真实持仓账本存 SQLite `data/positions.db`；估值仍消费主库可信行情。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
-- `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release）。`curated/prices_qfq` 已接入 `daily_loop`：置真 `factor_reads_curated` 且 `adjust_type='qfq'` 时，先从 warm history + control hot window 构建临时数据集，因子通过绑定该临时路径的 `CuratedDailyBarReader` 计算，发布闸门通过后才原子切换正式目录并激活 release；关闭开关时仍走 ORM。其余 curated 数据集仍由离线脚本驱动。
+- `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release）。`curated/prices_qfq` 已接入 `daily_loop`：置真 `factor_reads_curated` 且 `adjust_type='qfq'` 时，先从 warm history + control hot window 构建临时数据集，因子通过绑定该临时路径的 `CuratedDailyBarReader` 计算。发布闸门通过后先切换正式目录并暂留旧树，两条 release 激活事务提交成功后才回收旧树；激活或提交失败则回滚数据库并恢复旧树，新树退回暂存供诊断。关闭开关时仍走 ORM。其余 curated 数据集仍由离线脚本驱动。
+- 容量边界：本机只保留各职责的必要事实，不自动复制整库。`curated/prices_qfq` 的旧物化目录仅在发布切换期间临时存在，发布失败恢复旧目录，发布成功删除本次明确替换的旧目录。普通构建不按名称或年龄自动清理历史暂存、替换或备份目录；清理前必须核验活动任务、当前读路径、manifest/行数和研究审计引用。温层 `exported` 的有效父链、增量层和被研究/审计引用的 release 必须保留，不能按时间直接清空。
+- 持续写入边界：HiThink API 的回看窗口和公司行为 dump 重跑按同源业务键与内容版本幂等写入 `raw`，旧值修订仍新增版本；可信日线只有字段或选中来源变化时才更新。离线 Parquet 分区压缩经行数核验后切换，旧文件只在成功发布后回收。主库必要的新交易日与有效温层 delta 仍会随事实增长，不能用按年龄删 raw 或有效 release 伪造容量稳定。
+- `export_warm_layer.py` 逐表校验失败即停，只在所有选定表通过后原子写可消费的 release summary；失败时尝试删除本次未发布目录，重用已存在 tag 会直接拒绝，不覆盖既有事实。硬中断或删除受阻留下的无效目录需后续核对清理；旧版本清理仍需检查 active、父链及研究引用。
+- 东财研究估值历史采集同样拒绝覆盖已发布的 release tag，发布前检查成功父链和深度。当前研究温层是估值历史明细的权威数据；该流程的 `raw.vendor_snapshot` 仅留页哈希、行数及抓取时间，不足以从 raw 重建已删除的 Parquet 明细。
+- 估值筛选全量 JSON 只供最新工作台与当前跟踪使用；每次发布保留最新报告和冻结 cohort，旧任务日志保留摘要及快照哈希，清除旧文件引用后回收旧 JSON。历史全量报告无法精确回看是用户接受的容量取舍；原始供应商证据仍在 `raw`，此清理不改变 PIT/质量状态。
 - `libs/hithink_sdk/marketdb` 是独立 DuckDB SDK/toolkit，适合 notebook、离线研究和 HiThink dump 使用，不直接等同于后端 `market` 可信层。
 
 分层存储最初决策见 `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`；当前还包含 [SQLite 账本例外](20261023-1925-position-ledger-sqlite.md) 与 [独立研究库](20261024-1427-research-database-split.md)，不再以早期“纯单库、无 SQLite”描述全部存储。`curated/prices_qfq` 已接入 `daily_loop`（`factor_reads_curated` 开关），`fundamentals_pit`、factor release 与完整 Parquet release 发布/校验仍属后续切片。
@@ -292,7 +297,8 @@ V1 稳定后已经扩展出的能力：
 
 API 启动后的日线维护由 `scheduler/auto_data_sync.py` 的后台线程执行，调用
 `services/auto_data_sync.py` 编排参考数据刷新、HiThink dump 幂等导入和可信日线构建。
-批量日线构建在已存在通达信独立 raw 或历史冲突的日期会再次执行通用多源对账；
+全量 dump 的集合式 market 构建只负责可直接判定的基础行；存在第二来源、量额缺失或一零一正、停牌/非法 OHLC/负量额等硬拒绝、价格连续性/极端涨幅警告、以及 raw 早于自身交易日 15:30 上海时间采集的日期，必须在同一事务提交前回到公共质量与对账服务，保证批量和逐行路径产生相同的可信状态及问题证据。近期 QFQ 补采在下载前分页生成分类计划，只自动处理确认缺行和量额不完整；状态未知、上市日未知、状态冲突与其他 suspect 保持未解决，部分结果不得记为完整成功。
+批量日线构建在存在任一独立 raw 或历史冲突的日期会再次执行通用多源对账；
 真实冲突使已有非人工修复的 market 行降为 `suspect`，保留数值和 raw 血缘，
 不再提供给可信读取。通达信目前承担独立对账，不承担主源接口失败时的自动切换。
 首次使用历史包建立处理基线，之后按成功任务水位与近期包实际窗口判断增量或历史回补，

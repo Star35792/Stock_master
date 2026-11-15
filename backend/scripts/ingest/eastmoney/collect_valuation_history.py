@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import re
 import tempfile
 from datetime import date, datetime
 from pathlib import Path
@@ -26,7 +26,7 @@ from pathlib import Path
 from app.database.session import SessionLocal, initialize_database
 from app.models.raw import RawVendorSnapshot
 from app.repositories.raw import RawDailyBarImportRepository
-from app.repositories.warm_layer import WarmLayerStore
+from app.repositories.warm_layer import _MAX_RELEASE_DEPTH, WarmLayerStore
 from app.services.valuation_history_collection import (
     DATASET,
     PAGE_SIZE,
@@ -37,6 +37,8 @@ from app.services.valuation_history_collection import (
     now_iso,
 )
 from app.utils.discard import discard_directory
+
+_RELEASE_TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 
 
 def _release_tag(start_date: date, end_date: date) -> str:
@@ -106,8 +108,19 @@ def main() -> int:
     if base_tag is None:
         raise SystemExit("no warm-layer release available to inherit from")
     release_tag = args.release_tag or _release_tag(args.start_date, args.end_date)
+    if not _RELEASE_TAG.fullmatch(base_tag) or base_tag in {".", ".."}:
+        raise SystemExit(f"invalid parent release tag: {base_tag}")
+    if not _RELEASE_TAG.fullmatch(release_tag) or release_tag in {".", ".."}:
+        raise SystemExit(f"invalid release tag: {release_tag}")
+    if not store._release_is_complete(base_tag):
+        raise SystemExit(f"parent release is incomplete: {base_tag}")
+    if len(store.release_lineage(base_tag)) >= _MAX_RELEASE_DEPTH:
+        raise SystemExit("warm release lineage is at capacity; publish a verified snapshot first")
 
     warm_root = store.warm_root
+    published = warm_root / "exported" / release_tag
+    if published.exists():
+        raise SystemExit(f"release already exists; refusing to overwrite: {published}")
     staging = warm_root / "staging" / release_tag
     pages_dir = staging / "_pages"
     if staging.exists() and not args.resume:
@@ -359,8 +372,8 @@ def _run_sweep(
     # ever sees a release whose summary reports all_ok.
     published = warm_root / "exported" / release_tag
     if published.exists():
-        discard_directory(published, trash_root=warm_root / "exported" / ".trash")
-    os.replace(staging, published)
+        raise FileExistsError(f"release already exists; refusing to overwrite: {published}")
+    staging.rename(published)
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

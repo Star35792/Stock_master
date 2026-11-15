@@ -113,6 +113,9 @@ class BacktestPerformanceRead(BaseModel):
 class BacktestBenchmarkRead(BaseModel):
     run_id: int
     benchmark: str
+    input_source: Literal["run_snapshot", "current_market_unversioned"] = (
+        "current_market_unversioned"
+    )
     strategy_total_return: Decimal
     benchmark_total_return: Decimal
     excess_return: Decimal
@@ -209,7 +212,9 @@ class FactorSelectionBacktestRequest(BaseModel):
     commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
     slippage_bps: Decimal = Field(default=Decimal("2"), ge=0)
     lot_size: int = Field(default=100, gt=0)
-    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = "linear_commission_v1"
+    fee_model_version: Literal[
+        "linear_commission_v1", "a_share_cost_v1", "a_share_cost_v2"
+    ] = "linear_commission_v1"
     min_commission: Decimal | None = Field(default=None, ge=0)
     sell_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
@@ -390,7 +395,9 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
     commission_rate: Decimal = Field(default=Decimal("0.0003"), ge=0)
     slippage_bps: Decimal = Field(default=Decimal("2"), ge=0)
     lot_size: int = Field(default=100, gt=0)
-    fee_model_version: Literal["linear_commission_v1", "a_share_cost_v1"] = "linear_commission_v1"
+    fee_model_version: Literal[
+        "linear_commission_v1", "a_share_cost_v1", "a_share_cost_v2"
+    ] = "linear_commission_v1"
     min_commission: Decimal | None = Field(default=None, ge=0)
     sell_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)

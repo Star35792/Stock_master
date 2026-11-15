@@ -236,6 +236,25 @@ class PriceValueScreenRepository:
             .limit(1)
         )
 
+    def retire_screen_artifact_references(self, db: Session, *, keep_job_id: int) -> int:
+        """Keep historical screen summaries without dangling artifact paths."""
+        retired = 0
+        for job in db.scalars(
+            select(JobLog).where(
+                JobLog.job_name == "price_value_screen",
+                JobLog.id != keep_job_id,
+            )
+        ):
+            metadata = dict(job.metadata_ or {})
+            if not (metadata.get("artifact_name") or metadata.get("cohort_name")):
+                continue
+            metadata.pop("artifact_name", None)
+            metadata.pop("cohort_name", None)
+            metadata["artifact_pruned"] = True
+            job.metadata_ = metadata
+            retired += 1
+        return retired
+
     def recent_screen_jobs(self, db: Session, *, limit: int = 20) -> list[JobLog]:
         return list(
             db.scalars(

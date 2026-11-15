@@ -18,8 +18,8 @@
 
 本脚本只做两件事
 ----------------
-1. 把待删除的行导出成 Parquet 备份（可离线复查）；
-2. 删除它们。
+1. 报告待删除的行数；
+2. 删除它们；只有显式指定 ``--backup`` 才导出副本。
 
 删除后必须重算，否则因子池会缺成员。重算命令见文件末尾的说明。
 ``--dry-run`` 只报告影响范围。
@@ -59,7 +59,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--backup",
-        help="parquet path for the removed rows (default: data/backups/…)",
+        help="optional parquet export path for the removed rows",
     )
     parser.add_argument("--db", help="override the control-plane database path")
     args = parser.parse_args()
@@ -72,16 +72,14 @@ def main() -> int:
     else:
         bind = engine
 
-    backup_path = Path(
-        args.backup
-        or Path("data") / "backups" / "industry_factor_contamination_20261111.parquet"
-    )
+    backup_path = Path(args.backup) if args.backup else None
 
     names = ", ".join(f"'{name}'" for name in CONTAMINATED_FACTORS)
     print("=== 清除被污染的行业因子值 ===")
     print(f"数据库  : {db_path}")
     print(f"因子    : {', '.join(CONTAMINATED_FACTORS)}")
-    print(f"备份    : {backup_path}")
+    if backup_path:
+        print(f"显式导出: {backup_path}")
 
     with Session(bind) as db:
         before = db.execute(
@@ -99,15 +97,16 @@ def main() -> int:
             print("\n--dry-run：未做任何修改")
             return 0
 
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        db.execute(
-            text(
-                "COPY (SELECT * FROM factor.factor_value "
-                f"WHERE factor_name IN ({names})) "
-                f"TO '{backup_path.as_posix()}' (FORMAT PARQUET)"
+        if backup_path:
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            db.execute(
+                text(
+                    "COPY (SELECT * FROM factor.factor_value "
+                    f"WHERE factor_name IN ({names})) "
+                    f"TO '{backup_path.as_posix()}' (FORMAT PARQUET)"
+                )
             )
-        )
-        print(f"\n备份已写入: {backup_path}")
+            print(f"\n显式导出已写入: {backup_path}")
 
         result = db.execute(
             text(

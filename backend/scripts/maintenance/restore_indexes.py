@@ -91,7 +91,17 @@ def _columns_from_sql(sql: str | None) -> tuple[str, ...] | None:
 
 
 def declared_indexes() -> list[IndexSpec]:
-    """从 ORM 元数据读出全部声明的索引（权威来源）。"""
+    """从 ORM 元数据读出全部声明的索引（权威来源）。
+
+    唯一约束也要收进来。  SQLAlchemy 把 ``UniqueConstraint`` 放在
+    ``table.constraints`` 里，而不是 ``table.indexes``；DuckDB 又只在
+    ``CREATE TABLE ... UNIQUE`` 时才把约束物化成索引，于是每次 CTAS 重建
+    都会把它丢掉。  只读 ``table.indexes`` 会漏掉全部 22 个唯一约束，
+    ``ON CONFLICT`` 的去重保证随之静默失效。
+
+    两类声明在数据库里都表现为唯一索引，因此可以统一按「同表 + 同列组合
+    + 同唯一性」判定是否已存在。
+    """
 
     specs: list[IndexSpec] = []
     for table_name, table in Base.metadata.tables.items():
@@ -102,6 +112,20 @@ def declared_indexes() -> list[IndexSpec]:
                     name=index.name,
                     unique=bool(index.unique),
                     columns=tuple(column.name for column in index.columns),
+                )
+            )
+        for constraint in table.constraints:
+            if type(constraint).__name__ != "UniqueConstraint":
+                continue
+            columns = tuple(constraint.columns.keys())
+            if not columns:
+                continue
+            specs.append(
+                IndexSpec(
+                    table=table_name,
+                    name=constraint.name or f"uq_{table_name}_{'_'.join(columns)}",
+                    unique=True,
+                    columns=columns,
                 )
             )
     return sorted(specs, key=lambda spec: (spec.table, spec.name))

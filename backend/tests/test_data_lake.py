@@ -2,8 +2,10 @@ from datetime import date
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from app.lake import DataLake
+from app.lake.data_lake import _compact_partitions
 
 
 def _daily_source(path) -> None:
@@ -83,3 +85,67 @@ def test_data_lake_prunes_old_generated_versions(tmp_path) -> None:
     assert not Path(first.path).exists()
     assert Path(second.path).exists()
     assert lake.latest("daily_bar").release == "second"
+
+
+def test_partition_compaction_publishes_verified_file_before_reclaim(tmp_path) -> None:
+    root = tmp_path / "lake"
+    partition = root / "trade_year=2026" / "trade_month=7"
+    partition.mkdir(parents=True)
+    connection = duckdb.connect()
+    try:
+        for value in (1, 2):
+            target_sql = (partition / f"part-{value}.parquet").as_posix().replace("'", "''")
+            connection.execute(
+                f"COPY (SELECT ?::INTEGER AS id) TO '{target_sql}' (FORMAT PARQUET)",
+                [value],
+            )
+    finally:
+        connection.close()
+
+    _compact_partitions(root)
+
+    assert [path.name for path in partition.iterdir()] == ["data.parquet"]
+    connection = duckdb.connect()
+    try:
+        assert connection.execute(
+            "SELECT id FROM read_parquet(?) ORDER BY id",
+            [str(partition / "data.parquet")],
+        ).fetchall() == [(1,), (2,)]
+    finally:
+        connection.close()
+    assert not list(root.rglob("*.replacing-*"))
+
+
+def test_partition_compaction_restores_originals_when_publish_fails(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "lake"
+    partition = root / "trade_year=2026" / "trade_month=7"
+    partition.mkdir(parents=True)
+    connection = duckdb.connect()
+    try:
+        for value in (1, 2):
+            target_sql = (partition / f"part-{value}.parquet").as_posix().replace("'", "''")
+            connection.execute(
+                f"COPY (SELECT {value} AS id) TO '{target_sql}' (FORMAT PARQUET)"
+            )
+    finally:
+        connection.close()
+
+    original_rename = Path.rename
+
+    def fail_staged_publish(self: Path, target: Path) -> Path:
+        if ".compact-" in self.name:
+            raise OSError("simulated publish failure")
+        return original_rename(self, target)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(Path, "rename", fail_staged_publish)
+        with pytest.raises(OSError, match="simulated publish failure"):
+            _compact_partitions(root)
+
+    assert sorted(path.name for path in partition.glob("*.parquet")) == [
+        "part-1.parquet", "part-2.parquet"
+    ]
+    assert not list(root.rglob("*.compact-*"))
+    assert not list(root.rglob("*.replacing-*"))

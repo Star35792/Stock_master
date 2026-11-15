@@ -65,20 +65,35 @@ class BacktestQueryService:
         equity_dates = [row.trade_date for row in equities]
         if equity_dates != sorted(set(equity_dates)):
             raise ValueError("strategy equity dates are invalid for benchmark comparison")
-        bars = self.daily_bar_repository.list_by_symbol(
-            db,
-            symbol=benchmark.upper(),
-            adjust_type=run.parameters.get("adjust_type", "qfq"),
-            start_date=equity_dates[0],
-            end_date=equity_dates[-1],
-            quality_status="trusted",
-            limit=5000,
-            offset=0,
-        )[0]
-        if [bar.trade_date for bar in bars] != equity_dates:
-            raise ValueError("trusted benchmark dates do not cover strategy equity dates")
-        first_close = bars[0].close
-        last_close = bars[-1].close
+        snapshot = run.parameters.get("benchmark_snapshot")
+        if snapshot is not None:
+            if snapshot.get("status") != "verified":
+                raise ValueError(snapshot.get("reason", "benchmark snapshot unavailable"))
+            if (
+                snapshot.get("start_date") != equity_dates[0].isoformat()
+                or snapshot.get("end_date") != equity_dates[-1].isoformat()
+                or snapshot.get("date_count") != len(equity_dates)
+            ):
+                raise ValueError("benchmark snapshot does not match strategy equity dates")
+            first_close = Decimal(snapshot["first_close"])
+            last_close = Decimal(snapshot["last_close"])
+            input_source = "run_snapshot"
+        else:
+            bars = self.daily_bar_repository.list_by_symbol(
+                db,
+                symbol=benchmark.upper(),
+                adjust_type=run.parameters.get("adjust_type", "qfq"),
+                start_date=equity_dates[0],
+                end_date=equity_dates[-1],
+                quality_status="trusted",
+                limit=5000,
+                offset=0,
+            )[0]
+            if [bar.trade_date for bar in bars] != equity_dates:
+                raise ValueError("trusted benchmark dates do not cover strategy equity dates")
+            first_close = bars[0].close
+            last_close = bars[-1].close
+            input_source = "current_market_unversioned"
         if first_close <= 0 or equities[0].total_equity <= 0:
             raise ValueError("benchmark comparison requires positive starting values")
         benchmark_return = last_close / first_close - Decimal(1)
@@ -89,14 +104,15 @@ class BacktestQueryService:
         return BacktestBenchmarkRead(
             run_id=run.id,
             benchmark=benchmark.upper(),
+            input_source=input_source,
             strategy_total_return=strategy_return,
             benchmark_total_return=benchmark_return,
             excess_return=strategy_return - benchmark_return,
             strategy_annualized_return=strategy_annualized,
             benchmark_annualized_return=benchmark_annualized,
             excess_annualized_return=strategy_annualized - benchmark_annualized,
-            start_date=bars[0].trade_date,
-            end_date=bars[-1].trade_date,
+            start_date=equity_dates[0],
+            end_date=equity_dates[-1],
         )
 
     @staticmethod

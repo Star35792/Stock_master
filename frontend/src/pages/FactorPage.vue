@@ -167,13 +167,13 @@ function createBacktestPayload(factorSpecs: FactorScoreSpecInput[]): FactorSelec
     commission_rate: "0.0003",
     slippage_bps: "2",
     lot_size: 100,
-    fee_model_version: "a_share_cost_v1",
+    fee_model_version: "a_share_cost_v2",
     min_commission: "5",
-    sell_stamp_duty_rate: "0.0005",
+    sell_stamp_duty_rate: null,
     transfer_fee_rate: "0.00001",
     exchange_fee_rate: "0.0000487",
-    code_version: "workbench",
-    data_version: "workbench",
+    code_version: "auto",
+    data_version: "auto",
     validation_mode: "none",
   };
 }

@@ -63,3 +63,6 @@ combine-as-imports = true
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-p no:cacheprovider"
+markers = [
+    "production_data: read-only audits against an explicitly selected production database",
+]

@@ -1,8 +1,0 @@
-{
-  "stage": "sync",
-  "started_at": "2026-10-29T00:47:51.236083-07:00",
-  "status": "failed",
-  "error_type": "HithinkFinanceError",
-  "error": "HiThink network error: [WinError 10013] 以一种访问权限不允许的方式做了一个访问套接字的尝试。",
-  "finished_at": "2026-10-29T00:47:52.450122-07:00"
-}

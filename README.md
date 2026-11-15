@@ -89,7 +89,7 @@ npm run dev
 回测详情、利润状态、基准比较及回测失败重跑计划的产物读取使用独立研究库；研究忙时沿用 409。组合页“复制回测目标权重”使用期末总权益作为零现仓预算，不复制历史实际数量。通用日频回测对持仓证券开市日缺可信行情返回明确错误，不静默填价；历史运行保持不变。
 
 - 检查命令唯一维护在 `scripts/ci_check.py`，本地和 `.github/workflows/ci.yml` 共用。
-- 后端对 `app/`、`tests/`、`backend/scripts/` 和统一检查脚本执行 Ruff，再运行一次完整 pytest，自动包含 `tests/` 下的全部测试。前端执行 package.json 中已配置的 `test` 脚本（未配置则跳过），再执行类型检查/构建；任一步失败立即返回非零状态。
+- 后端对 `app/`、`tests/`、`backend/scripts/` 和统一检查脚本执行 Ruff，再运行一次完整 pytest，自动收集 `tests/` 下的测试。标记为 `production_data` 的只读生产数据审计默认跳过，避免 CI 或本地单测隐式读取 `data/stock_master.duckdb`；显式设置 `RUN_PRODUCTION_DATA_AUDIT=1` 后单独运行，数据库路径可用 `PRODUCTION_CONTROL_PLANE_PATH` 指定，此时路径不存在或数据库无法只读打开会直接失败而不是静默跳过。前端执行 package.json 中已配置的 `test` 脚本（未配置则跳过），再执行类型检查/构建；任一步失败立即返回非零状态。
 - 从仓库根目录执行（Windows、Linux、macOS 通用）：
 
   ```powershell
@@ -152,7 +152,7 @@ curl http://127.0.0.1:8000/health
 - `POST /api/v1/strategy-research/rolling-windows`
 - `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。可选 `quantile_backtest` 在每个测试窗内做分层回测。返回 `RollingBacktestResult`：各窗 `windows` + 跨窗拼接的 `combined` 组合净收益曲线（重叠窗 fail-closed 拒绝拼接、各窗仍独立可用）+ 非可交易声明）
 - `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源。可选 `quantile_backtest`：`split_factor_name/version` + `n_layers`(2–20) + `max_assets_per_layer` 按 split 因子在决策日横截面分桶；当前仅接受 `weighting_mode=equal_weight_fully_invested`，其他模式 fail-fast，逐桶等权多头跑净收益曲线与 top–bottom 统计收益差；换层以 `explicit_zero_exit_v2` 显式退出旧成员，分层分支独立读取并双快照校验全量证券行情，结果内嵌主运行 `parameters.quantile_backtest` / `quantile_data_snapshot` 并随响应返回 `quantile`）
-- `POST /api/v1/strategy-research/factor-selection/backtests/batch`
+- `POST /api/v1/strategy-research/factor-selection/backtests/batch`（单项成功即提交独立研究库，失败项回滚后继续；`code_version=auto` 由服务端代码摘要解析，`data_version=auto` 在运行成功后由实际消费的行情、因子、基准摘要解析。工作台默认使用 `a_share_cost_v2`，股票印花税可按成交日期分段，ETF 不套用股票税；旧 `v1` 合同保留）
 - `POST /api/v1/strategy-research/factor-selection/backtests/preflight`（与单次因子选股回测使用同一请求体，只读预演因子、调仓日、可信未复权行情、公司行为及日频引擎；返回检查时间、输入 SHA-256、`runnable_now`、`evidence_qualified` 与逐项原因。预检不创建研究运行，正式运行仍重新校验；当前不覆盖 rolling 与分层附加结果）
 - 价格价值研究：`POST /api/v1/strategy-research/price-value/evaluate`
 - 价格价值假设回测：`POST /api/v1/strategy-research/price-value/backtests`、`GET /api/v1/strategy-research/price-value/backtests/{run_id}`
@@ -161,13 +161,13 @@ curl http://127.0.0.1:8000/health
 - 内置价值投资选股：`POST /api/v1/strategy-research/value-investing/screen`（只读；按登记在案的锁定安全边际 30%、3 年年化 ROE 质地闸门、价值陷阱闸门（4 年年报窗口的营收/净利连跌年数、负债率 3 年变化）与成长路径（营收/净利 3 年 CAGR），跑准入 → 质量 → 价值 → 安全边际四层漏斗，输出达标池、优先研究名单、企业质地体检、价值陷阱闸门命中统计与「仅价格闸门」对照，不产生权重或订单）
   - 闸门语义：**未知即阻断、已知不合格即排除**——价值陷阱命中（连跌 ≥ 2 年或负债率上行 > 10pp）判 `excluded`，趋势窗口不足 4 期判 `blocked`。成长路径只替代 ROE 质地闸门，**绝不替代价格闸门**；**陷阱闸门优先于成长路径**（营收涨而利润跌、杠杆上升是带好标题的陷阱，不是成长故事）。**DCF 不进闸门**（对现金流与折现率假设敏感），估值锚（历史倍数保守锚，相对自身历史倍数、不是内在价值）用盈利锚与净资产锚取较小者，绝对估值由只读 FCFE 情景研究承担。
   - 显式 `current_research_catchup` 模式可补采最新完整交易日的研究观察，报告可选返回 `observation_mode`、`price_as_of`、`financial_as_of`、`analysis_at`、`observed_at`。页面分别展示行情日期、财务日期、真实分析与采集时刻，并标明“当前补采研究观察，非当晚历史名单”；财务可得截止为实际分析时刻，固定未认证历史 PIT，通用因子与历史回测保持隔离。
-  - 初筛 v7 在读取时返回 `freshness`（上海三所日历核验）和 `candidate_eligible`；不改写历史报告及其哈希。逐股 `research_diagnostics` 提供 20 日复权走势、三年利润/现金流和经营现金流 TTM、新增净利润 TTM（报表净利润，非扣非／归母）、来源、缺口及输入哈希；`research_candidate_count` 保留原走势与现金流条件池数量，不改成精选数量。
+  - 初筛 v7 在读取时返回 `freshness`（上海三所日历核验）和 `candidate_eligible`；不改写当前报告及其哈希。只保留最新全量报告与冻结 cohort，旧任务保留摘要和快照哈希，旧报告无法精确展开。逐股 `research_diagnostics` 提供 20 日复权走势、三年利润/现金流和经营现金流 TTM、新增净利润 TTM（报表净利润，非扣非／归母）、来源、缺口及输入哈希；`research_candidate_count` 保留原走势与现金流条件池数量，不改成精选数量。
   - `selection.version=value_research_shortlist_v2` 要求净利润 TTM 严格为正；缺失或冲突待核查、非正排除。返回冻结的 `parameters`、`qualified_count`（全部达标池）、`shortlist_count`（优先研究数量）、按研究顺序排列的 `ordered_symbols`、`reason_counts` 及 `ranking_description`。逐股 `shortlist` 返回 `status/qualified/selected/rank/reason_codes/metrics`；容量递延状态为 `qualified_deferred`，不是淘汰。默认页面只显示后台优先研究名单，最多 10 只、每行业最多 2 只，可显式切换达标池、原条件池或基础准入记录；原始行仍须主动打开。个人 PE/PB/ROE 过滤只缩小当前视图，不重新排序、不补位、不解除后台门槛。旧版本或缺精选合同的报告不能产生新版候选。
   - `selection.rule_impact` 在同一份 v7 输入上构造“仅移除净利润 TTM 门槛”的反事实，分别统计 TTM 非正、缺失/冲突、混合原因及名单变化；它用于归因新增门槛，不把不同观察时刻的旧报告差异归因给单一规则。
   - `screen/tracking` 使用不可变 cohort sidecar 读取冻结的优先名单、达标池与原条件池，按真实形成日后的首个共同交易日收盘开始，固定观察 5/20/60 个交易日。成员等权冻结、不补入、不再平衡；可信前复权行情缺失的成员仍保留在分母并把池标为不完整。返回毛观察收益、固定比例成本后结果、相对原条件池差异、覆盖和输入哈希；补采 cohort 单独标识。该接口是动态只读前向观察，不改写原报告或哈希，不是历史回测、真实组合收益或策略认证。
   - 精选另要求供应商 PE≤20、PB≤2、上市至少 730 天、20 日平均成交额至少 5000 万元、最近三年逐年盈利、较 MA20 偏离不超过 8%，主期及已核验更新期 ROE 为正；周期行业与异常 ROE 需复核。排序和全部规则见价值策略文档。当前名单始终须通过鲜度和基础准入；这些规则只安排研究工作量，未完成绝对估值或样本外收益验证。
 - 回测运行：`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`.../trades`、`.../equity`、`.../positions`、`.../performance`（strategy 产物存独立 `data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
-- 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐，双方收益均按首末净值日期窗口计算；缺失返回 422，不提供不可比超额收益）、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
+- 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐；新运行使用经复核的运行时基准快照，返回 `input_source=run_snapshot`；旧运行返回 `current_market_unversioned`，其结果可能随可信行情修订变化。缺失返回 422）、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
 - 回测最终持仓（组合草案预填源）：`GET /api/v1/backtests/runs/{run_id}/final-holdings`
 
 ### 组合、风控与模拟盘

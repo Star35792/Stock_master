@@ -2,18 +2,19 @@
 
 等价于 ``CuratedLayer.build_prices_qfq_from_db`` 的 COPY 部分，但：
 - 跳过 ``_compact_partitions``（避免逐分区 unlink 触发环境批量删除保护钩子）；
-- 用 ``mv`` 改名提升，旧活动层保留为 ``prices_qfq.prev-<stamp>``，不删除。
+- 校验暂存行数后替换活动层，旧物化目录在成功发布后清理。
 未压缩分区（每分区 1 个文件）对 ``CuratedDailyBarReader`` 读取无正确性问题。
 """
 
 from __future__ import annotations
 
-import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
+
+from app.lake.curated import _cleanup, _replace_directory
 
 
 def security_type_case_sql(symbol_expr: str = "symbol") -> str:
@@ -70,28 +71,32 @@ def main() -> None:
         )
     """
 
-    con = duckdb.connect(db_path)
     try:
-        con.execute("SET threads = 1")
-        stats = con.execute(
-            "SELECT count(*), min(trade_date), max(trade_date) "
-            "FROM market.daily_bar WHERE quality_status = 'trusted' AND adjust_type = 'qfq'"
-        ).fetchone()
-        print(f"source_rows={stats[0]} min_date={stats[1]} max_date={stats[2]}", flush=True)
-        con.execute(sql, [str(temp_target)])
+        con = duckdb.connect(db_path)
+        try:
+            con.execute("SET threads = 1")
+            stats = con.execute(
+                "SELECT count(*), min(trade_date), max(trade_date) "
+                "FROM market.daily_bar WHERE quality_status = 'trusted' AND adjust_type = 'qfq'"
+            ).fetchone()
+            print(f"source_rows={stats[0]} min_date={stats[1]} max_date={stats[2]}", flush=True)
+            con.execute(sql, [str(temp_target)])
+        finally:
+            con.close()
+
+        n_files = sum(1 for _ in temp_target.rglob("*.parquet"))
+        print(f"wrote temp={temp_target} parquet_files={n_files}", flush=True)
+        with duckdb.connect() as verify:
+            exported = verify.execute(
+                "SELECT count(*) FROM read_parquet(?)",
+                [str(temp_target / "**" / "*.parquet")],
+            ).fetchone()[0]
+        if exported != stats[0]:
+            raise RuntimeError(f"curated row-count mismatch: source={stats[0]} exported={exported}")
+        _replace_directory(temp_target, target)
+        print(f"published {target}", flush=True)
     finally:
-        con.close()
-
-    n_files = sum(1 for _ in temp_target.rglob("*.parquet"))
-    print(f"wrote temp={temp_target} parquet_files={n_files}", flush=True)
-
-    # 改名提升：旧层保留为 prev，不删除
-    if target.exists():
-        prev = root / f"prices_qfq.prev-{stamp}"
-        shutil.move(str(target), str(prev))
-        print(f"moved old active -> {prev}", flush=True)
-    shutil.move(str(temp_target), str(target))
-    print(f"promoted temp -> {target}", flush=True)
+        _cleanup(temp_target)
     print("done")
 
 

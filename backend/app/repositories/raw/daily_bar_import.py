@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -13,6 +14,12 @@ class BulkDailyBarImportResult:
     input_count: int
     inserted_count: int
     skipped_count: int
+
+
+@dataclass
+class DailyBarContentIndex:
+    hashes: set[tuple]
+    legacy_values: set[tuple]
 
 
 class RawDailyBarImportRepository:
@@ -59,6 +66,81 @@ class RawDailyBarImportRepository:
             return False
         db.add(row)
         return True
+
+    def load_daily_bar_content_index(
+        self,
+        db: Session,
+        *,
+        source_name: str,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+    ) -> DailyBarContentIndex:
+        """Read the requested source/window once before a repeated sync."""
+        columns = (
+            RawDailyBar.source_name,
+            RawDailyBar.symbol,
+            RawDailyBar.trade_date,
+            RawDailyBar.adjust_type,
+            RawDailyBar.security_type,
+            RawDailyBar.row_hash,
+            RawDailyBar.open,
+            RawDailyBar.high,
+            RawDailyBar.low,
+            RawDailyBar.close,
+            RawDailyBar.volume,
+            RawDailyBar.amount,
+        )
+        existing = db.execute(
+            select(*columns).distinct().where(
+                RawDailyBar.source_name == source_name,
+                RawDailyBar.adjust_type == adjust_type,
+                RawDailyBar.trade_date >= start_date,
+                RawDailyBar.trade_date <= end_date,
+            )
+        ).all()
+        hashes: set[tuple] = set()
+        legacy_values: set[tuple] = set()
+        for record in existing:
+            key = tuple(record[:5])
+            if record[5]:
+                hashes.add((*key, record[5]))
+            else:
+                legacy_values.add((*key, *record[6:]))
+
+        return DailyBarContentIndex(hashes=hashes, legacy_values=legacy_values)
+
+    def add_daily_bars_if_changed(
+        self,
+        db: Session,
+        rows: list[RawDailyBar],
+        *,
+        content_index: DailyBarContentIndex,
+    ) -> int:
+        """Insert distinct content versions without a query per vendor row."""
+        pending: list[RawDailyBar] = []
+        for row in rows:
+            key = (
+                row.source_name, row.symbol, row.trade_date,
+                row.adjust_type, row.security_type,
+            )
+            content_hash = (*key, row.row_hash)
+            values = (
+                *key, row.open, row.high, row.low, row.close,
+                row.volume, row.amount,
+            )
+            if (
+                (row.row_hash and content_hash in content_index.hashes)
+                or values in content_index.legacy_values
+            ):
+                continue
+            pending.append(row)
+            if row.row_hash:
+                content_index.hashes.add(content_hash)
+            else:
+                content_index.legacy_values.add(values)
+        db.add_all(pending)
+        return len(pending)
 
     def bulk_import_hithink_daily_dump(
         self,

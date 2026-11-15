@@ -100,15 +100,6 @@ class DailyBarMarketBuildService:
         existing_symbols = self.security_repository.get_symbols(
             db, {candidate.symbol for candidate in candidates}
         )
-        # Special-treatment status comes from the security master, which
-        # derives it from the security's short name.  No daily source writes
-        # the field, so without this lookup every bar would carry a NULL
-        # status and every screen candidate would be rejected as "treatment
-        # unknown".
-        treatment_statuses = self.security_repository.get_special_treatment_statuses(
-            db, {candidate.symbol for candidate in candidates}
-        )
-
         open_dates_by_exchange = {
             exchange: self.trading_calendar_repository.get_open_dates(
                 db,
@@ -152,6 +143,12 @@ class DailyBarMarketBuildService:
             )
             if assessment.quality_status == "rejected":
                 rejected_count += 1
+                self.market_repository.mark_rejected(
+                    db,
+                    symbol=candidate.symbol,
+                    trade_date=candidate.trade_date,
+                    adjust_type=candidate.adjust_type,
+                )
                 for issue in assessment.issues:
                     self.issue_repository.create(db, **issue)
                     issue_count += 1
@@ -168,7 +165,6 @@ class DailyBarMarketBuildService:
                 quality_status=assessment.quality_status,
                 is_suspect=assessment.is_suspect,
                 source_count=reconciliation.source_counts.get(key, 1),
-                special_treatment_status=treatment_statuses.get(candidate.symbol),
             )
             if assessment.quality_status == "trusted":
                 trusted_count += 1
@@ -194,9 +190,7 @@ class DailyBarMarketBuildService:
                     "session settled; they are stored as suspect and stay out of "
                     "every trusted read path until a post-close sync replaces them"
                 ),
-                expected_value={
-                    "captured_at_or_after": session_settle_at(trade_date).isoformat()
-                },
+                expected_value={"captured_at_or_after": session_settle_at(trade_date).isoformat()},
                 actual_value={"bar_count": bar_count},
             )
             issue_count += 1
@@ -229,7 +223,26 @@ class DailyBarMarketBuildService:
 
             sorted_rows = sorted(rows, key=lambda row: (row.source_name, row.id))
             source_counts[key] = len(sorted_rows)
-            for left, right in combinations(sorted_rows, 2):
+
+            # A bar captured inside its own session is an incomplete day, not a
+            # second opinion.  It is already demoted to suspect on provenance
+            # alone (see ``_assess_candidate_quality``), so letting it take
+            # part in the reconciliation would let a half-day snapshot accuse
+            # the settled bar of a conflict -- and the settled bar would then
+            # be pushed out of every trusted read path as well.
+            #
+            # Measured on 2026-11-11: the only ``hithink_finance`` version for
+            # that session was captured at 10:41 Shanghai time, so its close
+            # was the price at that moment rather than the close.  Comparing it
+            # against the settled dump produced 6,105 "conflicts" and left
+            # 21 of 6,148 bars trusted.  The settled sources agreed with each
+            # other on 5,573 symbols.
+            settled_rows = [
+                row
+                for row in sorted_rows
+                if not is_pre_close_capture(getattr(row, "imported_at", None), row.trade_date)
+            ]
+            for left, right in combinations(settled_rows, 2):
                 comparison = _compare_candidates(left, right)
                 self.compare_repository.upsert_pair(db, **comparison)
                 if comparison["is_conflict"]:

@@ -231,6 +231,60 @@ def test_screen_is_read_only_research_and_idempotently_persisted(tmp_path):
     engine.dispose()
 
 
+def test_screen_keeps_only_latest_report_and_cohort(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    engine = _database(tmp_path)
+    output_dir = tmp_path / "screens"
+    service = PriceValueScreenService(output_dir=output_dir)
+    with Session(engine) as db:
+        first = service.run(db, now=NOW)
+        second_report = deepcopy(first)
+        second_report["snapshot_hash"] = "f" * 64
+        monkeypatch.setattr(service, "scan", lambda _db, now=None: deepcopy(second_report))
+        second = service.run(db, now=NOW)
+
+        assert second["run_id"] != first["run_id"]
+        jobs = list(db.scalars(select(JobLog).where(JobLog.job_name == "price_value_screen")))
+        old_job = next(job for job in jobs if job.id == first["run_id"])
+        latest_job = next(job for job in jobs if job.id == second["run_id"])
+        assert old_job.metadata_["artifact_pruned"] is True
+        assert "artifact_name" not in old_job.metadata_
+        assert "cohort_name" not in old_job.metadata_
+        assert old_job.metadata_["snapshot_hash"] == first["snapshot_hash"]
+        assert {path.name for path in output_dir.glob("*.json")} == {
+            latest_job.metadata_["artifact_name"], latest_job.metadata_["cohort_name"]
+        }
+        assert service.latest(db)["snapshot_hash"] == second["snapshot_hash"]
+        from app.services.price_value_tracking import PriceValueForwardTrackingService
+
+        tracking = PriceValueForwardTrackingService(output_dir=output_dir).latest(db)
+        assert tracking is not None
+        assert "frozen_cohort_missing" not in tracking.get("reason_codes", [])
+    engine.dispose()
+
+
+def test_screen_cleanup_failure_does_not_fail_published_report(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    engine = _database(tmp_path)
+    service = PriceValueScreenService(output_dir=tmp_path / "screens")
+    with Session(engine) as db:
+        first = service.run(db, now=NOW)
+        second_report = deepcopy(first)
+        second_report["snapshot_hash"] = "e" * 64
+        monkeypatch.setattr(service, "scan", lambda _db, now=None: deepcopy(second_report))
+
+        def fail_cleanup(_db, _job):
+            raise OSError("simulated cleanup failure")
+
+        monkeypatch.setattr(service, "_prune_superseded_artifacts_unchecked", fail_cleanup)
+        second = service.run(db, now=NOW)
+        assert second["run_id"] != first["run_id"]
+        assert service.latest(db)["snapshot_hash"] == second["snapshot_hash"]
+    engine.dispose()
+
+
 def test_screen_blocks_cross_date_inputs(tmp_path):
     engine = _database(tmp_path)
     with Session(engine) as db:
@@ -241,6 +295,27 @@ def test_screen_blocks_cross_date_inputs(tmp_path):
         assert report["status"] == "blocked"
         assert report["ready_count"] == 0
         assert "valuation_missing_for_target" in report["global_reason_codes"]
+    engine.dispose()
+
+
+def test_current_screen_uses_security_treatment_without_backfilling_bar(tmp_path):
+    engine = _database(tmp_path)
+    with Session(engine) as db:
+        security = db.scalar(select(Security).where(Security.symbol == "600001.SH"))
+        bar = db.scalar(select(DailyBar).where(DailyBar.symbol == "600001.SH"))
+        security.special_treatment_status = "normal"
+        bar.special_treatment_status = None
+        db.commit()
+
+        report = PriceValueScreenService(output_dir=tmp_path / "screens").scan(db, now=NOW)
+
+        row = next(item for item in report["rows"] if item["symbol"] == "600001.SH")
+        assert "treatment_unknown_or_restricted" not in row["reason_codes"]
+        assert db.scalar(
+            select(DailyBar.special_treatment_status).where(
+                DailyBar.symbol == "600001.SH"
+            )
+        ) is None
     engine.dispose()
 
 

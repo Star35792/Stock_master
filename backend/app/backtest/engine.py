@@ -1,9 +1,9 @@
 from bisect import bisect_right
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from app.backtest.fees import (
     LINEAR_COMMISSION_V1,
@@ -13,7 +13,7 @@ from app.backtest.fees import (
 from app.backtest.tradability import AShareTradabilityPolicy
 from app.portfolio import PortfolioAsset, PortfolioBuilder, PortfolioConstraints
 
-ENGINE_VERSION = "daily_event_v3"
+ENGINE_VERSION = "daily_event_v4"
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,20 @@ class EquitySnapshot:
 
 
 @dataclass(frozen=True)
+class BacktestExecutionEvent:
+    signal_date: date
+    trade_date: date
+    symbol: str
+    side: Literal["buy", "sell", "target"]
+    target_weight: Decimal
+    status: Literal[
+        "retry_scheduled", "blocked_final", "superseded", "no_longer_needed"
+    ]
+    reason: str
+    next_execution_date: date | None = None
+
+
+@dataclass(frozen=True)
 class BacktestResult:
     initial_cash: Decimal
     final_equity: Decimal
@@ -61,6 +75,7 @@ class BacktestResult:
     trades: list[BacktestTrade]
     positions: list[PositionSnapshot]
     equity_curve: list[EquitySnapshot]
+    execution_events: list[BacktestExecutionEvent] = field(default_factory=list)
 
 
 class DailyEventBacktestEngine:
@@ -169,9 +184,11 @@ class DailyEventBacktestEngine:
         quantities: dict[str, int] = defaultdict(int)
         last_close: dict[str, Decimal] = {}
         pending_targets: dict[str, tuple[date, Decimal, date]] = {}
+        retry_sell_only: set[str] = set()
         trades: list[BacktestTrade] = []
         positions: list[PositionSnapshot] = []
         equity_curve: list[EquitySnapshot] = []
+        execution_events: list[BacktestExecutionEvent] = []
 
         for trade_date in timeline:
             daily_bars = bars_by_date[trade_date]
@@ -221,10 +238,25 @@ class DailyEventBacktestEngine:
                     opening_equity * target_weight / reference_price
                 )
                 quantity_delta = target_quantity - quantities[symbol]
+                if symbol in retry_sell_only and quantity_delta >= 0:
+                    pending_targets.pop(symbol, None)
+                    retry_sell_only.discard(symbol)
+                    execution_events.append(BacktestExecutionEvent(
+                        signal_date=signal_date,
+                        trade_date=trade_date,
+                        symbol=symbol,
+                        side="sell",
+                        target_weight=target_weight,
+                        status="no_longer_needed",
+                        reason="target no longer requires a sell at the current equity",
+                    ))
+                    continue
                 if quantity_delta:
                     orders.append(
                         (quantity_delta > 0, symbol, signal_date, quantity_delta)
                     )
+                else:
+                    pending_targets.pop(symbol, None)
             orders.sort(key=lambda order: (order[0], order[1], order[2]))
 
             for is_buy, symbol, signal_date, quantity_delta in orders:
@@ -232,20 +264,53 @@ class DailyEventBacktestEngine:
                 reference_price = bar.open
                 side = "buy" if is_buy else "sell"
                 tradability = self.tradability_policy.check(bar)
-                if is_buy and not tradability.can_buy:
-                    pending_targets.pop(symbol, None)
-                    continue
-                if not is_buy and not tradability.can_sell:
-                    pending_targets.pop(symbol, None)
+                if (is_buy and not tradability.can_buy) or (
+                    not is_buy and not tradability.can_sell
+                ):
+                    target_weight = executable[symbol][1]
+                    retry_date = None
+                    if not is_buy:
+                        retry_date = self._next_execution_date(
+                            symbol=symbol, signal_date=trade_date, calendars=calendars,
+                        )
+                    if retry_date is None:
+                        pending_targets.pop(symbol, None)
+                        retry_sell_only.discard(symbol)
+                    else:
+                        pending_targets[symbol] = (signal_date, target_weight, retry_date)
+                        retry_sell_only.add(symbol)
+                    execution_events.append(BacktestExecutionEvent(
+                        signal_date=signal_date,
+                        trade_date=trade_date,
+                        symbol=symbol,
+                        side=side,
+                        target_weight=target_weight,
+                        status="retry_scheduled" if retry_date else "blocked_final",
+                        reason=tradability.reason or "trade unavailable under tradability policy",
+                        next_execution_date=retry_date,
+                    ))
                     continue
                 if is_buy:
                     quantity = self._affordable_quantity(
                         desired_quantity=quantity_delta,
                         reference_price=reference_price,
                         cash=cash,
+                        symbol=symbol,
+                        security_type=getattr(bar, "security_type", None),
+                        trade_date=trade_date,
                     )
                     if quantity == 0:
                         pending_targets.pop(symbol, None)
+                        retry_sell_only.discard(symbol)
+                        execution_events.append(BacktestExecutionEvent(
+                            signal_date=signal_date,
+                            trade_date=trade_date,
+                            symbol=symbol,
+                            side=side,
+                            target_weight=executable[symbol][1],
+                            status="blocked_final",
+                            reason="insufficient cash for one lot including fees",
+                        ))
                         continue
                 else:
                     quantity = min(abs(quantity_delta), quantities[symbol])
@@ -254,6 +319,9 @@ class DailyEventBacktestEngine:
                     reference_price=reference_price,
                     quantity=quantity,
                     side=side,
+                    symbol=symbol,
+                    security_type=getattr(bar, "security_type", None),
+                    trade_date=trade_date,
                 )
                 fill_price = fee_result.fill_price
                 commission = fee_result.total_fee
@@ -278,6 +346,7 @@ class DailyEventBacktestEngine:
                     )
                 )
                 pending_targets.pop(symbol, None)
+                retry_sell_only.discard(symbol)
 
             for symbol, bar in daily_bars.items():
                 last_close[symbol] = bar.close
@@ -308,6 +377,19 @@ class DailyEventBacktestEngine:
             )
 
             for signal in signals_by_date.get(trade_date, []):
+                previous = pending_targets.get(signal.symbol)
+                retry_sell_only.discard(signal.symbol)
+                if previous is not None and previous[2] > trade_date:
+                    execution_events.append(BacktestExecutionEvent(
+                        signal_date=previous[0],
+                        trade_date=trade_date,
+                        symbol=signal.symbol,
+                        side="target",
+                        target_weight=previous[1],
+                        status="superseded",
+                        reason=f"replaced by newer target signal from {trade_date.isoformat()}",
+                        next_execution_date=None,
+                    ))
                 scheduled_date = self._next_execution_date(
                     symbol=signal.symbol,
                     signal_date=signal.signal_date,
@@ -331,6 +413,7 @@ class DailyEventBacktestEngine:
             trades=trades,
             positions=positions,
             equity_curve=equity_curve,
+            execution_events=execution_events,
         )
 
     def _apply_portfolio_constraints(
@@ -403,6 +486,9 @@ class DailyEventBacktestEngine:
         desired_quantity: int,
         reference_price: Decimal,
         cash: Decimal,
+        symbol: str,
+        security_type: str | None,
+        trade_date: date,
     ) -> int:
         # Supported fee models have monotonic order costs. Search whole lots
         # using the actual fill cost so minimum commissions are charged once.
@@ -412,6 +498,7 @@ class DailyEventBacktestEngine:
             quantity = candidate * self.lot_size
             fee = self.fee_model.apply(
                 reference_price=reference_price, quantity=quantity, side="buy",
+                symbol=symbol, security_type=security_type, trade_date=trade_date,
             )
             if Decimal(quantity) * fee.fill_price + fee.total_fee <= cash:
                 low = candidate

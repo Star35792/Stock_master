@@ -37,14 +37,16 @@ class BacktestPerformanceAnalyzer:
             raise ValueError("backtest equity curve is empty")
         equity_rows = sorted(equity_rows, key=lambda row: row.trade_date)
         equities = [row.total_equity for row in equity_rows]
-        daily_returns = [
+        if run.initial_cash <= 0 or any(equity <= 0 for equity in equities):
+            raise ValueError("performance requires positive initial cash and equity")
+        daily_returns = [equities[0] / run.initial_cash - Decimal(1)]
+        daily_returns.extend(
             equities[index] / equities[index - 1] - Decimal(1)
             for index in range(1, len(equities))
-            if equities[index - 1] != 0
-        ]
+        )
         total_return = equities[-1] / run.initial_cash - Decimal(1)
         annualized_return = self._annualized_return(total_return, len(daily_returns))
-        maximum_drawdown = self._maximum_drawdown(equities)
+        maximum_drawdown = self._maximum_drawdown([run.initial_cash, *equities])
         daily_mean = self._mean(daily_returns) or Decimal()
         daily_std = self._standard_deviation(daily_returns) or Decimal()
         annualized_volatility = daily_std * Decimal(str(sqrt(252)))

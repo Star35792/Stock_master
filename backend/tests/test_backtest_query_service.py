@@ -163,6 +163,33 @@ def test_backtest_query_service_calculates_benchmark_excess_return() -> None:
     assert result.excess_return == Decimal("0.05")
 
 
+def test_benchmark_comparison_uses_run_snapshot_after_market_changes() -> None:
+    repository = FakeBacktestRepository()
+    repository.get_run = lambda db, *, run_id: SimpleNamespace(
+        id=run_id, status="success",
+        parameters={
+            "benchmark": "000300.SH",
+            "benchmark_snapshot": {
+                "status": "verified", "start_date": "2026-07-01",
+                "end_date": "2026-07-02", "date_count": 2,
+                "first_close": "100", "last_close": "105",
+            },
+        },
+    )
+
+    class ChangedMarket:
+        def list_by_symbol(self, db, **kwargs):
+            raise AssertionError("snapshot query must not read current market")
+
+    result = BacktestQueryService(
+        backtest_repository=repository,
+        performance_repository=FakePerformanceRepository(),
+        daily_bar_repository=ChangedMarket(),
+    ).get_benchmark_comparison(object(), run_id=1)
+    assert result.input_source == "run_snapshot"
+    assert result.benchmark_total_return == Decimal("0.05")
+
+
 @pytest.mark.parametrize("available_days", [
     (date(2026, 7, 2), date(2026, 7, 3)),
     (date(2026, 7, 1), date(2026, 7, 3)),

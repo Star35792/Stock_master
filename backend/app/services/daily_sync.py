@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,26 @@ from app.services.hithink_collection import (
     HithinkDailyBarCollectionService,
 )
 from app.services.reference_data import ReferenceDataSyncResult, ReferenceDataSyncService
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _last_completed_date() -> date:
+    """The most recent day that has fully passed in Shanghai time.
+
+    Two things go wrong when a sync asks for *today*:
+
+    * the vendor answers with the session as it stands, so a run inside the
+      trading hours stores a half-day snapshot whose close is the price at
+      that moment;
+    * ``date.today()`` reads the **host's** clock, not the exchange's, so on
+      a host outside UTC+8 the requested window is silently off by a day.
+
+    A session is only observed once the calendar day is over: a run at 21:00
+    still observes the previous day, and only after midnight does the service
+    move on to the day that just ended.
+    """
+    return datetime.now(SHANGHAI).date() - timedelta(days=1)
 
 
 @dataclass(frozen=True)
@@ -46,7 +67,7 @@ class HithinkDailySyncService:
         if days < 1:
             raise ValueError("days must be greater than or equal to 1")
 
-        resolved_end_date = end_date or date.today()
+        resolved_end_date = end_date or _last_completed_date()
         resolved_start_date = start_date or (resolved_end_date - timedelta(days=days))
 
         reference_result = None

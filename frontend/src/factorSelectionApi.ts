@@ -35,7 +35,7 @@ export interface FactorSelectionBacktestRequest {
   lot_size: number;
   fee_model_version: string;
   min_commission: string;
-  sell_stamp_duty_rate: string;
+  sell_stamp_duty_rate: string | null;
   transfer_fee_rate: string;
   exchange_fee_rate: string;
   code_version: string;

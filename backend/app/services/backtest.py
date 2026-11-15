@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.backtest import (
     A_SHARE_COST_V1,
+    A_SHARE_COST_V2,
     ENGINE_VERSION,
     LINEAR_COMMISSION_V1,
     BacktestResult,
@@ -34,7 +35,12 @@ from app.repositories.market import (
 from app.repositories.research_read import WarmResearchReadRepository
 from app.repositories.strategy import BacktestRepository
 from app.services.backtest_query import BacktestQueryService as BacktestQueryService
-from app.services.backtest_snapshot import _EXECUTION_ADJUST_TYPE, _build_market_snapshot
+from app.services.backtest_snapshot import (
+    _EXECUTION_ADJUST_TYPE,
+    _build_market_snapshot,
+    build_benchmark_snapshot,
+    build_input_data_version,
+)
 
 _CORPORATE_ACTION_POLICY = "reject"
 _DEFAULT_FEE_MODEL_VERSION = LINEAR_COMMISSION_V1
@@ -45,6 +51,13 @@ _A_SHARE_DEFAULT_EXCHANGE_FEE_RATE = Decimal("0.0000487")
 
 
 def _fee_model_limitations(fee_model_version: str) -> list[str]:
+    if fee_model_version == A_SHARE_COST_V2:
+        return [
+            "instrument_aware_cost_assumptions",
+            "no_margin_trading_costs",
+            "no_block_trading_costs",
+            "no_broker_specific_fee_schedule",
+        ]
     if fee_model_version == A_SHARE_COST_V1:
         return [
             "realistic_a_share_costs",
@@ -68,10 +81,24 @@ def _build_fee_contract(
     transfer_fee_rate: Decimal | None,
     exchange_fee_rate: Decimal | None,
 ) -> dict[str, str]:
-    if fee_model_version == A_SHARE_COST_V1:
+    if fee_model_version in {A_SHARE_COST_V1, A_SHARE_COST_V2}:
         return {
-            "fee_model_version": A_SHARE_COST_V1,
-            "fee_model_name": "a_share_cost",
+            "fee_model_version": fee_model_version,
+            "fee_model_name": (
+                "a_share_cost_instrument_aware" if fee_model_version == A_SHARE_COST_V2
+                else "a_share_cost"
+            ),
+            **(
+                {
+                    "security_type_fee_rule": "stock_or_etf_v1",
+                    "stock_stamp_duty_rule": (
+                        "legal_20230828_v1"
+                        if sell_stamp_duty_rate is None else "fixed_rate_v1"
+                    ),
+                    "supported_trade_date_start": "2022-04-29",
+                }
+                if fee_model_version == A_SHARE_COST_V2 else {}
+            ),
             "commission_rate": str(commission_rate),
             "min_commission": str(
                 min_commission if min_commission is not None else _A_SHARE_DEFAULT_MIN_COMMISSION
@@ -348,7 +375,11 @@ class DailyBacktestService:
             commission_rate=commission_rate,
             slippage_bps=slippage_bps,
             min_commission=Decimal(fee_contract["min_commission"]),
-            sell_stamp_duty_rate=Decimal(fee_contract["sell_stamp_duty_rate"]),
+            sell_stamp_duty_rate=(
+                None if resolved_fee_model_version == A_SHARE_COST_V2
+                and sell_stamp_duty_rate is None
+                else Decimal(fee_contract["sell_stamp_duty_rate"])
+            ),
             transfer_fee_rate=Decimal(fee_contract["transfer_fee_rate"]),
             exchange_fee_rate=Decimal(fee_contract["exchange_fee_rate"]),
         )
@@ -397,6 +428,9 @@ class DailyBacktestService:
             initial_cash=initial_cash,
             training_artifact_id=training_artifact_id,
         )
+        benchmark_symbol = (
+            research_contract.get("benchmark") if research_contract else None
+        )
         try:
             with self._research_read(
                 db, start_date=start_date, end_date=end_date
@@ -418,6 +452,13 @@ class DailyBacktestService:
                 )
                 execution_calendar = reader.load_execution_calendar(
                     symbols=symbols, start_date=start_date, end_date=end_date
+                )
+                benchmark_bars = (
+                    reader.list_daily_bars(
+                        start_date=start_date, end_date=end_date,
+                        adjust_type=adjust_type, symbols=[benchmark_symbol.upper()],
+                        quality_status="trusted",
+                    ) if benchmark_symbol else []
                 )
             snapshot_before = _build_market_snapshot(
                 bars=execution_bars,
@@ -447,6 +488,11 @@ class DailyBacktestService:
                 signals=normalized_signals,
                 execution_calendar=execution_calendar,
             )
+            equity_dates = [point.trade_date for point in result.equity_curve]
+            benchmark_snapshot = (
+                build_benchmark_snapshot(bars=benchmark_bars, equity_dates=equity_dates)
+                if benchmark_symbol else None
+            )
             with self._research_verify_read(
                 db, start_date=start_date, end_date=end_date
             ) as (
@@ -465,6 +511,13 @@ class DailyBacktestService:
                 )
                 execution_calendar_after = verification_reader.load_execution_calendar(
                     symbols=symbols, start_date=start_date, end_date=end_date
+                )
+                benchmark_bars_after = (
+                    verification_reader.list_daily_bars(
+                        start_date=start_date, end_date=end_date,
+                        adjust_type=adjust_type, symbols=[benchmark_symbol.upper()],
+                        quality_status="trusted",
+                    ) if benchmark_symbol else []
                 )
             snapshot_after = _build_market_snapshot(
                 bars=execution_bars_after,
@@ -495,7 +548,59 @@ class DailyBacktestService:
                     "backtest_data_changed: trusted market data changed while "
                     "the backtest was running"
                 )
+            if benchmark_symbol:
+                benchmark_snapshot_after = build_benchmark_snapshot(
+                    bars=benchmark_bars_after, equity_dates=equity_dates,
+                )
+                if benchmark_snapshot_after != benchmark_snapshot:
+                    raise BacktestDataChangedError(
+                        "backtest_data_changed: benchmark data changed during the run"
+                    )
+                self.backtest_repository.update_run_parameters(
+                    artifacts_db, run=run,
+                    extra={"benchmark_snapshot": benchmark_snapshot},
+                )
+            if data_version in {"auto", "workbench"}:
+                resolved_data_version = build_input_data_version(
+                    market_snapshot=snapshot_before,
+                    strategy_input_snapshot=(
+                        research_contract.get("strategy_input_snapshot")
+                        if research_contract else None
+                    ),
+                    benchmark_snapshot=benchmark_snapshot,
+                )
+                run.data_version = resolved_data_version
+                self.backtest_repository.update_run_parameters(
+                    artifacts_db,
+                    run=run,
+                    extra={"data_version": resolved_data_version},
+                )
             self.backtest_repository.save_result(artifacts_db, run=run, result=result)
+            if result.execution_events:
+                self.backtest_repository.update_run_parameters(
+                    artifacts_db,
+                    run=run,
+                    extra={"execution_event_summary": {
+                        "version": "daily_execution_events_v1",
+                        "total": len(result.execution_events),
+                        "items": [
+                            {
+                                "signal_date": event.signal_date.isoformat(),
+                                "trade_date": event.trade_date.isoformat(),
+                                "symbol": event.symbol,
+                                "side": event.side,
+                                "status": event.status,
+                                "reason": event.reason,
+                                "next_execution_date": (
+                                    event.next_execution_date.isoformat()
+                                    if event.next_execution_date else None
+                                ),
+                            }
+                            for event in result.execution_events[:100]
+                        ],
+                        "truncated": len(result.execution_events) > 100,
+                    }},
+                )
             quantile_result = self._maybe_run_quantile_layers(
                 db=db,
                 artifacts_db=artifacts_db,

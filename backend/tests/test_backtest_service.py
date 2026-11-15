@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 from app.backtest import TargetWeightSignal
 from app.backtest.quantile_result import QuantileBacktestMeta
 from app.services import DailyBacktestService
-from app.services.backtest import _independent_verification_session
+from app.services.backtest import (
+    BacktestDataChangedError,
+    _independent_verification_session,
+)
 
 
 class FakeDailyBarRepository:
@@ -170,7 +173,7 @@ def test_backtest_service_reads_trusted_market_and_persists_result() -> None:
     assert snapshot["verification_status"] == "verified"
     assert snapshot["sha256"] == snapshot["post_run_sha256"]
     assert backtest_repository.create_kwargs["parameters"]["engine_version"] == (
-        "daily_event_v3"
+        "daily_event_v4"
     )
     assert backtest_repository.create_kwargs["parameters"]["missing_held_bar_policy"] == (
         "reject_on_open_date_v1"
@@ -178,6 +181,77 @@ def test_backtest_service_reads_trusted_market_and_persists_result() -> None:
     assert backtest_repository.create_kwargs["parameters"]["fee_model_version"] == (
         "linear_commission_v1"
     )
+
+
+def test_backtest_service_resolves_auto_data_version_from_consumed_inputs() -> None:
+    repository = FakeBacktestRepository()
+    service = DailyBacktestService(
+        daily_bar_repository=FakeDailyBarRepository(),
+        backtest_repository=repository,
+        corporate_action_repository=FakeCorporateActionRepository(),
+        trading_calendar_repository=FakeTradingCalendarRepository(),
+    )
+    service.run(
+        object(), name="auto-version", strategy_name="unit_test",
+        signals=[TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+        start_date=date(2026, 7, 1), end_date=date(2026, 7, 2),
+        adjust_type="none", initial_cash=Decimal("10000"),
+        commission_rate=Decimal("0"), slippage_bps=Decimal("0"), lot_size=100,
+        code_version="test", data_version="auto",
+        research_contract={"strategy_input_snapshot": {"sha256": "factor-input"}},
+    )
+    assert repository.updated_parameters[-1]["data_version"].startswith("input-")
+    assert repository.updated_parameters[-1]["data_version"] != "auto"
+
+
+def test_backtest_service_freezes_benchmark_and_detects_change() -> None:
+    class BarsWithBenchmark(FakeDailyBarRepository):
+        def __init__(self, *, change_on_verify: bool = False) -> None:
+            super().__init__()
+            self.benchmark_reads = 0
+            self.change_on_verify = change_on_verify
+
+        def list_for_factor_calculation(self, db, **kwargs):
+            if kwargs["symbols"] == ["000300.SH"]:
+                self.benchmark_reads += 1
+                last = "106" if self.change_on_verify and self.benchmark_reads == 2 else "105"
+                return [
+                    SimpleNamespace(
+                        symbol="000300.SH", security_type="index",
+                        trade_date=date(2026, 7, day), close=Decimal(close),
+                    )
+                    for day, close in ((1, "100"), (2, last))
+                ]
+            return super().list_for_factor_calculation(db, **kwargs)
+
+    def execute(bars):
+        repository = FakeBacktestRepository()
+        service = DailyBacktestService(
+            daily_bar_repository=bars, backtest_repository=repository,
+            corporate_action_repository=FakeCorporateActionRepository(),
+            trading_calendar_repository=FakeTradingCalendarRepository(),
+        )
+        return repository, service.run(
+            SimpleNamespace(commit=lambda: None),
+            name="benchmark-snapshot", strategy_name="factor_selection",
+            signals=[TargetWeightSignal(date(2026, 7, 1), "AAA.SH", Decimal("1"))],
+            start_date=date(2026, 7, 1), end_date=date(2026, 7, 2),
+            adjust_type="qfq", initial_cash=Decimal("10000"),
+            commission_rate=Decimal("0"), slippage_bps=Decimal("0"), lot_size=100,
+            code_version="test", data_version="auto",
+            research_contract={"benchmark": "000300.SH"},
+        )
+
+    repository, _ = execute(BarsWithBenchmark())
+    snapshot = next(
+        item["benchmark_snapshot"] for item in repository.updated_parameters
+        if "benchmark_snapshot" in item
+    )
+    assert snapshot["status"] == "verified"
+    assert snapshot["first_close"] == "100"
+    assert snapshot["last_close"] == "105"
+    with pytest.raises(BacktestDataChangedError, match="benchmark data changed"):
+        execute(BarsWithBenchmark(change_on_verify=True))
 
 
 def test_backtest_service_fails_run_when_held_position_bar_is_missing() -> None:

@@ -80,6 +80,7 @@ class FakeMarketRepository:
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.conflicts: list[dict] = []
+        self.rejected: list[dict] = []
 
     def upsert_from_raw(self, db: object, **kwargs: object) -> None:
         self.calls.append(kwargs)
@@ -87,14 +88,15 @@ class FakeMarketRepository:
     def mark_source_conflict(self, db: object, **kwargs: object) -> None:
         self.conflicts.append(kwargs)
 
+    def mark_rejected(self, db: object, **kwargs: object) -> None:
+        self.rejected.append(kwargs)
+
 
 class FakeSecurityRepository:
     def get_symbols(self, db: object, symbols: set[str]) -> set[str]:
         return symbols
 
-    def get_special_treatment_statuses(
-        self, db: object, symbols: set[str]
-    ) -> dict[str, str]:
+    def get_special_treatment_statuses(self, db: object, symbols: set[str]) -> dict[str, str]:
         """Return no known status; the real repository omits unknown securities.
 
         An omitted status must stay "unknown" rather than become "normal",
@@ -261,12 +263,14 @@ def test_market_build_blocks_price_conflict_between_sources() -> None:
     assert result.issue_count == 1
     assert result.conflict_count == 1
     assert market_repository.calls == []
-    assert market_repository.conflicts == [{
-        "symbol": "600519.SH",
-        "trade_date": date(2026, 7, 17),
-        "adjust_type": "none",
-        "source_count": 2,
-    }]
+    assert market_repository.conflicts == [
+        {
+            "symbol": "600519.SH",
+            "trade_date": date(2026, 7, 17),
+            "adjust_type": "none",
+            "source_count": 2,
+        }
+    ]
     assert compare_repository.calls[0]["is_conflict"] is True
     assert issue_repository.calls[0]["issue_type"] == "SOURCE_CONFLICT"
     assert db.committed is True

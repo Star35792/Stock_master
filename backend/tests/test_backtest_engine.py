@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.backtest import AShareCostFeeModel, DailyEventBacktestEngine, TargetWeightSignal
+from app.backtest.engine import ENGINE_VERSION
 
 
 def _bar(trade_date: date, symbol: str, open_: str, close: str) -> SimpleNamespace:
@@ -390,6 +391,135 @@ def test_backtest_blocks_all_trades_when_suspended() -> None:
     )
 
     assert not any(trade.trade_date == date(2026, 7, 2) for trade in result.trades)
+
+
+@pytest.mark.parametrize("blocked_bar", [
+    {"limit_down": "9"}, {"is_suspended": True},
+], ids=["limit_down", "explicit_suspended_input"])
+def test_exit_target_retries_when_bar_is_explicitly_untradable(blocked_bar) -> None:
+    # Production trusted data omits real suspension days.  The explicit
+    # suspended bar exercises the policy boundary only; a missing held bar is
+    # covered separately and remains fail-closed.
+    days = [date(2026, 7, day) for day in (1, 2, 3, 6)]
+    bars = [
+        _tradable_bar(days[0], "AAA", "10", "10"),
+        _tradable_bar(days[1], "AAA", "10", "10"),
+        _tradable_bar(days[2], "AAA", "9", "9", **blocked_bar),
+        _tradable_bar(days[3], "AAA", "8", "8"),
+    ]
+    result = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"), commission_rate=Decimal(),
+        slippage_bps=Decimal(),
+    ).run(
+        bars=bars,
+        signals=[
+            TargetWeightSignal(days[0], "AAA", Decimal("1")),
+            TargetWeightSignal(days[1], "AAA", Decimal()),
+        ],
+        execution_calendar={"AAA": days},
+    )
+
+    assert ENGINE_VERSION == "daily_event_v4"
+    assert [(trade.side, trade.signal_date, trade.trade_date) for trade in result.trades] == [
+        ("buy", days[0], days[1]), ("sell", days[1], days[3]),
+    ]
+    blocked = result.execution_events
+    assert len(blocked) == 1
+    assert blocked[0].status == "retry_scheduled"
+    assert blocked[0].trade_date == days[2]
+    assert blocked[0].next_execution_date == days[3]
+    assert blocked[0].reason
+    assert result.positions[-1].trade_date == days[2]
+
+
+@pytest.mark.parametrize("retry_price, expected_sell", [
+    ("8", True), ("2", False),
+])
+def test_blocked_partial_sell_retries_without_reversing_to_buy(
+    retry_price, expected_sell
+) -> None:
+    days = [date(2026, 7, day) for day in (1, 2, 3, 6)]
+    result = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"), commission_rate=Decimal(),
+        slippage_bps=Decimal(),
+    ).run(
+        bars=[
+            _tradable_bar(days[0], "AAA", "10", "10"),
+            _tradable_bar(days[1], "AAA", "10", "10"),
+            _tradable_bar(days[2], "AAA", "9", "9", limit_down="9"),
+            _tradable_bar(days[3], "AAA", retry_price, retry_price),
+        ],
+        signals=[
+            TargetWeightSignal(days[0], "AAA", Decimal("0.5")),
+            TargetWeightSignal(days[1], "AAA", Decimal("0.4")),
+        ],
+        execution_calendar={"AAA": days},
+    )
+    assert result.execution_events[0].status == "retry_scheduled"
+    later_trades = [trade for trade in result.trades if trade.trade_date == days[3]]
+    if expected_sell:
+        assert len(later_trades) == 1
+        assert later_trades[0].side == "sell"
+        assert later_trades[0].signal_date == days[1]
+    else:
+        assert later_trades == []
+        assert result.execution_events[-1].status == "no_longer_needed"
+
+
+def test_newer_target_supersedes_blocked_exit() -> None:
+    days = [date(2026, 7, day) for day in (1, 2, 3, 6, 7)]
+    bars = [
+        _tradable_bar(days[0], "AAA", "10", "10"),
+        _tradable_bar(days[1], "AAA", "10", "10"),
+        _tradable_bar(days[2], "AAA", "9", "9", limit_down="9"),
+        _tradable_bar(days[3], "AAA", "10", "10"),
+        _tradable_bar(days[4], "AAA", "10", "10"),
+    ]
+    result = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"), commission_rate=Decimal(),
+        slippage_bps=Decimal(),
+    ).run(
+        bars=bars,
+        signals=[
+            TargetWeightSignal(days[0], "AAA", Decimal("1")),
+            TargetWeightSignal(days[1], "AAA", Decimal()),
+            TargetWeightSignal(days[2], "AAA", Decimal("0.5")),
+        ],
+        execution_calendar={"AAA": days},
+    )
+
+    sells = [trade for trade in result.trades if trade.side == "sell"]
+    assert len(sells) == 1
+    assert sells[0].signal_date == days[2]
+    assert sells[0].trade_date == days[3]
+    assert sells[0].quantity == 5000
+    assert [event.status for event in result.execution_events] == [
+        "retry_scheduled", "superseded",
+    ]
+
+
+def test_blocked_exit_on_last_open_date_is_reported_without_fabricated_fill() -> None:
+    days = [date(2026, 7, day) for day in (1, 2, 3)]
+    result = DailyEventBacktestEngine(
+        initial_cash=Decimal("100000"), commission_rate=Decimal(),
+        slippage_bps=Decimal(),
+    ).run(
+        bars=[
+            _tradable_bar(days[0], "AAA", "10", "10"),
+            _tradable_bar(days[1], "AAA", "10", "10"),
+            _tradable_bar(days[2], "AAA", "9", "9", limit_down="9"),
+        ],
+        signals=[
+            TargetWeightSignal(days[0], "AAA", Decimal("1")),
+            TargetWeightSignal(days[1], "AAA", Decimal()),
+        ],
+        execution_calendar={"AAA": days},
+    )
+    assert [trade.side for trade in result.trades] == ["buy"]
+    assert [(event.status, event.next_execution_date) for event in result.execution_events] == [
+        ("blocked_final", None),
+    ]
+    assert result.positions[-1].quantity == 10000
 
 
 def _run_with_constraints(

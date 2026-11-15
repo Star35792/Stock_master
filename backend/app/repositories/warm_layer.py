@@ -163,11 +163,9 @@ class WarmLayerStore:
     def latest_release_tag(self) -> str | None:
         """Return the most recent *successful* release tag directory name.
 
-        A release directory is published before its export is verified, and a
-        failed export still writes ``export_summary.json`` with ``all_ok=false``.
-        Selecting such a directory would make every research read consume a
-        half-written release.  Only releases whose summary reports
-        ``all_ok=true`` are eligible.
+        An interrupted or legacy failed export may leave a directory behind.
+        Selecting it would make research read a partial release. Only releases
+        whose summary reports ``all_ok=true`` are eligible.
         """
         exported = self._exported_root()
         if not exported.exists():
@@ -259,7 +257,7 @@ class WarmLayerStore:
         single-level fallback is not enough once releases are stacked (a
         factor backfill on top of a data release on top of the full release),
         because the middle release may not carry the table a reader needs.
-        Cycles are broken and the chain is depth-bounded.
+        Invalid cycles and chains beyond the depth limit fail closed.
         """
         tag = release_tag or self.latest_release_tag
         if tag is None:
@@ -271,6 +269,12 @@ class WarmLayerStore:
             seen.add(current)
             chain.append(current)
             current = self.base_release_tag_for(current)
+        if current in seen:
+            raise ValueError(f"warm release lineage contains a cycle: {tag}")
+        if current:
+            raise ValueError(
+                f"warm release lineage exceeds {_MAX_RELEASE_DEPTH} levels: {tag}"
+            )
         return chain
 
     def table_globs(
@@ -323,17 +327,23 @@ class WarmLayerStore:
     def prices_qfq_glob(self) -> Path:
         """Return the glob path for the curated forward-adjusted price layer.
 
-        If the active ``prices_qfq`` directory does not exist (e.g. because a
-        rebuild left it as a timestamped backup), return the most recent backup.
+        During a publish, the old directory is briefly named ``.replacing-*``.
+        A crash in that window must not make the sole materialization unreadable.
         """
         lake_root = Path(settings.data_lake_root).resolve()
         curated = lake_root / "curated"
         primary = curated / "prices_qfq"
         if primary.exists():
             return primary
-        backups = sorted(
-            p for p in curated.glob("prices_qfq.backup-*") if p.is_dir()
+        replacing = sorted(
+            (p for p in curated.glob(".prices_qfq.replacing-*") if p.is_dir()),
+            key=lambda path: path.stat().st_mtime,
         )
+        if replacing:
+            return replacing[-1]
+        # Legacy publishers left timestamped directories. Keep the last one
+        # readable if a crash removed the primary before the new publish.
+        backups = sorted(p for p in curated.glob("prices_qfq.backup-*") if p.is_dir())
         if backups:
             return backups[-1]
         return primary

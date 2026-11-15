@@ -12,7 +12,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from app.lake import CuratedLayer, DataLake
+from app.lake import CuratedDatasetResult, CuratedLayer, DataLake
 
 
 def _seed_db_tables(db_path: Path) -> None:
@@ -73,36 +73,86 @@ def _seed_db_tables(db_path: Path) -> None:
             [
                 # Unadjusted rows; the curated layer multiplies by the QFQ factor.
                 (
-                    "000001.SZ", "stock", date(2026, 1, 5), "none",
-                    Decimal("10"), Decimal("10"), Decimal("10"), Decimal("10"),
-                    Decimal("100"), Decimal("900"), Decimal("0.01"),
-                    "trusted", "hithink", 1,
+                    "000001.SZ",
+                    "stock",
+                    date(2026, 1, 5),
+                    "none",
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("100"),
+                    Decimal("900"),
+                    Decimal("0.01"),
+                    "trusted",
+                    "hithink",
+                    1,
                 ),
                 (
-                    "000001.SZ", "stock", date(2026, 1, 6), "none",
-                    Decimal("10"), Decimal("10"), Decimal("10"), Decimal("10"),
-                    Decimal("100"), Decimal("900"), Decimal("0.02"),
-                    "trusted", "hithink", 1,
+                    "000001.SZ",
+                    "stock",
+                    date(2026, 1, 6),
+                    "none",
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("10"),
+                    Decimal("100"),
+                    Decimal("900"),
+                    Decimal("0.02"),
+                    "trusted",
+                    "hithink",
+                    1,
                 ),
                 (
-                    "000001.SZ", "stock", date(2026, 1, 7), "none",
-                    Decimal("9.9"), Decimal("9.9"), Decimal("9.9"), Decimal("9.9"),
-                    Decimal("100"), Decimal("990"), Decimal("0.015"),
-                    "trusted", "hithink", 1,
+                    "000001.SZ",
+                    "stock",
+                    date(2026, 1, 7),
+                    "none",
+                    Decimal("9.9"),
+                    Decimal("9.9"),
+                    Decimal("9.9"),
+                    Decimal("9.9"),
+                    Decimal("100"),
+                    Decimal("990"),
+                    Decimal("0.015"),
+                    "trusted",
+                    "hithink",
+                    1,
                 ),
                 # A non-trusted row must be excluded from the curated layer.
                 (
-                    "000002.SZ", "stock", date(2026, 1, 7), "none",
-                    Decimal("5"), Decimal("5"), Decimal("5"), Decimal("5"),
-                    Decimal("10"), Decimal("50"), Decimal("0.005"),
-                    "suspect", "hithink", 1,
+                    "000002.SZ",
+                    "stock",
+                    date(2026, 1, 7),
+                    "none",
+                    Decimal("5"),
+                    Decimal("5"),
+                    Decimal("5"),
+                    Decimal("5"),
+                    Decimal("10"),
+                    Decimal("50"),
+                    Decimal("0.005"),
+                    "suspect",
+                    "hithink",
+                    1,
                 ),
                 # A row with no matching factor must be excluded (cannot compute qfq).
                 (
-                    "000003.SZ", "stock", date(2026, 1, 7), "none",
-                    Decimal("5"), Decimal("5"), Decimal("5"), Decimal("5"),
-                    Decimal("10"), Decimal("50"), Decimal("0.005"),
-                    "trusted", "hithink", 1,
+                    "000003.SZ",
+                    "stock",
+                    date(2026, 1, 7),
+                    "none",
+                    Decimal("5"),
+                    Decimal("5"),
+                    Decimal("5"),
+                    Decimal("5"),
+                    Decimal("10"),
+                    Decimal("50"),
+                    Decimal("0.005"),
+                    "trusted",
+                    "hithink",
+                    1,
                 ),
             ],
         )
@@ -169,6 +219,8 @@ def test_build_prices_qfq_from_db_is_idempotent(tmp_path) -> None:
     rows = _read(str(lake.root / "curated" / "prices_qfq" / "**" / "*.parquet"))
     assert len(rows) == 4
     assert rows[-1]["trade_date"] == date(2026, 1, 8)
+    assert list((lake.root / "curated").glob("prices_qfq.backup-*")) == []
+    assert list((lake.root / "curated").glob(".prices_qfq.replacing-*")) == []
 
 
 def test_staged_prices_are_not_visible_until_publish(tmp_path) -> None:
@@ -188,3 +240,112 @@ def test_staged_prices_are_not_visible_until_publish(tmp_path) -> None:
     assert Path(published.path) == published_path.resolve()
     assert published_path.exists()
     assert len(_read(str(published_path / "**" / "*.parquet"))) == 3
+
+
+def test_publish_rolls_back_if_staged_rename_fails(tmp_path, monkeypatch) -> None:
+    from app.lake.curated import _replace_directory
+
+    root = tmp_path / "curated"
+    root.mkdir()
+    target = root / "prices_qfq"
+    source = root / ".prices_qfq.tmp-test"
+    target.mkdir()
+    source.mkdir()
+    (target / "old.parquet").write_bytes(b"old")
+    (source / "new.parquet").write_bytes(b"new")
+    original_rename = Path.rename
+
+    def fail_staged_rename(path: Path, destination: Path):
+        if path == source:
+            raise OSError("simulated publish failure")
+        return original_rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", fail_staged_rename)
+    with pytest.raises(OSError, match="simulated publish failure"):
+        _replace_directory(source, target)
+
+    assert (target / "old.parquet").read_bytes() == b"old"
+    assert source.exists()
+    assert list(root.glob(".prices_qfq.replacing-*")) == []
+
+
+def test_publish_retries_transient_windows_directory_lock(tmp_path, monkeypatch) -> None:
+    from app.lake.curated import _replace_directory
+
+    root = tmp_path / "curated"
+    root.mkdir()
+    source = root / ".prices_qfq.tmp-test"
+    target = root / "prices_qfq"
+    source.mkdir()
+    (source / "new.parquet").write_bytes(b"new")
+    original_rename = Path.rename
+    calls = 0
+
+    def transient_lock(path: Path, destination: Path):
+        nonlocal calls
+        calls += 1
+        if path == source and calls < 3:
+            raise PermissionError("simulated transient lock")
+        return original_rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", transient_lock)
+    _replace_directory(source, target)
+
+    assert calls == 3
+    assert (target / "new.parquet").read_bytes() == b"new"
+
+
+def test_prepared_publish_can_restore_previous_tree_after_activation_failure(
+    tmp_path,
+) -> None:
+    lake = DataLake(tmp_path / "lake")
+    layer = CuratedLayer(lake)
+    root = lake.root / "curated"
+    target = root / "prices_qfq"
+    source = root / ".prices_qfq.tmp-test"
+    target.mkdir(parents=True)
+    source.mkdir()
+    (target / "old.parquet").write_bytes(b"old")
+    (source / "new.parquet").write_bytes(b"new")
+    staged = CuratedDatasetResult(
+        dataset="prices_qfq",
+        path=str(source),
+        row_count=1,
+        min_date="2026-01-05",
+        max_date="2026-01-05",
+        created_at="2026-01-05T00:00:00+00:00",
+    )
+
+    transaction = layer.prepare_prices_qfq_publish(staged)
+    assert (target / "new.parquet").read_bytes() == b"new"
+    assert transaction.retired_path is not None
+
+    layer.rollback_prices_qfq_publish(transaction)
+
+    assert (target / "old.parquet").read_bytes() == b"old"
+    assert (source / "new.parquet").read_bytes() == b"new"
+    assert not Path(transaction.retired_path).exists()
+
+
+def test_build_does_not_age_prune_recovery_or_staging_directories(tmp_path) -> None:
+    import os
+    from time import time
+
+    lake = DataLake(tmp_path / "lake")
+    db_path = tmp_path / "stock_master.duckdb"
+    _seed_db_tables(db_path)
+    root = lake.root / "curated"
+    legacy = root / "prices_qfq.backup-old"
+    staging = root / ".prices_qfq.tmp-old"
+    legacy.mkdir(parents=True)
+    staging.mkdir()
+    (legacy / "data.parquet").write_bytes(b"recovery")
+    (staging / "data.parquet").write_bytes(b"staging")
+    old = time() - 3 * 86400
+    os.utime(legacy, (old, old))
+    os.utime(staging, (old, old))
+
+    CuratedLayer(lake).build_prices_qfq_from_db(str(db_path))
+
+    assert (legacy / "data.parquet").read_bytes() == b"recovery"
+    assert (staging / "data.parquet").read_bytes() == b"staging"

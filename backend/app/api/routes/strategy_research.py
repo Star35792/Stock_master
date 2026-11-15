@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.api.dependencies import DatabaseSession, ResearchDatabaseSession
 from app.backtest.quantile_result import quantile_result_to_read
+from app.config.settings import settings
 from app.portfolio import PortfolioConstraints
 from app.schemas.price_value import PriceValueRequest
 from app.schemas.price_value_backtest import PriceValueBacktestRequest, PriceValueBacktestResponse
@@ -217,6 +218,8 @@ def preflight_factor_selection_backtest(
     db: DatabaseSession,
 ) -> FactorSelectionPreflightRead:
     """Read-only point-in-time preview; the actual run always rechecks inputs."""
+    if payload.code_version in {"auto", "workbench"}:
+        payload = payload.model_copy(update={"code_version": settings.app_code_version})
     return FactorSelectionPreflightRead.model_validate(check_factor_selection(
         db,
         payload=payload,
@@ -234,6 +237,8 @@ def run_factor_selection_backtest(
     db: DatabaseSession,
     research_db: ResearchDatabaseSession,
 ) -> FactorSelectionBacktestResult:
+    if payload.code_version in {"auto", "workbench"}:
+        payload = payload.model_copy(update={"code_version": settings.app_code_version})
     if payload.start_date > payload.end_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -305,12 +310,18 @@ def run_factor_selection_backtest(
             quantile_backtest=payload.quantile_backtest,
         )
         db.commit()
+        research_db.commit()
     except ValueError as exc:
         db.rollback()
+        research_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except Exception:
+        db.rollback()
+        research_db.rollback()
+        raise
 
     result = persisted.result
     return FactorSelectionBacktestResult(

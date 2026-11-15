@@ -1,5 +1,7 @@
 # ADR：不可回放 WAL 的无损恢复与预防
 
+> 后续策略覆盖（2026-11-12）：下文记录事故当时的自动备份流程；当前 `recover_duckdb_wal.py` 不再复制 DB/WAL，恢复后仍须校验行数并写审计。WAL 是已提交事务的组成部分，不得为节省空间直接删除。
+
 - 日期：2026-11-06
 - 状态：已接受并实施
 - 决策级别：T1（存储可用性修复；不改 schema、不改数据契约、不改 API）
@@ -51,7 +53,7 @@ ALTER TABLE "<schema>"."<table>" ALTER COLUMN "<column>" SET DEFAULT nextval('<s
 
 **恢复用 ATTACH 绕过，不删 WAL；预防靠模型层建表即带默认值 + 幂等 DDL + 立即 checkpoint。**
 
-1. **无损恢复**：从 `:memory:` 连接 `ATTACH '<db>' AS r`，ATTACH 提供了默认数据库上下文，回放因此正常进行；随后 `CHECKPOINT target`（**必须点名目标库**，裸 `CHECKPOINT` 只作用于默认库即 `:memory:`，是空操作）把 WAL 折进数据库文件并清空 WAL。此后用原版本 DuckDB 直接打开即正常。已固化为 `backend/scripts/maintenance/recover_duckdb_wal.py`：区分「被其他进程占用」与「WAL 不可回放」（占用则直接退出，不做备份——占用期间拷贝得到的是两个不同时刻的切片，回滚无法配对）；持主库写锁（`app/utils/duckdb_write_lock.py`，`timeout_seconds=0` 不排队）后再操作；自动备份 DB+WAL；恢复后校验 `raw.vendor_snapshot` 行数一致；并按 AGENT.MD「人工修复必须写审计」在 `metadata.job_log` 写一条 `job_type='repair'` 记录。
+1. **无损恢复**：从 `:memory:` 连接 `ATTACH '<db>' AS r`，ATTACH 提供了默认数据库上下文，回放因此正常进行；随后 `CHECKPOINT target`（**必须点名目标库**，裸 `CHECKPOINT` 只作用于默认库即 `:memory:`，是空操作）把 WAL 折进数据库文件并清空 WAL。此后用原版本 DuckDB 直接打开即正常。已固化为 `backend/scripts/maintenance/recover_duckdb_wal.py`：区分「被其他进程占用」与「WAL 不可回放」（占用则直接退出；占用期间拷贝得到的是两个不同时刻的切片，回滚无法配对）；持主库写锁（`app/utils/duckdb_write_lock.py`，`timeout_seconds=0` 不排队）后再操作；ATTACH 回放并 checkpoint；恢复后校验 `raw.vendor_snapshot` 行数一致；并按 AGENT.MD「人工修复必须写审计」在 `metadata.job_log` 写一条 `job_type='repair'` 记录。2026-11-12 起脚本不再自动复制 DB/WAL。
 2. **模型层建表即带默认值（根治）**：37 处序列主键列补上 `server_default=text("nextval('<seq>')")`（此前只有 9 处有）。`CREATE TABLE ... DEFAULT nextval(...)` 是**可安全回放**的，只有 `ALTER` 路径有毒。新库因此在 `create_all` 阶段就建出带默认值的表，**首次初始化零毒 ALTER**（实测 346 → 149 条语句，序列默认 ALTER 由 37 条降为 0 条）。
 3. **幂等 DDL**：`ensure_duckdb_sequences` 先读 `information_schema.columns.column_default`，默认值已等价于目标 `nextval('<seq>')` 时**跳过** DDL。比较走归一化（去空白、统一大小写、剥 schema 前缀），不一致时打 WARNING——静默降级会让人误以为问题已解决。
 4. **立即 checkpoint**：`initialize_database` 末尾调用公共 `checkpoint_duckdb()`，把 schema DDL 折进数据库文件，不留在 WAL 里。`slim_metadata_db.py` 单独调用 `ensure_duckdb_sequences`、绕过 `initialize_database`，因此**也显式调用同一函数**，不留未覆盖的写入路径。checkpoint 失败只记 WARNING 不阻断启动——checkpoint 失败时数据库本身仍健康，让 API 起不来代价更大。

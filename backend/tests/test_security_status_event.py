@@ -66,6 +66,64 @@ def test_statuses_on_date_returns_latest_observation(
     assert repo.status_on_date(db, symbol="600000.SH", trade_date=date(2026, 1, 8)) == "normal"
 
 
+def test_explicit_status_does_not_extend_one_day_observation(
+    db: Session, repo: SecurityStatusEventRepository
+) -> None:
+    repo.record_status(
+        db,
+        symbol="600000.SH",
+        trade_date=date(2026, 1, 5),
+        status="suspended",
+        source_name="test",
+    )
+    repo.record_status(
+        db,
+        symbol="000001.SZ",
+        trade_date=date(2026, 1, 1),
+        status="suspended",
+        source_name="test",
+        effective_from=date(2026, 1, 4),
+        effective_to=date(2026, 1, 6),
+    )
+    repo.record_status(
+        db,
+        symbol="300001.SZ",
+        trade_date=date(2026, 1, 1),
+        status="suspended",
+        source_name="test",
+        effective_from=date(2026, 1, 4),
+        effective_to=None,
+    )
+    db.commit()
+
+    assert repo.explicit_statuses_on_date(
+        db, symbols={"600000.SH", "000001.SZ"}, trade_date=date(2026, 1, 5)
+    ) == {"600000.SH": "suspended", "000001.SZ": "suspended"}
+    assert repo.explicit_statuses_on_date(
+        db,
+        symbols={"600000.SH", "000001.SZ", "300001.SZ"},
+        trade_date=date(2026, 1, 6),
+    ) == {"000001.SZ": "suspended"}
+
+
+def test_explicit_status_conflict_stays_unresolved(
+    db: Session, repo: SecurityStatusEventRepository
+) -> None:
+    for source_name, status in (("source-a", "suspended"), ("source-b", "normal")):
+        repo.record_status(
+            db,
+            symbol="600000.SH",
+            trade_date=date(2026, 1, 5),
+            status=status,
+            source_name=source_name,
+        )
+    db.commit()
+
+    assert repo.explicit_statuses_on_date(
+        db, symbols={"600000.SH"}, trade_date=date(2026, 1, 5)
+    ) == {"600000.SH": "conflict"}
+
+
 def test_suspended_symbols_on_date(db: Session, repo: SecurityStatusEventRepository) -> None:
     repo.record_status(
         db,

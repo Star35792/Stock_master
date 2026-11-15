@@ -16,10 +16,14 @@
 ## 事实源边界
 
 - 主 DuckDB（`data/stock_master.duckdb`）保存市场、因子、组合、风控、模拟推演与控制面事实；独立研究 DuckDB 保存策略产物，SQLite 保存手工持仓账本，本地 Parquet 保存温层历史及 curated 数据集。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
+- 本地单份保留指各项必要事实只有一份权威数据，不再默认生成整库备份。`curated/prices_qfq` 发布只在切换期间暂存旧目录，成功后删除；失败构建和旧暂存定期清理。`warm/exported` 的有效父链、增量层、active 与审计引用仍是事实组成部分，清理时必须按引用关系而非目录年龄判定。
+- 历史补齐用的 `_rebuild_curated_qfq_supplement.py` 同样在行数校验后通过共用切换逻辑发布，成功后不保留 `prices_qfq.prev-*` 副本。
+- `price_value_screens/` 只保留最新全量研究报告和对应的冻结 cohort；旧 `price_value_screen` 任务日志保留日期、状态、数量与 `snapshot_hash` 等摘要，并移除已清理文件的路径引用。报告与 cohort 的当前引用先落库，再清理旧文件。用户已接受旧全量报告无法精确回看的取舍。
 - 温层 Parquet 除 curated 数据集外还承载**研究层表**：只存在于 Parquet、无 ORM 模型、无 Alembic 迁移、不出现在控制面 `information_schema`。当前有一张：`research.valuation_history`（东财估值历史序列，全部行 `pit_verified=false`，只用于研究口径）。判定标准见 `aiDoc/modules/schema-plan.md` §17，字段级 PIT 判定与偏差登记见 `aiDoc/data/20261026-valuation-history-backfill.md`。研究层表不得被 `market` 层的通用读取器拾取。
 - 手工记账的真实持仓账本存独立 SQLite `data/positions.db`（`positions` 域，2026-10-23 决策，见 [ADR](20261023-1925-position-ledger-sqlite.md)）；账本持仓的估值价格仍取 DuckDB `market` 可信层，持仓与盈亏由流水重放推导、不落库。
 - strategy 回测产物（`backtest_*`、`training_artifact`）自 2026-10-24 起存独立 `data/research.duckdb`：研究脚本持 `data/research_write.lock` 写产物，API/维护进程写主库，两域不再竞争同一把文件级写锁（见 [ADR](20261024-1427-research-database-split.md)）；行情/因子/日历读路径不变。维护/研究脚本写任一库前走 `app/utils/duckdb_write_lock.py` 对应域锁。
 - `raw` 保存来源、批次、原始 payload 和异常数据。
+- HiThink API 的 14 日回看及公司行为 dump 重跑只追加同源同键的新内容版本；相同内容只留一份 raw 行，批次仍记录本轮观测和跳过数量。`market.daily_bar` 对值与选中 raw ID 均未变化的行不重写，避免重复同步持续制造主库空闲块。历史重复行尚未按此规则回收。
 - `market` 是可信消费层。
 - `factor` 保存可复现的因子定义、运行和值。
 - `strategy` 保存回测运行、成交、净值、持仓和绩效。
@@ -31,10 +35,13 @@
 - DuckDB 写入协调采用操作系统锁：同路径常驻 `.guard` 文件维持稳定锁对象，PID 文件仅作诊断，持有时间不构成抢锁理由；退出或进程崩溃后 OS 释放锁。不要删除 `.guard` 文件。兼容旧 PID 文件时，存活或未知持有者保持阻断。研究库启动初始化与请求访问共同协调研究锁；分库集成测试的主库不建立 strategy 表。
 
 - `backend/app/lake`：本地 Parquet 数据湖和批量扫描工具；curated 数据集是因子服务可配置的生产消费源，与 DuckDB 事实层共同组成单机存储架构。
-- Warm release 表带 `snapshot/delta` 模式：完整快照截断同表父链，增量表按业务键由新层覆盖旧层；`all_ok=false` 的失败 release 不参与 latest 解析。同 tag 导出禁止覆盖。
+- 数据湖离线分区压缩先写同级暂存目录、核对行数，再切换目录；`daily_loop` 在文件切换后暂留旧目录，只有两条 release 激活事务提交成功才回收，激活或提交失败则恢复旧目录并保留新暂存供诊断。顶层目录重命名在 Windows 文件句柄短暂延迟释放时进行有界重试，持续占用仍失败并恢复原目录。普通构建不按名称或年龄自动清理历史目录。
+- Warm release 表带 `snapshot/delta` 模式：完整快照截断同表父链，增量表按业务键由新层覆盖旧层；`all_ok=false` 的失败 release 不参与 latest 解析。同 tag 发布禁止覆盖（含东财估值历史采集），发布前检查父链所有节点及 16 层上限；读侧遇父链循环或超限直接报错，不静默截断。
+- 温层大表导出先占用新的 release 目录，逐表行数校验失败即停止后续大表写入；全部通过后才原子写入成功 summary。导出失败清理本次未发布目录，避免留下整套 Parquet；硬中断或删除受阻仍可能留下无有效 summary 的目录，需后续核对清理。历史失败目录也须按引用与状态核对后单独清理。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。
 - API 生命周期管理 `AutoDataSyncWorker`：启动后在后台线程串行执行全市场未复权日线同步；股票横截面覆盖达标后触发 `daily_loop(skip_sync=true)`，依次更新 QFQ、暂存 curated 价格、计算因子并经发布闸门原子切换。行情日期未前进但该日没有已发布闭环时仍会重试。每次结束后等待配置间隔再检查，关闭时等待当前任务完成；使用单 worker，任务与水位复用 `JobLog`（物理表 `metadata.job_log`）。
-- HiThink dump 的批量日线构建对已有通达信 raw 或跨源冲突的日期复用通用对账；冲突行保留原始值与 raw ID，但退出可信消费路径，后续主源修订不得由批量 SQL 直接恢复可信。通达信目前仍由独立采集入口获取，是对账源而非自动故障切换源。
+- HiThink dump 的批量日线构建保持集合式历史导入；存在任一第二来源、量额缺失/一零一正、停牌或其他硬拒绝、价格连续性/极端涨幅警告、历史盘中采集时点的日期在提交前复用公共质量与对账服务。冲突、警告及硬拒绝行保留原始值与 raw ID 供审计但退出可信消费路径，重复复核只复用未关闭的同类问题。通达信目前仍由独立采集入口获取，是对账源而非自动故障切换源。
+- 近期 QFQ 缺口补采先分页生成分类计划：无行和量额缺失可进入自动采集，其他 suspect 仅诊断；明确停牌只接受当天观察或显式有效区间，上市日未知保持证据不足。部分来源或部分键失败记 `partial`，相同 raw 内容幂等复用并继续允许重试 market 构建。补采截止日与逐证券同步共用上海时间已完整过去日期。
 - 可选的证据补采在每轮自动同步结束时独立执行：公司行为按 Tushare → 巨潮 → 东方财富逐证券兜底；换手率按 Tushare → 东方财富逐证券兜底；退市名单每天最多一次，Tushare 全市场响应复用给沪深两所，缺口再走交易所接口。每次尝试各写 `raw.import_batch`，成功响应写 `raw.vendor_snapshot`；同一数据源故障不会回滚已认证的日线/因子发布。字段缺失时只返回部分证据，三条链均不自动写 `market` 或解锁策略/回测。
 - 同进程 `PriceValueInputPrepWorker` 于交易日 21:00 后准备当晚估值观察值与供应商披露 ROE，不生成通用 ROE 代理；`PriceValueScreenWorker` 在 00:00 生成上一完成交易日的只读全市场报告，并于启动和白天补查。三个 worker 共用进程内数据库写锁；仅适用于单 API worker，其他独立写库进程仍须避开。HiThink 证券与日历刷新先留 raw，证券上市日低覆盖时重取小页，实际变化才写 market，已知上市日冲突即失败。东方财富当前估值接口失败时，同日晚间可使用供应商标注**当天**交易日期的估值分析分页；估值与 ROE 原始页先入 `raw`，同日可信日线及公告时间验收后才附入研究用 `market.valuation_snapshot`。这些行带 `_research_batch_id`，通用估值/市值因子读取会排除；报告仅作人工复核。旧估值直写入口已禁用。
 - 手工历史估值补采脚本按供应商 `TRADE_DATE` 获取估值分析日期列表，只向 DuckDB `raw` 留存独立批次和真实抓取时刻。因尚无历史首次可得时间与生产因子消费隔离，它不发布 `market`、`factor` 或筛选报告；运行脚本需与持有 DuckDB 的 API 进程错开。

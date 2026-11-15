@@ -21,7 +21,6 @@ process holds the database.
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,21 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the DuckDB database file.",
     )
     parser.add_argument(
-        "--backup-dir",
-        type=Path,
-        default=Path("data/backups"),
-        help="Directory that receives the pre-recovery copy of the database and WAL.",
-    )
-    parser.add_argument(
         "--lock-path",
         type=Path,
         default=DEFAULT_LOCK,
         help="Writer lock guarding the main database.",
-    )
-    parser.add_argument(
-        "--skip-backup",
-        action="store_true",
-        help="Skip the backup copy. Only safe when another copy already exists.",
     )
     return parser
 
@@ -103,7 +91,7 @@ def _row_count(con: duckdb.DuckDBPyConnection, schema: str, table: str) -> int:
         return -1
 
 
-def _write_audit(database: Path, wal_size: int, backups: list[Path]) -> None:
+def _write_audit(database: Path, wal_size: int) -> None:
     """Record the recovery in the ``metadata`` domain.
 
     AGENT.MD requires that a manual repair is auditable, so the recovery is
@@ -123,12 +111,11 @@ def _write_audit(database: Path, wal_size: int, backups: list[Path]) -> None:
             [
                 "duckdb_wal_recovery",
                 wal_size,
-                len(backups),
+                0,
                 "replayed an unreplayable DuckDB WAL via ATTACH (duckdb#18259)",
                 {
                     "database": str(database),
                     "wal_size_bytes": wal_size,
-                    "backups": [str(path) for path in backups],
                     "recovered_at": datetime.now(UTC).isoformat(),
                 },
             ],
@@ -184,26 +171,6 @@ def main() -> int:
                 return 0
 
             wal_size = wal.stat().st_size if wal.exists() else 0
-            backups: list[Path] = []
-            if not args.skip_backup:
-                args.backup_dir.mkdir(parents=True, exist_ok=True)
-                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                for source in (database, wal):
-                    if not source.exists():
-                        continue
-                    target = args.backup_dir / f"{source.name}.pre-recovery-{stamp}"
-                    try:
-                        shutil.copy2(source, target)
-                    except OSError as exc:
-                        print(f"recover.error=backup_failed {type(exc).__name__}: {exc}")
-                        print(
-                            "recover.hint=the database was not modified; "
-                            "fix the backup path and retry"
-                        )
-                        return 1
-                    backups.append(target)
-                    print(f"recover.backup={target}")
-
             escaped = database.as_posix().replace("'", "''")
             con = duckdb.connect(":memory:")
             try:
@@ -233,7 +200,7 @@ def main() -> int:
                 print("recover.error=row_count_mismatch")
                 return 1
 
-            _write_audit(database, wal_size, backups)
+            _write_audit(database, wal_size)
             print("recover.status=recovered")
             print(f"recover.database={database}")
             print(f"recover.wal_remaining={wal.exists()}")

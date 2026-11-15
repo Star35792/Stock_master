@@ -10,6 +10,7 @@ database is not available.
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -27,24 +28,35 @@ from app.services.value_investing_research_card import (
 UTC = UTC
 
 
-def _control_plane() -> duckdb.DuckDBPyConnection | None:
-    """Open the control plane read-only, or return None if it is not there."""
+def _control_plane() -> duckdb.DuckDBPyConnection:
+    """Open an explicitly enabled production control plane read-only."""
     from pathlib import Path
 
-    path = Path("data/stock_master.duckdb")
+    if os.getenv("RUN_PRODUCTION_DATA_AUDIT") != "1":
+        pytest.skip("set RUN_PRODUCTION_DATA_AUDIT=1 to run production-data audits")
+    path = Path(os.getenv("PRODUCTION_CONTROL_PLANE_PATH", "data/stock_master.duckdb")).resolve()
     if not path.exists():
-        return None
+        pytest.fail(f"production control plane does not exist: {path}")
     try:
         return duckdb.connect(str(path), read_only=True)
-    except duckdb.Error:
-        return None
+    except duckdb.Error as exc:
+        pytest.fail(f"cannot open production control plane read-only at {path}: {exc}")
 
 
+def test_explicit_production_audit_fails_when_database_is_missing(tmp_path, monkeypatch) -> None:
+    missing = tmp_path / "missing.duckdb"
+    monkeypatch.setenv("RUN_PRODUCTION_DATA_AUDIT", "1")
+    monkeypatch.setenv("PRODUCTION_CONTROL_PLANE_PATH", str(missing))
+
+    with pytest.raises(pytest.fail.Exception) as caught:
+        _control_plane()
+    assert str(missing.resolve()) in str(caught.value)
+
+
+@pytest.mark.production_data
 def test_a_decline_streak_counts_backwards_from_the_latest_period():
     """The streak is "the last N years fell", not "N falls anywhere"."""
     connection = _control_plane()
-    if connection is None:
-        pytest.skip("control plane is not available")
     try:
         rows = connection.execute(
             """
@@ -85,11 +97,10 @@ def test_a_decline_streak_counts_backwards_from_the_latest_period():
         assert streak is None or 0 <= streak <= 3, symbol
 
 
+@pytest.mark.production_data
 def test_the_trap_signals_are_observable_on_the_control_plane():
     """The trap gate must have real evidence behind it, not empty rows."""
     connection = _control_plane()
-    if connection is None:
-        pytest.skip("control plane is not available")
     try:
         revenue_periods = connection.execute(
             """
@@ -207,9 +218,7 @@ def test_a_later_capture_wins_over_an_earlier_one():
 
 
 def test_the_card_ignores_an_unknown_observation_type():
-    observation = _observation(
-        "601799.SH", "some_future_source", {"business": "不该被采纳"}
-    )
+    observation = _observation("601799.SH", "some_future_source", {"business": "不该被采纳"})
     card = build_card("601799.SH", [observation])
     assert card.business is None
     assert card.observation_refs == ()

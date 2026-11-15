@@ -1,17 +1,20 @@
 """Backtest fee models.
 
-The fee model is versioned so that research contracts can reproduce the exact
-cost assumptions of a historical run. The legacy ``linear_commission_v1`` is
-preserved for backward compatibility; new runs should use ``a_share_cost_v1``
-which models A-share trading friction more realistically.
+The fee model is versioned so research contracts retain historical cost
+assumptions. V1 remains stable; V2 uses instrument type and trade date.
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Protocol
 
 LINEAR_COMMISSION_V1 = "linear_commission_v1"
 A_SHARE_COST_V1 = "a_share_cost_v1"
+A_SHARE_COST_V2 = "a_share_cost_v2"
+
+_MODERN_TRANSFER_FEE_START = date(2022, 4, 29)
+_STAMP_DUTY_HALVING_DATE = date(2023, 8, 28)
 
 ROUNDING_MODE = "ROUND_HALF_UP"
 
@@ -54,6 +57,9 @@ class FeeModel(Protocol):
         reference_price: Decimal,
         quantity: int,
         side: str,
+        symbol: str | None = None,
+        security_type: str | None = None,
+        trade_date: date | None = None,
     ) -> FeeResult: ...
 
 
@@ -72,6 +78,9 @@ class LinearCommissionFeeModel:
         reference_price: Decimal,
         quantity: int,
         side: str,
+        symbol: str | None = None,
+        security_type: str | None = None,
+        trade_date: date | None = None,
     ) -> FeeResult:
         if side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
@@ -120,6 +129,9 @@ class AShareCostFeeModel:
         reference_price: Decimal,
         quantity: int,
         side: str,
+        symbol: str | None = None,
+        security_type: str | None = None,
+        trade_date: date | None = None,
     ) -> FeeResult:
         if side not in {"buy", "sell"}:
             raise ValueError("side must be buy or sell")
@@ -171,6 +183,79 @@ class AShareCostFeeModel:
         }
 
 
+@dataclass(frozen=True)
+class AShareCostV2FeeModel(AShareCostFeeModel):
+    """Instrument-aware costs for trades from 2022-04-29 onward.
+
+    V1 remains frozen.  V2 requires explicit instrument type and fill date so
+    ETF trades never inherit stock taxes and the 2023 stamp-duty change is
+    applied to historical stock sells.  Earlier transfer-fee schedules are
+    outside this version and fail closed.
+    """
+
+    version: str = A_SHARE_COST_V2
+    name: str = "a_share_cost_instrument_aware"
+    legal_stamp_duty_schedule: bool = True
+
+    def apply(
+        self,
+        *,
+        reference_price: Decimal,
+        quantity: int,
+        side: str,
+        symbol: str | None = None,
+        security_type: str | None = None,
+        trade_date: date | None = None,
+    ) -> FeeResult:
+        if not symbol or security_type not in {"stock", "etf"} or trade_date is None:
+            raise ValueError("a_share_cost_v2 requires symbol, security_type and trade_date")
+        if trade_date < _MODERN_TRANSFER_FEE_START:
+            raise ValueError("a_share_cost_v2 requires trade_date >= 2022-04-29")
+        result = super().apply(
+            reference_price=reference_price,
+            quantity=quantity,
+            side=side,
+        )
+        if security_type == "etf":
+            return FeeResult(
+                fill_price=result.fill_price,
+                commission=result.commission,
+                stamp_duty=Decimal(),
+                transfer_fee=Decimal(),
+                exchange_fee=result.exchange_fee,
+                slippage_cost=result.slippage_cost,
+            )
+        if self.legal_stamp_duty_schedule and side == "sell":
+            rate = (
+                Decimal("0.001")
+                if trade_date < _STAMP_DUTY_HALVING_DATE
+                else Decimal("0.0005")
+            )
+            amount = Decimal(quantity) * result.fill_price
+            stamp_duty = (amount * rate).quantize(
+                Decimal("0.000001"), rounding=ROUNDING_MODE
+            )
+            return FeeResult(
+                fill_price=result.fill_price,
+                commission=result.commission,
+                stamp_duty=stamp_duty,
+                transfer_fee=result.transfer_fee,
+                exchange_fee=result.exchange_fee,
+                slippage_cost=result.slippage_cost,
+            )
+        return result
+
+    def to_contract(self) -> dict[str, str]:
+        return {
+            **super().to_contract(),
+            "security_type_fee_rule": "stock_or_etf_v1",
+            "stock_stamp_duty_rule": (
+                "legal_20230828_v1" if self.legal_stamp_duty_schedule else "fixed_rate_v1"
+            ),
+            "supported_trade_date_start": _MODERN_TRANSFER_FEE_START.isoformat(),
+        }
+
+
 def build_fee_model(
     *,
     fee_model_version: str = LINEAR_COMMISSION_V1,
@@ -186,8 +271,13 @@ def build_fee_model(
     Omitted components use the selected model's defaults. Explicit zero values
     are preserved so execution matches the recorded research cost assumptions.
     """
-    if fee_model_version == A_SHARE_COST_V1:
-        return AShareCostFeeModel(
+    if fee_model_version in {A_SHARE_COST_V1, A_SHARE_COST_V2}:
+        model_type = (
+            AShareCostFeeModel
+            if fee_model_version == A_SHARE_COST_V1
+            else AShareCostV2FeeModel
+        )
+        model_kwargs = dict(
             commission_rate=commission_rate,
             min_commission=Decimal("5") if min_commission is None else min_commission,
             stamp_duty_rate=(
@@ -201,6 +291,9 @@ def build_fee_model(
             ),
             slippage_bps=slippage_bps,
         )
+        if fee_model_version == A_SHARE_COST_V2:
+            model_kwargs["legal_stamp_duty_schedule"] = sell_stamp_duty_rate is None
+        return model_type(**model_kwargs)
     if fee_model_version == LINEAR_COMMISSION_V1:
         if min_commission or sell_stamp_duty_rate or transfer_fee_rate or exchange_fee_rate:
             raise ValueError(

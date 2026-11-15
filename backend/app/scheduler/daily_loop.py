@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import settings
 from app.database.session import SessionLocal, engine
 from app.lake import CuratedLayer, DataLake
-from app.lake.curated import CuratedDatasetResult
+from app.lake.curated import CuratedDatasetResult, _cleanup
 from app.repositories.lake import ReleaseRepository
 from app.repositories.market import SecurityRepository, TradingCalendarRepository
 from app.repositories.system import JobLogRepository
@@ -42,7 +42,6 @@ from app.services import HithinkDailySyncResult
 from app.services.adjustment_build import AdjustmentBuildService
 from app.services.auto_data_sync import MIN_STOCK_COVERAGE_RATE, completed_daily_cutoff
 from app.services.release import ReleaseService
-from app.utils.discard import discard_directory
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +138,9 @@ def run_daily_loop(
         today = target_date or completed_daily_cutoff()
         cal_repo = trading_calendar_repository or TradingCalendarRepository()
         cal_entries = cal_repo.get_many_on_date(
-            db, exchanges={"SH", "SZ", "BJ"}, trade_date=today,
+            db,
+            exchanges={"SH", "SZ", "BJ"},
+            trade_date=today,
         )
         if not cal_entries:
             error_message = (
@@ -215,9 +216,7 @@ def run_daily_loop(
         db.commit()
 
         if skip_sync:
-            coverage = AutoDataSyncRepository().market_coverage_on_date(
-                db, trade_date=today
-            )
+            coverage = AutoDataSyncRepository().market_coverage_on_date(db, trade_date=today)
             job.metadata_ = {**(job.metadata_ or {}), "market_coverage": coverage}
             if coverage["stock_coverage_rate"] < MIN_STOCK_COVERAGE_RATE:
                 error_message = (
@@ -256,9 +255,7 @@ def run_daily_loop(
                     # suspect, so nothing downstream silently reads a 11:00
                     # price as the day's close.  Recorded here because the fix
                     # is an operator action: re-sync after 15:30.
-                    "intraday_snapshot_count": (
-                        sync_result.market_build.intraday_snapshot_count
-                    ),
+                    "intraday_snapshot_count": (sync_result.market_build.intraday_snapshot_count),
                     "intraday_snapshot_dates": [
                         trade_date.isoformat() for trade_date in intraday_dates
                     ],
@@ -389,7 +386,6 @@ def run_daily_loop(
                 **curated_metadata,
             }
             release_service = ReleaseService()
-            release_repository = ReleaseRepository()
             market_checksum = _compute_market_qfq_checksum(
                 db,
                 source_name="hithink_finance_dump",
@@ -474,12 +470,9 @@ def run_daily_loop(
                     "alternative_failures": alt_result.failures,
                 }
                 if alt_result.status == "failed":
-                    result.alternative_error = (
-                        "alternative data collection failed: "
-                        + "; ".join(
-                            f"{name}: {message}"
-                            for name, message in sorted(alt_result.failures.items())
-                        )
+                    result.alternative_error = "alternative data collection failed: " + "; ".join(
+                        f"{name}: {message}"
+                        for name, message in sorted(alt_result.failures.items())
                     )
                 elif alt_result.status == "partial":
                     result.alternative_error = (
@@ -492,9 +485,7 @@ def run_daily_loop(
                     "alternative_status": "failed",
                     "alternative_sources": {},
                     "alternative_empty_datasets": [],
-                    "alternative_failures": {
-                        "collector": f"{type(exc).__name__}: {exc}"
-                    },
+                    "alternative_failures": {"collector": f"{type(exc).__name__}: {exc}"},
                 }
                 result.alternative_error = (
                     f"alternative data collection raised: {type(exc).__name__}: {exc}"
@@ -512,9 +503,7 @@ def run_daily_loop(
                 code_version=code_version,
                 release_id=factor_release_id,
                 curated_path=(
-                    result.curated_result.path
-                    if result.curated_result is not None
-                    else None
+                    result.curated_result.path if result.curated_result is not None else None
                 ),
                 session_factory=session_factory,
                 job_log_repository=repo,
@@ -524,9 +513,7 @@ def run_daily_loop(
             if factor_result.failed:
                 result.failed = True
                 job.status = "failed"
-                job.error_message = (
-                    f"factor pipeline failed services: {factor_result.failed}"
-                )
+                job.error_message = f"factor pipeline failed services: {factor_result.failed}"
             elif factor_result.empty:
                 job.status = "partial"
             else:
@@ -589,9 +576,9 @@ def run_daily_loop(
                     result.failed = True
                     job.status = "failed"
                     job.error_message = (
-                        job.error_message or ""
-                    ) + "; publish gate blocked: " + "; ".join(
-                        job.metadata_.get("reason_codes", [])
+                        (job.error_message or "")
+                        + "; publish gate blocked: "
+                        + "; ".join(job.metadata_.get("reason_codes", []))
                     )
                 else:
                     job.metadata_["gate_status"] = "passed"
@@ -600,22 +587,14 @@ def run_daily_loop(
                         result.market_release_id is not None
                         and result.curated_release_id is not None
                     ):
-                        published = CuratedLayer(DataLake()).publish_prices_qfq(
-                            result.curated_result
-                        )
-                        result.curated_result = replace(
-                            published,
-                            release_id=result.curated_release_id,
+                        result.curated_result = _publish_and_activate_curated(
+                            db,
+                            layer=CuratedLayer(DataLake()),
+                            staged=result.curated_result,
+                            market_release_id=result.market_release_id,
+                            curated_release_id=result.curated_release_id,
                         )
                         job.metadata_["curated_path"] = result.curated_result.path
-                        release_repository = ReleaseRepository()
-                        release_repository.activate(
-                            db, release_id=result.market_release_id
-                        )
-                        release_repository.activate(
-                            db, release_id=result.curated_release_id
-                        )
-                        db.commit()
                         logger.info(
                             "Activated releases market=%s curated=%s",
                             result.market_release_id,
@@ -623,6 +602,7 @@ def run_daily_loop(
                         )
             except Exception as exc:  # noqa: BLE001 - gate failure must fail closed
                 logger.exception("Certification or release activation failed: %s", exc)
+                db.rollback()
                 if job.metadata_ is None:
                     job.metadata_ = {}
                 job.metadata_["gate_status"] = "blocked"
@@ -676,17 +656,46 @@ def run_daily_loop(
     if result.failed and result.curated_result is not None:
         staged_path = Path(result.curated_result.path)
         if staged_path.name.startswith(".prices_qfq.tmp-"):
-            discard_directory(staged_path)
+            _cleanup(staged_path)
 
     logger.info(
-        "Daily loop completed: failed=%s sync_trusted=%s factor_rows=%s "
-        "alternative=%s",
+        "Daily loop completed: failed=%s sync_trusted=%s factor_rows=%s alternative=%s",
         result.failed,
         result.sync_result.market_build.trusted_count if result.sync_result else 0,
         result.factor_result.total_rows if result.factor_result else 0,
         result.alternative_result.status if result.alternative_result else "skipped",
     )
     return result
+
+
+def _publish_and_activate_curated(
+    db: Session,
+    *,
+    layer: CuratedLayer,
+    staged: CuratedDatasetResult,
+    market_release_id: str,
+    curated_release_id: str,
+    release_repository: ReleaseRepository | None = None,
+) -> CuratedDatasetResult:
+    """Keep files and active-release state consistent across activation failure."""
+    transaction = layer.prepare_prices_qfq_publish(staged)
+    repository = release_repository or ReleaseRepository()
+    try:
+        repository.activate(db, release_id=market_release_id)
+        repository.activate(db, release_id=curated_release_id)
+        db.commit()
+    except Exception as activation_exc:
+        db.rollback()
+        try:
+            layer.rollback_prices_qfq_publish(transaction)
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                f"{activation_exc}; curated rollback failed: "
+                f"{type(rollback_exc).__name__}: {rollback_exc}"
+            ) from rollback_exc
+        raise
+    layer.finalize_prices_qfq_publish(transaction)
+    return replace(transaction.result, release_id=curated_release_id)
 
 
 def create_daily_loop_scheduler(
@@ -843,9 +852,7 @@ def _gather_certification_metadata(
             meta["reason_codes"].append("DATA_STALE")
         meta["market_max_date"] = str(row) if row else None
 
-        coverage = AutoDataSyncRepository().market_coverage_on_date(
-            db, trade_date=target_date
-        )
+        coverage = AutoDataSyncRepository().market_coverage_on_date(db, trade_date=target_date)
         meta["market_coverage"] = coverage
         if coverage["stock_coverage_rate"] < MIN_STOCK_COVERAGE_RATE:
             meta["gate_market_coverage_incomplete"] = True
@@ -958,12 +965,11 @@ def _gather_certification_metadata(
                 incomplete_factors.append(factor_name)
         meta["daily_factor_coverage"] = factor_coverage
         meta["daily_factor_incomplete"] = [
-            name for name, row in factor_coverage.items()
+            name
+            for name, row in factor_coverage.items()
             if row["coverage_rate"] < MIN_STOCK_COVERAGE_RATE
         ]
-        meta["core_factor_coverage"] = {
-            name: factor_coverage[name] for name in CORE_PRICE_FACTORS
-        }
+        meta["core_factor_coverage"] = {name: factor_coverage[name] for name in CORE_PRICE_FACTORS}
         meta["core_factor_incomplete"] = incomplete_factors
         if incomplete_factors:
             meta["gate_core_factor_partial"] = True

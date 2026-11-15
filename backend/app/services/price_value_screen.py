@@ -1,13 +1,16 @@
 """Nightly, read-only PE/PB/reported-ROE coverage for human research."""
 
 import json
+import logging
 import os
+import re
 from collections import Counter
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -31,6 +34,10 @@ from app.services.price_value_shortlist import (
 from app.services.price_value_tracking import build_cohort
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+logger = logging.getLogger(__name__)
+_SCREEN_ARTIFACT_NAME = re.compile(
+    r"^(?:\d{4}-\d{2}-\d{2}|no-calendar)-[0-9a-f]{20}(?:\.cohort)?\.json$"
+)
 SCREEN_VERSION = "relative_value_research_v7"
 REQUIRED_EXCHANGES = {"SH", "SZ", "BJ"}
 FINANCIAL_TOKENS = (
@@ -203,6 +210,14 @@ class PriceValueScreenService:
         }
         for security in stocks:
             bar = bars.get(security.symbol)
+            # This is a current-research screen.  The security master carries
+            # the auditable current-name treatment state; historical bars stay
+            # NULL unless their selected raw row has date-specific evidence.
+            treatment_status = (
+                security.special_treatment_status
+                or (bar.special_treatment_status if bar else None)
+                or ""
+            ).strip().lower()
             valuation = valuations.get(security.symbol)
             pe = _vendor_pe(valuation)
             payload = (
@@ -240,10 +255,9 @@ class PriceValueScreenService:
                 )
                 coverage["reported_roe"] += reported_roe is not None
                 coverage["listing_date"] += security.list_date is not None
-                coverage["treatment_known"] += bool(
-                    bar and (bar.special_treatment_status or "").strip().lower()
-                    in {"normal", "none", "st", "*st"}
-                )
+                coverage["treatment_known"] += treatment_status in {
+                    "normal", "none", "st", "*st"
+                }
             reasons = list(global_reasons)
             if not security.is_active or (
                 target and security.delist_date and security.delist_date <= target
@@ -276,9 +290,7 @@ class PriceValueScreenService:
                 reasons.append("untrusted_quote")
             elif bar.is_suspended:
                 reasons.append("suspended")
-            elif (bar.special_treatment_status or "").strip().lower() not in {
-                "normal", "none"
-            }:
+            elif treatment_status not in {"normal", "none"}:
                 reasons.append("treatment_unknown_or_restricted")
             elif not _positive(bar.volume) or not _positive(bar.amount):
                 reasons.append("liquidity_missing")
@@ -499,6 +511,7 @@ class PriceValueScreenService:
                         cohort_name = self._write_cohort(existing)
                         latest_job.metadata_ = {**metadata, "cohort_name": cohort_name}
                         db.commit()
+                    self._prune_superseded_artifacts(db, latest_job)
                     existing["run_id"] = latest_job.id
                     return existing
 
@@ -544,7 +557,49 @@ class PriceValueScreenService:
                 "selection_qualified_count": report["selection"]["qualified_count"],
                 "selection_shortlist_count": report["selection"]["shortlist_count"],
             }
+        self._prune_superseded_artifacts(db, job)
         return report
+
+    def _prune_superseded_artifacts(self, db: Session, current_job: object) -> None:
+        """Retain the current report/cohort and historical job summaries only."""
+        try:
+            self._prune_superseded_artifacts_unchecked(db, current_job)
+        except Exception:
+            logger.exception("Screen artifact cleanup failed; current report remains published")
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception("Could not roll back failed screen artifact cleanup")
+
+    def _prune_superseded_artifacts_unchecked(self, db: Session, current_job: object) -> None:
+        metadata = getattr(current_job, "metadata_", None) or {}
+        keep = {metadata.get("artifact_name"), metadata.get("cohort_name")}
+        if None in keep or any(
+            not isinstance(name, str)
+            or not _SCREEN_ARTIFACT_NAME.fullmatch(name)
+            or self._load_artifact(name) is None
+            for name in keep
+        ):
+            return
+        retired = self.repository.retire_screen_artifact_references(
+            db, keep_job_id=current_job.id
+        )
+        if retired:
+            db.commit()
+        for path in self.output_dir.iterdir():
+            if path.name in keep:
+                continue
+            artifact = _SCREEN_ARTIFACT_NAME.fullmatch(path.name)
+            stale_temp = (
+                path.name.startswith((".price-value-", ".price-value-cohort-"))
+                and path.suffix == ".tmp"
+                and path.stat().st_mtime < time() - 172800
+            )
+            if path.is_file() and (artifact or stale_temp):
+                try:
+                    path.unlink()
+                except OSError:
+                    logger.warning("Could not remove old screen artifact: %s", path, exc_info=True)
 
     def _write_cohort(self, report: dict) -> str:
         cohort_name = (

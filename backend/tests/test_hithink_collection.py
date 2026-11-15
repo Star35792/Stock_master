@@ -1,7 +1,13 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from app.data_sources import DailyBarRecord, HithinkFinanceDataSource
+from app.models.raw import ImportBatch, RawDailyBar
+from app.repositories.raw import RawDailyBarImportRepository
 from app.services.hithink_collection import (
     HithinkDailyBarCollectionService,
     _daily_bar_row_hash,
@@ -11,6 +17,7 @@ from app.services.hithink_collection import (
 
 class FakeBatch:
     id = 1
+    request_params: dict[str, object] = {}
 
 
 class FakeRepository:
@@ -20,8 +27,14 @@ class FakeRepository:
     def create_batch(self, db: object, **kwargs: object) -> FakeBatch:
         return FakeBatch()
 
-    def add_daily_bar(self, db: object, row: object) -> None:
-        self.rows.append(row)
+    def load_daily_bar_content_index(self, db: object, **kwargs: object) -> object:
+        return object()
+
+    def add_daily_bars_if_changed(
+        self, db: object, rows: list[object], *, content_index: object
+    ) -> int:
+        self.rows.extend(rows)
+        return len(rows)
 
     def finish_batch(self, db: object, batch: object, **kwargs: object) -> None:
         pass
@@ -60,6 +73,9 @@ class FakeDb:
 
     def rollback(self) -> None:
         self.rolled_back = True
+
+    def flush(self) -> None:
+        pass
 
 
 def test_hithink_collection_hash_is_stable() -> None:
@@ -106,6 +122,73 @@ def test_hithink_collection_uses_security_master_type() -> None:
     assert result.accepted_count == 1
     assert repository.rows[0].security_type == "index"
     assert db.committed is True
+
+
+def test_hithink_collection_repeated_window_keeps_only_content_versions() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as connection:
+        connection.exec_driver_sql("CREATE SCHEMA raw")
+    ImportBatch.__table__.create(engine)
+    RawDailyBar.__table__.create(engine)
+
+    class MutableSource:
+        name = "hithink_finance"
+        source_type = "api"
+        close = Decimal("3505")
+        payload_revision = 1
+
+        def fetch_daily_bars(self, **kwargs: object) -> list[DailyBarRecord]:
+            return [
+                DailyBarRecord(
+                    symbol="000001.SH",
+                    trade_date=date(2026, 7, 17),
+                    adjust_type="none",
+                    open=Decimal("3500"),
+                    high=Decimal("3510"),
+                    low=Decimal("3490"),
+                    close=self.close,
+                    raw_payload={
+                        "vendor_close": str(self.close),
+                        "revision": self.payload_revision,
+                    },
+                )
+            ]
+
+    source = MutableSource()
+    service = HithinkDailyBarCollectionService(
+        data_source=source,  # type: ignore[arg-type]
+        repository=RawDailyBarImportRepository(),
+        security_repository=FakeSecurityRepository(),  # type: ignore[arg-type]
+    )
+    captured_at = datetime(2026, 7, 19, tzinfo=ZoneInfo("Asia/Shanghai"))
+    with Session(engine) as db:
+        def collect():
+            return service.collect_daily_bars(
+                db,
+                symbols=["000001.SH"],
+                start_date=date(2026, 7, 17),
+                end_date=date(2026, 7, 17),
+                clock=lambda: captured_at,
+            )
+
+        first = collect()
+        repeat = collect()
+        source.payload_revision = 2
+        payload_revised = collect()
+        source.close = Decimal("3506")
+        revised = collect()
+        assert (first.accepted_count, first.skipped_unchanged) == (1, 0)
+        assert (repeat.accepted_count, repeat.skipped_unchanged) == (0, 1)
+        assert (payload_revised.accepted_count, payload_revised.skipped_unchanged) == (1, 0)
+        assert (revised.accepted_count, revised.skipped_unchanged) == (1, 0)
+        assert repeat.row_count == 1
+        assert db.scalars(select(RawDailyBar.close).order_by(RawDailyBar.id)).all() == [
+            Decimal("3505.0000"), Decimal("3505.0000"), Decimal("3506.0000")
+        ]
+        batches = db.scalars(select(ImportBatch).order_by(ImportBatch.id)).all()
+        assert [batch.accepted_count for batch in batches] == [1, 0, 1, 1]
+        assert [batch.row_count for batch in batches] == [1, 1, 1, 1]
+    engine.dispose()
 
 
 def test_hithink_historical_paginates_until_empty() -> None:

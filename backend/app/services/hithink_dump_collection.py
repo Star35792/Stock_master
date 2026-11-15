@@ -6,7 +6,7 @@ from json import dumps
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import text
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -172,26 +172,63 @@ class HithinkDumpCollectionService:
             request_params={"release_tag": dump.release_tag},
         )
         row_count = 0
+        accepted_count = 0
+        observed_action_versions: dict[tuple[str, date], str | None] = {}
         try:
             duckdb_conn = _duckdb_connection(db)
             if duckdb_conn is not None:
+                row_count = int(
+                    duckdb_conn.execute(
+                        "SELECT count(*) FROM read_parquet(?)", [str(dump.path)]
+                    ).fetchone()[0]
+                )
                 _bulk_import_adjustments_duckdb(
                     duckdb_conn,
                     batch_id=batch.id,
                     source_name=self.data_source.name,
                     path=dump.path,
                 )
-                row_count = _count_batch_rows_in_table(
+                accepted_count = _count_batch_rows_in_table(
                     db,
                     table="raw.corporate_action",
                     batch_id=batch.id,
                 )
             else:
                 for chunk in self.data_source.iter_adjustment_rows(dump.path, chunk_size=1_000):
+                    row_count += len(chunk)
                     raw_rows = [
                         _to_raw_action(batch.id, self.data_source.name, item) for item in chunk
                     ]
-                    db.add_all(raw_rows)
+                    for row in raw_rows:
+                        key = (row.symbol, row.ex_date)
+                        previous_hash = observed_action_versions.setdefault(key, row.row_hash)
+                        if previous_hash != row.row_hash:
+                            raise ValueError(
+                                "corporate-action dump contains conflicting business keys: "
+                                f"{row.symbol} {row.ex_date}"
+                            )
+                    existing = {
+                        (symbol, ex_date, row_hash)
+                        for symbol, ex_date, row_hash in db.execute(
+                            select(
+                                RawCorporateAction.symbol,
+                                RawCorporateAction.ex_date,
+                                RawCorporateAction.row_hash,
+                            ).where(
+                                RawCorporateAction.source_name == self.data_source.name,
+                                RawCorporateAction.symbol.in_({row.symbol for row in raw_rows}),
+                                RawCorporateAction.ex_date.in_({row.ex_date for row in raw_rows}),
+                            )
+                        )
+                    }
+                    new_rows = []
+                    for row in raw_rows:
+                        key = (row.symbol, row.ex_date, row.row_hash)
+                        if key not in existing:
+                            existing.add(key)
+                            new_rows.append(row)
+                    db.add_all(new_rows)
+                    accepted_count += len(new_rows)
                     market_by_key = {}
                     for item in chunk:
                         market_row = _to_market_action(self.data_source.name, item)
@@ -206,6 +243,19 @@ class HithinkDumpCollectionService:
                         market_by_key[key] = market_row
                     market_rows = list(market_by_key.values())
                     if market_rows:
+                        # ``market.corporate_action`` is the current projection
+                        # of a source's latest observation.  Revisions remain in
+                        # raw, but an action-type change (cash -> mixed) must
+                        # replace, not coexist with, the older projection.
+                        for row in market_rows:
+                            db.execute(
+                                delete(CorporateAction).where(
+                                    CorporateAction.source_name == self.data_source.name,
+                                    CorporateAction.symbol == row["symbol"],
+                                    CorporateAction.ex_date == row["ex_date"],
+                                    CorporateAction.action_type != row["action_type"],
+                                )
+                            )
                         statement = insert(CorporateAction).values(market_rows)
                         statement = statement.on_conflict_do_update(
                             index_elements=[
@@ -224,13 +274,16 @@ class HithinkDumpCollectionService:
                         )
                         db.execute(statement)
                     db.flush()
-                    row_count += len(chunk)
+            batch.request_params = {
+                **batch.request_params,
+                "skipped_unchanged_count": row_count - accepted_count,
+            }
             self.repository.finish_batch(
                 db,
                 batch,
                 status="success",
                 row_count=row_count,
-                accepted_count=row_count,
+                accepted_count=accepted_count,
                 rejected_count=0,
             )
             db.commit()
@@ -261,16 +314,16 @@ class HithinkDumpCollectionService:
             "start_date": request_params.get("start_date"),
             "end_date": request_params.get("end_date"),
             "cap_date": end_date,
+            "today": datetime.now(_SHANGHAI).date(),
         }
         db.execute(text(_ENSURE_DUMP_SECURITIES_SQL), params)
-        # The bulk path is needed for years of dump history, but it cannot
-        # decide cross-vendor consistency. Recheck only dates with an
-        # independent TDX observation or an already recorded conflict.
-        reconciliation_dates = [
-            row[0] for row in db.execute(text(_RECONCILIATION_DATES_SQL), params)
-        ]
+        # The set-based path is needed for years of dump history.  Dates that
+        # require provenance, warning, or cross-source decisions are then sent
+        # through the shared builder before the transaction commits, so the
+        # fast path cannot grant a different trusted status.
+        recheck_dates = [row[0] for row in db.execute(text(_RECHECK_DATES_SQL), params)]
         db.execute(text(_BUILD_MARKET_DAILY_SQL), params)
-        for trade_date in reconciliation_dates:
+        for trade_date in recheck_dates:
             DailyBarMarketBuildService().build_from_raw(
                 db,
                 start_date=trade_date,
@@ -282,7 +335,6 @@ class HithinkDumpCollectionService:
         market_rows = int(db.scalar(text(_COUNT_MARKET_DAILY_SQL), params) or 0)
         db.commit()
         return market_rows
-
 
 
 def _to_record(item: dict) -> DailyBarRecord:
@@ -332,19 +384,21 @@ WITH candidates AS (
 """
 
 
-_BUILD_MARKET_DAILY_SQL = _DUMP_CANDIDATES_SQL + """
+_BUILD_MARKET_DAILY_SQL = (
+    _DUMP_CANDIDATES_SQL
+    + """
 INSERT INTO market.daily_bar (
     symbol, security_type, trade_date, adjust_type, open, high, low, close,
     pre_close, change_amount, pct_change, volume, amount, turnover_rate,
     amplitude, source_name, source_count, quality_score, quality_status,
-    is_suspect, selected_raw_id
+    is_suspect, special_treatment_status, selected_raw_id
 )
 SELECT
     r.symbol, r.security_type, r.trade_date, r.adjust_type,
     r.open, r.high, r.low, r.close,
     r.pre_close, r.change_amount, r.pct_change, r.volume, r.amount,
     r.turnover_rate, r.amplitude, r.source_name,
-    1, 100.00, 'trusted', false, r.id
+    1, 100.00, 'trusted', false, r.special_treatment_status, r.id
 FROM latest r
 JOIN market.security s ON s.symbol = r.symbol
 JOIN market.trading_calendar c
@@ -360,6 +414,7 @@ WHERE r.adjust_type = 'none'
         AND cmp.is_conflict = true
   )
   AND r.open > 0 AND r.high > 0 AND r.low > 0 AND r.close > 0
+  AND r.is_suspended = false
   AND r.high >= r.open AND r.high >= r.close AND r.high >= r.low
   AND r.low <= r.open AND r.low <= r.close AND r.low <= r.high
   AND (r.volume IS NULL OR r.volume >= 0)
@@ -382,14 +437,18 @@ ON CONFLICT (symbol, trade_date, adjust_type) DO UPDATE SET
     quality_score = EXCLUDED.quality_score,
     quality_status = EXCLUDED.quality_status,
     is_suspect = EXCLUDED.is_suspect,
+    special_treatment_status = EXCLUDED.special_treatment_status,
     selected_raw_id = EXCLUDED.selected_raw_id
 WHERE market.daily_bar.quality_status <> 'manual_fixed'
   AND market.daily_bar.selected_raw_id IS DISTINCT FROM EXCLUDED.selected_raw_id
   AND (market.daily_bar.selected_raw_id IS NULL
        OR market.daily_bar.selected_raw_id < EXCLUDED.selected_raw_id)
 """
+)
 
-_COUNT_MARKET_DAILY_SQL = _DUMP_CANDIDATES_SQL + """
+_COUNT_MARKET_DAILY_SQL = (
+    _DUMP_CANDIDATES_SQL
+    + """
 SELECT COUNT(*)
 FROM market.daily_bar d
 JOIN latest r ON r.id = d.selected_raw_id
@@ -397,34 +456,59 @@ WHERE d.adjust_type = 'none'
   AND d.quality_status IN ('trusted', 'manual_fixed')
   AND d.is_suspect = false
 """
-
-_RECONCILIATION_DATES_SQL = """
-WITH comparison_dates AS (
-    SELECT trade_date FROM raw.daily_bar
-    WHERE source_name = 'tdx_official' AND adjust_type = 'none'
-    UNION
-    SELECT trade_date FROM market.daily_bar_source_compare
-    WHERE is_conflict = true AND adjust_type = 'none'
 )
-SELECT d.trade_date
-FROM comparison_dates d
-WHERE (CAST(:cap_date AS DATE) IS NULL OR d.trade_date <= CAST(:cap_date AS DATE))
-  AND EXISTS (
-      SELECT 1 FROM raw.daily_bar r
-      WHERE r.source_name = :source_name
-        AND r.adjust_type = 'none'
-        AND r.trade_date = d.trade_date
-        AND (
-          (CAST(:start_date AS DATE) IS NOT NULL AND CAST(:end_date AS DATE) IS NOT NULL
-           AND r.trade_date BETWEEN CAST(:start_date AS DATE) AND CAST(:end_date AS DATE))
-          OR ((CAST(:start_date AS DATE) IS NULL OR CAST(:end_date AS DATE) IS NULL)
-              AND r.batch_id = :batch_id)
-        )
-  )
-ORDER BY d.trade_date
-"""
 
-_ENSURE_DUMP_SECURITIES_SQL = _DUMP_CANDIDATES_SQL + """
+_RECHECK_DATES_SQL = (
+    _DUMP_CANDIDATES_SQL
+    + """
+SELECT DISTINCT r.trade_date
+FROM latest r
+WHERE r.volume IS NULL
+   OR r.amount IS NULL
+   OR (r.volume = 0 AND r.amount > 0)
+   OR (r.amount = 0 AND r.volume > 0)
+   OR r.is_suspended = true
+   OR r.open IS NULL OR r.high IS NULL OR r.low IS NULL OR r.close IS NULL
+   OR r.open <= 0 OR r.high <= 0 OR r.low <= 0 OR r.close <= 0
+   OR r.high < r.open OR r.high < r.close OR r.high < r.low
+   OR r.low > r.open OR r.low > r.close OR r.low > r.high
+   OR r.volume < 0 OR r.amount < 0
+   OR NOT EXISTS (
+       SELECT 1
+       FROM market.trading_calendar c
+       WHERE c.exchange = split_part(r.symbol, '.', 2)
+         AND c.trade_date = r.trade_date
+         AND c.is_open = true
+   )
+   OR (
+       r.pre_close IS NOT NULL AND r.pre_close <> 0
+       AND r.change_amount IS NOT NULL
+       AND abs((r.close - r.pre_close) - r.change_amount) > 0.01
+   )
+   OR (
+       r.pre_close IS NOT NULL AND r.pre_close > 0
+       AND abs((r.close - r.pre_close) / r.pre_close) > 0.30
+   )
+   OR r.imported_at < (
+       (CAST(r.trade_date AS TIMESTAMP) + INTERVAL '15 hours 30 minutes')
+       AT TIME ZONE 'Asia/Shanghai'
+   )
+   OR r.trade_date = CAST(:today AS DATE)
+   OR EXISTS (
+       SELECT 1
+       FROM raw.daily_bar other
+       WHERE other.symbol = r.symbol
+         AND other.trade_date = r.trade_date
+         AND other.adjust_type = r.adjust_type
+         AND other.source_name <> r.source_name
+   )
+ORDER BY trade_date
+"""
+)
+
+_ENSURE_DUMP_SECURITIES_SQL = (
+    _DUMP_CANDIDATES_SQL
+    + """
 INSERT INTO market.security (
     symbol, raw_symbol, name, security_type, exchange, currency,
     list_date, is_active, source_name
@@ -460,6 +544,7 @@ FROM latest r
 GROUP BY r.symbol
 ON CONFLICT (symbol) DO NOTHING
 """
+)
 
 
 def _duckdb_connection(db: Session):
@@ -491,6 +576,59 @@ def _bulk_import_adjustments_duckdb(
     source_name: str,
     path,
 ) -> None:
+    conflicting_keys = connection.execute(
+        """
+        WITH normalized AS (
+            SELECT upper(thscode) AS symbol,
+                epoch_ms(ex_date_ms + 28800000)::DATE AS ex_date,
+                sha256(to_json(struct_pack(
+                    thscode := thscode,
+                    ticker := ticker,
+                    ex_date_ms := ex_date_ms,
+                    dividend_per_share := dividend_per_share,
+                    per_share_bonus := per_share_bonus,
+                    allotment_ratio := allotment_ratio,
+                    allotment_price := allotment_price,
+                    currency := currency
+                ))) AS row_hash
+            FROM read_parquet(?)
+        )
+        SELECT symbol, ex_date
+        FROM normalized
+        GROUP BY symbol, ex_date
+        HAVING count(DISTINCT row_hash) > 1
+        LIMIT 10
+        """,
+        [str(path)],
+    ).fetchall()
+    if conflicting_keys:
+        preview = ", ".join(f"{symbol} {ex_date}" for symbol, ex_date in conflicting_keys)
+        raise ValueError(
+            "corporate-action dump contains conflicting business keys: " + preview
+        )
+    connection.execute(
+        """
+        DELETE FROM market.corporate_action AS existing
+        USING (
+            SELECT DISTINCT upper(thscode) AS symbol,
+                epoch_ms(ex_date_ms + 28800000)::DATE AS ex_date,
+                CASE
+                    WHEN ((coalesce(dividend_per_share, 0) <> 0)::INT
+                        + (coalesce(per_share_bonus, 0) <> 0)::INT
+                        + (coalesce(allotment_ratio, 0) <> 0)::INT) > 1 THEN 'mixed'
+                    WHEN coalesce(dividend_per_share, 0) <> 0 THEN 'cash_dividend'
+                    WHEN coalesce(per_share_bonus, 0) <> 0 THEN 'bonus_share'
+                    ELSE 'rights_issue'
+                END AS action_type
+            FROM read_parquet($1)
+        ) AS incoming
+        WHERE existing.source_name = $2
+          AND existing.symbol = incoming.symbol
+          AND existing.ex_date = incoming.ex_date
+          AND existing.action_type <> incoming.action_type
+        """,
+        [str(path), source_name],
+    )
     connection.execute(
         """
         INSERT INTO raw.corporate_action (
@@ -498,33 +636,51 @@ def _bulk_import_adjustments_duckdb(
             dividend_per_share, per_share_bonus,
             allotment_ratio, allotment_price, raw_payload, row_hash
         )
+        WITH normalized AS (
+            SELECT
+                upper(thscode) AS symbol,
+                epoch_ms(ex_date_ms + 28800000)::DATE AS ex_date,
+                dividend_per_share, per_share_bonus,
+                allotment_ratio, allotment_price,
+                to_json(struct_pack(
+                    thscode := thscode,
+                    ticker := ticker,
+                    ex_date_ms := ex_date_ms,
+                    dividend_per_share := dividend_per_share,
+                    per_share_bonus := per_share_bonus,
+                    allotment_ratio := allotment_ratio,
+                    allotment_price := allotment_price,
+                    currency := currency
+                )) AS raw_payload
+            FROM read_parquet(?)
+        ), content_versions AS (
+            SELECT DISTINCT *, sha256(raw_payload) AS row_hash
+            FROM normalized
+        )
         SELECT
-            ?, ?, upper(thscode), epoch_ms(ex_date_ms + 28800000)::DATE,
-            dividend_per_share, per_share_bonus,
-            allotment_ratio, allotment_price,
-            to_json(struct_pack(
-                thscode := thscode,
-                ticker := ticker,
-                ex_date_ms := ex_date_ms,
-                dividend_per_share := dividend_per_share,
-                per_share_bonus := per_share_bonus,
-                allotment_ratio := allotment_ratio,
-                allotment_price := allotment_price,
-                currency := currency
-            )),
-            sha256(to_json(struct_pack(
-                thscode := thscode,
-                ticker := ticker,
-                ex_date_ms := ex_date_ms,
-                dividend_per_share := dividend_per_share,
-                per_share_bonus := per_share_bonus,
-                allotment_ratio := allotment_ratio,
-                allotment_price := allotment_price,
-                currency := currency
-            )))
-        FROM read_parquet(?)
+            ?, ?, d.symbol, d.ex_date,
+            d.dividend_per_share, d.per_share_bonus,
+            d.allotment_ratio, d.allotment_price,
+            d.raw_payload, d.row_hash
+        FROM content_versions d
+        WHERE NOT EXISTS (
+            SELECT 1 FROM raw.corporate_action r
+            WHERE r.source_name = ?
+              AND r.symbol = d.symbol
+              AND r.ex_date = d.ex_date
+              AND (
+                  r.row_hash = d.row_hash
+                  OR (
+                      r.row_hash IS NULL
+                      AND r.dividend_per_share IS NOT DISTINCT FROM d.dividend_per_share
+                      AND r.per_share_bonus IS NOT DISTINCT FROM d.per_share_bonus
+                      AND r.allotment_ratio IS NOT DISTINCT FROM d.allotment_ratio
+                      AND r.allotment_price IS NOT DISTINCT FROM d.allotment_price
+                  )
+              )
+        )
         """,
-        [batch_id, source_name, str(path)],
+        [str(path), batch_id, source_name, source_name],
     )
     connection.execute(
         """
@@ -570,7 +726,12 @@ def _bulk_import_adjustments_duckdb(
               OR coalesce(per_share_bonus, 0) > 0
               OR coalesce(allotment_ratio, 0) > 0
           )
-        ON CONFLICT (symbol, ex_date, action_type, source_name) DO NOTHING
+        ON CONFLICT (symbol, ex_date, action_type, source_name) DO UPDATE SET
+            cash_dividend = EXCLUDED.cash_dividend,
+            bonus_share_ratio = EXCLUDED.bonus_share_ratio,
+            rights_issue_ratio = EXCLUDED.rights_issue_ratio,
+            rights_issue_price = EXCLUDED.rights_issue_price,
+            raw_payload = EXCLUDED.raw_payload
         """,
         [source_name, str(path)],
     )

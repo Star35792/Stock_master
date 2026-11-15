@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -7,7 +8,7 @@ from app.backtest import (
     LinearCommissionFeeModel,
     build_fee_model,
 )
-from app.backtest.fees import A_SHARE_COST_V1, LINEAR_COMMISSION_V1
+from app.backtest.fees import A_SHARE_COST_V1, A_SHARE_COST_V2, LINEAR_COMMISSION_V1
 
 
 def test_linear_commission_model_matches_legacy_behavior() -> None:
@@ -106,3 +107,42 @@ def test_a_share_factory_preserves_explicit_zero_cost_components() -> None:
     assert model.exchange_fee_rate == 0
     for side in ("buy", "sell"):
         assert model.apply(reference_price=Decimal("10"), quantity=100, side=side).total_fee == 0
+
+
+def test_instrument_aware_fee_exempts_etf_stock_taxes() -> None:
+    model = build_fee_model(fee_model_version=A_SHARE_COST_V2)
+    etf = model.apply(
+        reference_price=Decimal("10"), quantity=1000, side="sell",
+        symbol="510300.SH", security_type="etf", trade_date=date(2026, 7, 1),
+    )
+    stock = model.apply(
+        reference_price=Decimal("10"), quantity=1000, side="sell",
+        symbol="600000.SH", security_type="stock", trade_date=date(2026, 7, 1),
+    )
+    assert etf.stamp_duty == etf.transfer_fee == 0
+    assert stock.stamp_duty > 0 and stock.transfer_fee > 0
+    assert etf.commission > 0 and etf.exchange_fee > 0
+
+
+def test_instrument_aware_fee_requires_type_and_date() -> None:
+    model = build_fee_model(fee_model_version=A_SHARE_COST_V2)
+    with pytest.raises(ValueError, match="requires symbol"):
+        model.apply(reference_price=Decimal("10"), quantity=100, side="buy")
+    with pytest.raises(ValueError, match="requires symbol"):
+        model.apply(
+            reference_price=Decimal("10"), quantity=100, side="buy",
+            symbol="000300.SH", security_type="index", trade_date=date(2026, 7, 1),
+        )
+
+
+def test_instrument_aware_fee_uses_historical_stock_stamp_duty() -> None:
+    model = build_fee_model(fee_model_version=A_SHARE_COST_V2)
+    before = model.apply(
+        reference_price=Decimal("10"), quantity=1000, side="sell",
+        symbol="600000.SH", security_type="stock", trade_date=date(2023, 8, 25),
+    )
+    after = model.apply(
+        reference_price=Decimal("10"), quantity=1000, side="sell",
+        symbol="600000.SH", security_type="stock", trade_date=date(2023, 8, 28),
+    )
+    assert before.stamp_duty == after.stamp_duty * 2

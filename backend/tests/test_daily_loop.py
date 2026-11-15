@@ -460,9 +460,7 @@ def test_daily_loop_rebuilds_curated_when_enabled(
 
         return AdjustmentBuildResult(factor_rows=10, qfq_bar_rows=20, version="local")
 
-    def fake_build_prices_qfq_from_db(
-        self: object, db_path: str, **kwargs: object
-    ) -> object:
+    def fake_build_prices_qfq_from_db(self: object, db_path: str, **kwargs: object) -> object:
         curated_calls.append((db_path, kwargs))
         from app.lake.curated import CuratedDatasetResult
 
@@ -508,9 +506,14 @@ def test_daily_loop_rebuilds_curated_when_enabled(
         "app.scheduler.daily_loop._compute_market_qfq_checksum",
         lambda db, **kwargs: "m" * 64,
     )
+    finalized: list[object] = []
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.CuratedLayer.publish_prices_qfq",
-        lambda self, staged: staged,
+        "app.scheduler.daily_loop.CuratedLayer.prepare_prices_qfq_publish",
+        lambda self, staged: SimpleNamespace(result=staged),
+    )
+    monkeypatch.setattr(
+        "app.scheduler.daily_loop.CuratedLayer.finalize_prices_qfq_publish",
+        lambda self, transaction: finalized.append(transaction),
     )
     monkeypatch.setattr(
         "app.scheduler.daily_loop._market_qfq_result",
@@ -551,8 +554,62 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     assert curated_calls[0][1].get("publish") is False
     assert curated_calls[0][1].get("connection") is warm_connection
     assert closed_connections == [True]
+    assert activated == ["market-release", "curated-release"]
+    assert len(finalized) == 1
     assert job_log_repo.jobs[0].metadata_["curated_rebuilt"] is True
     assert job_log_repo.jobs[0].metadata_["adjustment_factor_rows"] == 10
+
+
+def test_release_activation_failure_restores_previous_curated_tree(tmp_path) -> None:
+    from app.lake import CuratedDatasetResult, CuratedLayer, DataLake
+    from app.scheduler.daily_loop import _publish_and_activate_curated
+
+    lake = DataLake(tmp_path / "lake")
+    layer = CuratedLayer(lake)
+    root = lake.root / "curated"
+    target = root / "prices_qfq"
+    staged_path = root / ".prices_qfq.tmp-test"
+    target.mkdir(parents=True)
+    staged_path.mkdir()
+    (target / "old.parquet").write_bytes(b"old")
+    (staged_path / "new.parquet").write_bytes(b"new")
+    staged = CuratedDatasetResult(
+        dataset="prices_qfq",
+        path=str(staged_path),
+        row_count=1,
+        min_date="2026-01-05",
+        max_date="2026-01-05",
+        created_at="2026-01-05T00:00:00+00:00",
+    )
+
+    class FailingCommitDb:
+        rollbacks = 0
+
+        def commit(self):
+            raise RuntimeError("activation commit failed")
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    class FakeReleaseRepository:
+        def activate(self, db, *, release_id):
+            pass
+
+    db = FailingCommitDb()
+    with pytest.raises(RuntimeError, match="activation commit failed"):
+        _publish_and_activate_curated(
+            db,  # type: ignore[arg-type]
+            layer=layer,
+            staged=staged,
+            market_release_id="market-release",
+            curated_release_id="curated-release",
+            release_repository=FakeReleaseRepository(),  # type: ignore[arg-type]
+        )
+
+    assert db.rollbacks == 1
+    assert (target / "old.parquet").read_bytes() == b"old"
+    assert (staged_path / "new.parquet").read_bytes() == b"new"
+    assert list(root.glob(".prices_qfq.replacing-*")) == []
 
 
 def test_daily_loop_fails_when_sync_adjust_type_incompatible_with_curated(
@@ -747,9 +804,7 @@ def test_daily_loop_degrades_to_partial_when_alternative_source_fails(
     job = job_log_repo.jobs[0]
     assert job.status == "partial"
     assert "ALTERNATIVE_DATA_SOURCE_FAILED" in job.metadata_["reason_codes"]
-    assert job.metadata_["alternative_failures"]["eastmoney"].startswith(
-        "ConnectionError"
-    )
+    assert job.metadata_["alternative_failures"]["eastmoney"].startswith("ConnectionError")
 
 
 def test_daily_loop_degrades_to_partial_when_alternative_datasets_are_empty(

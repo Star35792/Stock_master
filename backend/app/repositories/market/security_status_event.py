@@ -64,6 +64,46 @@ class SecurityStatusEventRepository:
     ) -> str | None:
         return self.statuses_on_date(db, symbols={symbol}, trade_date=trade_date).get(symbol)
 
+    def explicit_statuses_on_date(
+        self,
+        db: Session,
+        *,
+        symbols: set[str] | list[str],
+        trade_date: date,
+    ) -> dict[str, str]:
+        """Return status evidence that explicitly covers ``trade_date``.
+
+        Repair planning must not let an old one-day ``suspended`` observation
+        explain every later missing bar. A row therefore covers the requested
+        date only when it was observed on that exact date, or when the source
+        supplied a bounded effective interval containing the date. Conflicting
+        statuses remain unresolved instead of depending on database row order.
+        """
+        symbol_set = {symbol for symbol in symbols if symbol}
+        if not symbol_set:
+            return {}
+        rows = db.scalars(
+            select(SecurityStatusEvent).where(
+                SecurityStatusEvent.symbol.in_(symbol_set),
+                (
+                    (SecurityStatusEvent.trade_date == trade_date)
+                    | (
+                        (SecurityStatusEvent.effective_from.is_not(None))
+                        & (SecurityStatusEvent.effective_to.is_not(None))
+                        & (SecurityStatusEvent.effective_from <= trade_date)
+                        & (SecurityStatusEvent.effective_to >= trade_date)
+                    )
+                ),
+            )
+        ).all()
+        statuses: dict[str, set[str]] = {}
+        for row in rows:
+            statuses.setdefault(row.symbol, set()).add(row.status)
+        return {
+            symbol: next(iter(values)) if len(values) == 1 else "conflict"
+            for symbol, values in statuses.items()
+        }
+
     def record_status(
         self,
         db: Session,

@@ -7,7 +7,11 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService, MarketBuildResult
-from app.services.daily_sync import HithinkDailySyncResult, HithinkDailySyncService
+from app.services.daily_sync import (
+    HithinkDailySyncResult,
+    HithinkDailySyncService,
+    _last_completed_date,
+)
 from app.services.gap_backfill import GapBackfillResult, MissingDailyBarBackfillService
 
 
@@ -25,7 +29,7 @@ class RecentDataCompletionService:
         daily_sync_service: HithinkDailySyncService | None = None,
         gap_backfill_service: MissingDailyBarBackfillService | None = None,
         market_build_service: DailyBarMarketBuildService | None = None,
-        today: Callable[[], date] = date.today,
+        today: Callable[[], date] = _last_completed_date,
     ) -> None:
         self.daily_sync_service = daily_sync_service or HithinkDailySyncService()
         self.gap_backfill_service = gap_backfill_service or MissingDailyBarBackfillService()

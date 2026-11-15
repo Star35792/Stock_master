@@ -30,7 +30,7 @@
 | `services.price_value_input_prep` / `services.price_value_screen` | 晚间或显式当前补采的相对估值研究观察；区分价格日与实际财务可得时刻，校验血缘、鲜度、走势与现金流证据，保存版本化名单；研究观察排除通用估值及历史认证消费 |
 | `services.price_value_shortlist` | 纯 Decimal 的版本化估值与连续盈利门槛、周期行业及异常 ROE 复核分流；确定性排序后生成最多10只且每行业最多2只的人工研究队列，保留全量达标池、容量递延与逐股原因 |
 | `services.valuation_history_collection` | 东财估值历史采集服务：并发分页、Decimal 精度保持、双闸门（价格零容差 + 股票池覆盖下限 + 重复键）、SQL 内 JOIN 闸门、原子发布 |
-| `utils.discard` | 把一次性目录**改名**移入 `.trash/` 而非批量删除；批量删除会触发宿主环境的安全删除守卫 |
+| `utils.discard` | 先将废弃目录改名移出读取路径，再尝试回收当前及既有 `.trash/` 目录；清理失败会留痕，不能把 `.trash/` 当长期保留层 |
 | `risk` | 下单前风控内核 |
 | `trade` | 本地模拟推演执行与持仓记录（BrokerAdapter 仅隔离本地模拟回报） |
 | `services.position_book` / `services.position_metrics` / `services.position_analysis` / `services.portfolio_drift` | 真实持仓账本（独立 SQLite）记账与重放推导、共享 Decimal 持仓指标（盈亏/集中度/行业暴露）、paper 账户持仓与净值绩效只读分析、组合草案与真实/模拟持仓的偏离检测（只读建议，不生成订单） |

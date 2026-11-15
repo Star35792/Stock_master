@@ -89,7 +89,12 @@ volume >= 0
 amount >= 0
 ```
 
-如果成交量为 0 但价格变化明显，应标记为可疑。
+`volume` 或 `amount` 缺失时分别生成 `VOLUME_MISSING`、`AMOUNT_MISSING`，该行
+只能进入 `suspect`，不得因走全量 dump 的批量构建路径而获得 `trusted`。成交量为
+0 而成交额大于 0，或成交额为 0 而成交量大于 0，生成
+`TURNOVER_INCONSISTENT` 并按同一规则降级。重复复核同一不可变 raw 证据时复用
+已有的 `open/reopened` 质量问题，不重复堆积告警；若同一问题已被关闭但 raw 重检仍
+失败，则新建一条 `open` 问题，不能让历史关闭状态隐藏当前仍在生效的可疑资格。
 
 由于停牌日不进入 `market.daily_bar`，market 层不存在“停牌日成交量为零”的记录；raw 层来源若返回停牌记录，应导入 `market.security_status_event`，不在此处重复判断。
 
@@ -98,6 +103,9 @@ amount >= 0
 ```text
 VOLUME_INVALID
 AMOUNT_INVALID
+VOLUME_MISSING
+AMOUNT_MISSING
+TURNOVER_INCONSISTENT
 ```
 
 ### 4.4 交易日历
@@ -106,8 +114,10 @@ AMOUNT_INVALID
 
 - `trade_date` 应出现在对应交易所交易日历中。
 - 非交易日出现成交数据，应标记异常。
-- 交易日缺少数据，需要结合 `market.security_status_event` 判断：若该日状态为 `suspended`、`delisting`、`unlisted`、`delisted` 等，则为正常无 bar；否则生成 `MISSING_BAR`。
+- 交易日缺少数据，需要结合 `market.security_status_event` 判断。只有该日无冲突的明确观察，或同时具有 `effective_from/effective_to` 且闭区间覆盖该日的 `suspended`、`unlisted`、`delisted` 证据才能解释无 bar；单日旧状态、开放结束日期或同日跨源冲突不得无限向后延续或静默裁决。`delisting` 证券仍可能处于可交易的退市整理期，不能仅凭状态名跳过行情补采。状态未知、上市日未知时保持“证据不足”，不得宣称缺口已补齐。
 - 任何来源标记为停牌的 raw 记录不得直接进入 `market.daily_bar`，应生成 `SUSPENDED_BAR_REJECTED` 并导入 `market.security_status_event`。
+- 最新 raw 修订命中停牌或其他硬拒绝时，已有非 `manual_fixed` market 行必须 fail-closed 降为 `rejected` 并退出可信读取，同时保留原值与 raw 血缘供审计；首次出现的硬拒绝只记录 raw 与质量问题，不伪造 market 行。若历史可信行已进入温层，控制面降级后还必须按 release/delta 规则发布覆盖，不能让旧 Parquet 继续被研究读取。
+- 补采批次统计必须区分内容未变化、响应内完全相同的重复、同业务键但内容冲突的重复、请求区间内的非候选旁带记录、请求作用域外记录和计划内未返回。内容未变化、完全相同重复及范围内旁带记录属于幂等或范围响应跳过，不计入 `rejected_count`；同键内容冲突、错证券、错复权或越过请求日期范围计为拒绝，冲突键不任意采用第一条；计划内未返回单独记录为 `unresolved_actionable_rows`。调度失败行数还必须纳入补采后公共构建器产生的 `suspect/rejected`，不能把“来源有返回”冒充“可信缺口已修复”。
 
 问题类型：
 
@@ -159,9 +169,10 @@ SOURCE_CONFLICT
 `SOURCE_CONFLICT` 问题；任一源产生新 raw 修订版本时保留新的冲突证据。
 后续最新版本对账一致且自身质量校验通过，方可重新升为 `trusted`。
 
-HiThink dump 的历史批量构建仍用批量 SQL，但对有通达信独立观察或已有冲突的
-交易日，发布前调用通用多源对账；已记录冲突的键不会由批量 SQL 直接重新标为
-`trusted`。`source_count` 是参与的原始来源名称数，不等于独立厂商数；
+HiThink dump 的历史批量构建仍用批量 SQL，但凡存在任一第二来源、量额缺失或一零一正、
+停牌/非法 OHLC/负量额等硬拒绝、价格连续性或极端涨幅警告、以及 raw 采集时点早于其
+交易日 15:30 上海时间，发布前都调用公共质量与多源对账。已记录冲突或硬拒绝的键不会
+由批量 SQL 直接重新标为 `trusted`。`source_count` 是参与的原始来源名称数，不等于独立厂商数；
 判断独立性须看数据源注册表和来源血缘。
 
 若冲突行已进入温层 Parquet，控制面降级后还须基于已验证父 release 发布

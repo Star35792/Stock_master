@@ -22,7 +22,7 @@
 | 重大决策、AI 提交前评审 | `aiDoc/plans/decision-review-protocol.md` | 按受影响边界读取下方对应文档 |
 | 阶段计划、路线、MVP | `aiDoc/plans/README.md` | `aiDoc/plans/roadmap.md` |
 | 架构、数据流、存储边界 | `aiDoc/relations/system-map.md` | `aiDoc/relations/trusted-daily-data-center.md` |
-| 存储体积、冗余副本与 qfq 物化优化 | [存储诊断与优化方案](relations/20261013-2207-storage-diagnosis-and-plan.md) | `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`、`aiDoc/data/daily-bar-contract.md` |
+| 本机单份数据保留、冗余清理与容量验收 | [本机存储保留与清理交接](relations/20261112-1341-local-storage-retention-and-cleanup.md) | [历史存储诊断](relations/20261013-2207-storage-diagnosis-and-plan.md)、`aiDoc/relations/system-map.md` |
 | 真实持仓账本存储（SQLite 例外）、持仓分析与偏离检测 | [持仓账本 SQLite ADR](relations/20261023-1925-position-ledger-sqlite.md) | `aiDoc/plans/roadmap.md` V5.4、`aiDoc/modules/schema-plan.md` |
 | 研究库拆分（research.duckdb）、DuckDB 跨进程并发 | [研究库拆分 ADR](relations/20261024-1427-research-database-split.md) | `aiDoc/relations/system-map.md`、`aiDoc/modules/schema-plan.md` |
 | 主库打不开、WAL 回放失败、DuckDB 存储可用性 | [不可回放 WAL 的无损恢复与预防](relations/20261106-1442-duckdb-unreplayable-wal-recovery.md) | `aiDoc/memory/README.md`、`aiDoc/modules/module-index.md` |

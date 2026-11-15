@@ -17,6 +17,9 @@ import argparse
 import hashlib
 import json
 import logging
+import os
+import re
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+
+from app.repositories.warm_layer import _MAX_RELEASE_DEPTH, WarmLayerStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +39,7 @@ logger = logging.getLogger(__name__)
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = BACKEND_DIR / "data" / "stock_master.duckdb"
 DEFAULT_WARM_ROOT = BACKEND_DIR / "data" / "warm" / "exported"
+_RELEASE_TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 
 EXPORT_TABLES = [
     ("market", "daily_bar", "trade_date"),
@@ -235,11 +241,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SCHEMA.TABLE",
         help="只导出指定表；可重复传入，用于父 release 上的局部修订",
     )
-    parser.add_argument(
-        "--skip-verify",
-        action="store_true",
-        help="跳过 Parquet 行数校验",
-    )
     return parser
 
 
@@ -248,6 +249,19 @@ def main(argv: list[str] | None = None) -> int:
     db_path = Path(args.db_path)
     warm_root = Path(args.warm_root)
     release_tag = args.release_tag
+    if not _RELEASE_TAG.fullmatch(release_tag) or release_tag in {".", ".."}:
+        logger.error("release tag 非法: %s", release_tag)
+        return 1
+    if args.base_release_tag and (
+        not _RELEASE_TAG.fullmatch(args.base_release_tag)
+        or args.base_release_tag in {".", ".."}
+    ):
+        logger.error("父 release tag 非法: %s", args.base_release_tag)
+        return 1
+    release_path = warm_root / release_tag
+    if release_path.exists():
+        logger.error("release 已存在，拒绝覆盖: %s", release_path)
+        return 1
     snapshot_tables = set(args.snapshot_table)
     selected_tables = set(args.include_table or [])
     if selected_tables and not args.base_release_tag:
@@ -256,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     if selected_tables & snapshot_tables:
         logger.error("局部导出的表不能声明为 snapshot；热窗口不含完整历史")
         return 1
-    if selected_tables:
+    if args.base_release_tag:
         parent_summary = warm_root / args.base_release_tag / "export_summary.json"
         try:
             parent_ok = json.loads(parent_summary.read_text(encoding="utf-8")).get("all_ok")
@@ -265,67 +279,94 @@ def main(argv: list[str] | None = None) -> int:
         if parent_ok is not True:
             logger.error("父 release 不存在或未通过验证: %s", args.base_release_tag)
             return 1
+        store = WarmLayerStore(warm_root=warm_root.parent)
+        try:
+            parent_lineage = store.release_lineage(args.base_release_tag)
+        except ValueError as exc:
+            logger.error("父 release 链无效: %s", exc)
+            return 1
+        if len(parent_lineage) >= _MAX_RELEASE_DEPTH or any(
+            not store._release_is_complete(tag) for tag in parent_lineage
+        ):
+            logger.error("父 release 链已达深度上限或包含未验证节点: %s", parent_lineage)
+            return 1
 
     if not db_path.exists():
         logger.error("数据库不存在: %s", db_path)
         return 1
 
     warm_root.mkdir(parents=True, exist_ok=True)
+    release_path.mkdir(exist_ok=False)
 
     results: list[ExportResult] = []
     all_ok = True
-
-    with duckdb.connect(str(db_path), read_only=True) as con:
-        for schema, table, date_column in EXPORT_TABLES:
-            if selected_tables and f"{schema}.{table}" not in selected_tables:
-                continue
-            try:
-                result = export_table(
-                    con,
-                    schema=schema,
-                    table=table,
-                    date_column=date_column,
-                    warm_root=warm_root,
-                    release_tag=release_tag,
-                )
-                results.append(result)
-                if not args.skip_verify:
+    published = False
+    try:
+        with duckdb.connect(str(db_path), read_only=True) as con:
+            for schema, table, date_column in EXPORT_TABLES:
+                if selected_tables and f"{schema}.{table}" not in selected_tables:
+                    continue
+                try:
+                    result = export_table(
+                        con,
+                        schema=schema,
+                        table=table,
+                        date_column=date_column,
+                        warm_root=warm_root,
+                        release_tag=release_tag,
+                    )
+                    results.append(result)
                     if not verify_export(con, result):
                         all_ok = False
-            except Exception:
-                logger.exception("导出 %s.%s 失败", schema, table)
-                all_ok = False
+                        break
+                except Exception:
+                    logger.exception("导出 %s.%s 失败", schema, table)
+                    all_ok = False
+                    break
 
-    summary = {
-        "release_tag": release_tag,
-        "base_release_tag": args.base_release_tag,
-        "partial_release": bool(args.base_release_tag),
-        "db_path": str(db_path.resolve()),
-        "warm_root": str(warm_root.resolve()),
-        "tables": [
-            {
-                "schema": r.schema,
-                "table": r.table,
-                "mode": (
-                    "snapshot"
-                    if not args.base_release_tag or f"{r.schema}.{r.table}" in snapshot_tables
-                    else "delta"
-                ),
-                "row_count": r.row_count,
-                "min_date": str(r.min_date) if r.min_date else None,
-                "max_date": str(r.max_date) if r.max_date else None,
-                "output_dir": str(r.output_dir.relative_to(warm_root.parent.parent)),
-                "manifest": str(r.manifest_path.relative_to(warm_root.parent.parent)),
-            }
-            for r in results
-        ],
-        "all_ok": all_ok,
-    }
-    summary_path = warm_root / release_tag / "export_summary.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("汇总已写入 %s", summary_path)
-
-    return 0 if all_ok else 1
+        summary = {
+            "release_tag": release_tag,
+            "base_release_tag": args.base_release_tag,
+            "partial_release": bool(args.base_release_tag),
+            "db_path": str(db_path.resolve()),
+            "warm_root": str(warm_root.resolve()),
+            "tables": [
+                {
+                    "schema": r.schema,
+                    "table": r.table,
+                    "mode": (
+                        "snapshot"
+                        if not args.base_release_tag or f"{r.schema}.{r.table}" in snapshot_tables
+                        else "delta"
+                    ),
+                    "row_count": r.row_count,
+                    "min_date": str(r.min_date) if r.min_date else None,
+                    "max_date": str(r.max_date) if r.max_date else None,
+                    "output_dir": str(r.output_dir.relative_to(warm_root.parent.parent)),
+                    "manifest": str(r.manifest_path.relative_to(warm_root.parent.parent)),
+                }
+                for r in results
+            ],
+            "all_ok": all_ok,
+        }
+        if not all_ok:
+            logger.error("release 导出失败，清理未发布目录: %s", release_path)
+            return 1
+        summary_path = release_path / "export_summary.json"
+        temporary_summary = release_path / ".export_summary.json.tmp"
+        temporary_summary.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(temporary_summary, summary_path)
+        published = True
+        logger.info("汇总已写入 %s", summary_path)
+        return 0
+    finally:
+        if not published:
+            try:
+                shutil.rmtree(release_path)
+            except OSError:
+                logger.exception("未发布目录清理失败，需人工检查: %s", release_path)
 
 
 if __name__ == "__main__":

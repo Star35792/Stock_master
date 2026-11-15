@@ -31,6 +31,9 @@ class FakeJobLog:
 
 
 class FakeJobLogRepository:
+    def __init__(self) -> None:
+        self.last_job: FakeJobLog | None = None
+
     def create(
         self,
         db: object,
@@ -42,6 +45,7 @@ class FakeJobLogRepository:
     ) -> FakeJobLog:
         job = FakeJobLog()
         job.metadata_ = metadata
+        self.last_job = job
         return job
 
     def finish(
@@ -99,8 +103,23 @@ class FakeSyncService:
 
 
 class FakeCompletionService:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        unresolved_rows: int = 0,
+        unresolved_actionable_rows: int = 0,
+        gap_status: str = "success",
+        status_conflict_rows: int = 0,
+        gap_market_rejected: int = 0,
+        gap_market_suspect: int = 0,
+    ) -> None:
         self.calls: list[dict] = []
+        self.unresolved_rows = unresolved_rows
+        self.unresolved_actionable_rows = unresolved_actionable_rows
+        self.gap_status = gap_status
+        self.status_conflict_rows = status_conflict_rows
+        self.gap_market_rejected = gap_market_rejected
+        self.gap_market_suspect = gap_market_suspect
 
     def complete(self, db: object, **kwargs: object) -> RecentDataCompletionResult:
         self.calls.append(kwargs)
@@ -129,12 +148,19 @@ class FakeCompletionService:
                 fetched_rows=1,
                 inserted_rows=1,
                 skipped_rows=0,
+                unresolved_rows=self.unresolved_rows,
+                unresolved_actionable_rows=self.unresolved_actionable_rows,
+                status=self.gap_status,
+                status_conflict_rows=self.status_conflict_rows,
             ),
             gap_market_build=MarketBuildResult(
                 candidates_count=1,
-                trusted_count=1,
-                rejected_count=0,
-                issue_count=0,
+                trusted_count=(
+                    0 if self.gap_market_rejected or self.gap_market_suspect else 1
+                ),
+                rejected_count=self.gap_market_rejected,
+                issue_count=self.gap_market_rejected + self.gap_market_suspect,
+                suspect_count=self.gap_market_suspect,
             ),
         )
 
@@ -210,6 +236,82 @@ def test_scheduled_recent_completion_runs_and_closes_session() -> None:
     ]
     assert session.closed is True
     assert result.gap_backfill.inserted_rows == 1
+
+
+def test_scheduled_recent_completion_marks_unresolved_gaps_partial() -> None:
+    session = FakeSession()
+    service = FakeCompletionService(unresolved_rows=1, status_conflict_rows=1)
+    job_log_repo = FakeJobLogRepository()
+
+    run_recent_data_completion(
+        symbols=["600519.SH"],
+        days=7,
+        service=service,  # type: ignore[arg-type]
+        session_factory=lambda: session,  # type: ignore[arg-type]
+        job_log_repository=job_log_repo,
+    )
+
+    assert job_log_repo.last_job is not None
+    assert job_log_repo.last_job.status == "partial"
+    assert job_log_repo.last_job.rows_failed == 0
+    assert job_log_repo.last_job.metadata_["gap"]["status_conflict_rows"] == 1
+    assert {
+        "missing_rows",
+        "partial_rows",
+        "suspect_rows",
+        "status_explained_rows",
+        "lifecycle_unknown_rows",
+        "status_conflict_rows",
+    } <= job_log_repo.last_job.metadata_["gap"].keys()
+
+
+def test_scheduled_recent_completion_preserves_gap_partial_status() -> None:
+    session = FakeSession()
+    service = FakeCompletionService(gap_status="partial")
+    job_log_repo = FakeJobLogRepository()
+
+    run_recent_data_completion(
+        symbols=["600519.SH"],
+        days=7,
+        service=service,  # type: ignore[arg-type]
+        session_factory=lambda: session,  # type: ignore[arg-type]
+        job_log_repository=job_log_repo,
+    )
+
+    assert job_log_repo.last_job is not None
+    assert job_log_repo.last_job.status == "partial"
+
+
+@pytest.mark.parametrize(
+    ("rejected_count", "suspect_count"),
+    [(1, 0), (0, 1)],
+)
+def test_scheduled_recent_completion_marks_untrusted_gap_build_partial(
+    rejected_count: int,
+    suspect_count: int,
+) -> None:
+    session = FakeSession()
+    service = FakeCompletionService(
+        gap_market_rejected=rejected_count,
+        gap_market_suspect=suspect_count,
+    )
+    job_log_repo = FakeJobLogRepository()
+
+    run_recent_data_completion(
+        symbols=["600519.SH"],
+        days=7,
+        service=service,  # type: ignore[arg-type]
+        session_factory=lambda: session,  # type: ignore[arg-type]
+        job_log_repository=job_log_repo,
+    )
+
+    assert job_log_repo.last_job is not None
+    assert job_log_repo.last_job.status == "partial"
+    assert job_log_repo.last_job.rows_failed == 1
+    assert job_log_repo.last_job.metadata_["gap"]["rejected_count"] == rejected_count
+    assert (
+        job_log_repo.last_job.metadata_["gap"]["market_suspect_count"] == suspect_count
+    )
 
 
 def test_recent_completion_scheduler_registers_weekday_single_instance_job() -> None:

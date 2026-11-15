@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, desc, func, literal, or_, select, update
+from sqlalchemy import and_, case, desc, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,30 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def mark_rejected(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        trade_date: date,
+        adjust_type: str,
+    ) -> None:
+        """Remove a hard-invalid revision's existing bar from trusted reads."""
+        db.execute(
+            update(DailyBar)
+            .where(
+                DailyBar.symbol == symbol,
+                DailyBar.trade_date == trade_date,
+                DailyBar.adjust_type == adjust_type,
+                DailyBar.quality_status != "manual_fixed",
+            )
+            .values(
+                quality_status="rejected",
+                is_suspect=True,
+                quality_score=Decimal("0.00"),
+            )
+        )
+
     def mark_source_conflict(
         self,
         db: Session,
@@ -293,7 +317,6 @@ class DailyBarRepository:
         quality_status: str,
         is_suspect: bool,
         source_count: int = 1,
-        special_treatment_status: str | None = None,
     ) -> None:
         row = {
             "symbol": raw_bar.symbol,
@@ -314,15 +337,11 @@ class DailyBarRepository:
             "limit_up": getattr(raw_bar, "limit_up", None),
             "limit_down": getattr(raw_bar, "limit_down", None),
             "is_suspended": getattr(raw_bar, "is_suspended", False),
-            # Prefer the vendor's own status; fall back to the security
-            # master, which derives it from the security's short name.  No
-            # daily source ever wrote this field, so without the fallback the
-            # column stayed NULL for every historical bar and every screen
-            # candidate was rejected as "treatment unknown".
-            "special_treatment_status": (
-                getattr(raw_bar, "special_treatment_status", None)
-                or special_treatment_status
-            ),
+            # Historical treatment status is valid only when the selected raw
+            # observation carries date-specific evidence.  The security master
+            # is a current-name projection and must never be backfilled into
+            # historical bars, otherwise current ST status leaks into history.
+            "special_treatment_status": getattr(raw_bar, "special_treatment_status", None),
             "source_name": raw_bar.source_name,
             "source_count": source_count,
             "quality_score": quality_score,
@@ -343,7 +362,15 @@ class DailyBarRepository:
                 DailyBar.adjust_type,
             ],
             set_=update_columns,
-            where=DailyBar.quality_status != "manual_fixed",
+            where=and_(
+                DailyBar.quality_status != "manual_fixed",
+                or_(
+                    *(
+                        getattr(DailyBar, key).is_distinct_from(getattr(statement.excluded, key))
+                        for key in update_columns
+                    )
+                ),
+            ),
         )
         db.execute(statement)
 
@@ -413,10 +440,7 @@ class DailyBarRepository:
         total = db.scalar(select(func.count()).select_from(DailyBar).where(*filters)) or 0
         latest = list(
             db.scalars(
-                select(DailyBar)
-                .where(*filters)
-                .order_by(DailyBar.trade_date.desc())
-                .limit(limit)
+                select(DailyBar).where(*filters).order_by(DailyBar.trade_date.desc()).limit(limit)
             )
         )
         latest.reverse()
@@ -475,6 +499,96 @@ class DailyBarRepository:
             .where(*filters)
         )
 
+        total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        items = list(
+            db.execute(
+                base.order_by(TradingCalendar.trade_date, Security.symbol)
+                .limit(limit)
+                .offset(offset)
+            ).all()
+        )
+        return items, total
+
+    def list_repair_candidates_by_calendar(
+        self,
+        db: Session,
+        *,
+        start_date: date,
+        end_date: date,
+        adjust_type: str,
+        symbol: str | None = None,
+        security_type: str | None = None,
+        exchange: str | None = None,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[list[object], int]:
+        """List missing and non-consumable calendar rows for repair planning.
+
+        This query deliberately keeps ``list_missing_by_calendar`` unchanged for
+        its public API.  Automatic repair can then distinguish a genuinely
+        absent row from a row that exists but is incomplete or suspect, without
+        silently treating every non-trusted row as the same problem.
+        """
+        repairable_quality = and_(
+            DailyBar.id.is_not(None),
+            DailyBar.quality_status != "manual_fixed",
+            or_(
+                DailyBar.volume.is_(None),
+                DailyBar.amount.is_(None),
+                DailyBar.quality_status.in_(("suspect", "rejected")),
+                DailyBar.is_suspect.is_(True),
+            ),
+        )
+        filters = [
+            TradingCalendar.is_open.is_(True),
+            TradingCalendar.trade_date >= start_date,
+            TradingCalendar.trade_date <= end_date,
+            or_(Security.list_date.is_(None), Security.list_date <= TradingCalendar.trade_date),
+            or_(
+                Security.delist_date.is_(None),
+                Security.delist_date >= TradingCalendar.trade_date,
+            ),
+            or_(DailyBar.id.is_(None), repairable_quality),
+        ]
+        if symbol:
+            filters.append(Security.symbol == symbol)
+        if security_type:
+            filters.append(Security.security_type == security_type)
+        if exchange:
+            filters.append(Security.exchange == exchange)
+
+        gap_reason = case(
+            (DailyBar.id.is_(None), "missing"),
+            (
+                or_(DailyBar.volume.is_(None), DailyBar.amount.is_(None)),
+                "required_field_missing",
+            ),
+            else_="suspect",
+        ).label("gap_reason")
+        base = (
+            select(
+                Security.symbol,
+                Security.name,
+                Security.security_type,
+                Security.exchange,
+                Security.list_date,
+                Security.delist_date,
+                TradingCalendar.trade_date,
+                literal(adjust_type).label("adjust_type"),
+                gap_reason,
+            )
+            .select_from(Security)
+            .join(TradingCalendar, TradingCalendar.exchange == Security.exchange)
+            .outerjoin(
+                DailyBar,
+                and_(
+                    DailyBar.symbol == Security.symbol,
+                    DailyBar.trade_date == TradingCalendar.trade_date,
+                    DailyBar.adjust_type == adjust_type,
+                ),
+            )
+            .where(*filters)
+        )
         total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
         items = list(
             db.execute(

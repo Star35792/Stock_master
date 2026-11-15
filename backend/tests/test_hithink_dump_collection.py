@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
@@ -269,9 +270,68 @@ def test_zero_adjustment_is_kept_raw_but_not_published_as_rights_issue(
         connection, batch_id=1, source_name="hithink", path=source
     )
     assert connection.execute("SELECT count(*) FROM raw.corporate_action").fetchone()[0] == 2
+    _bulk_import_adjustments_duckdb(
+        connection, batch_id=2, source_name="hithink", path=source
+    )
+    assert connection.execute("SELECT count(*) FROM raw.corporate_action").fetchone()[0] == 2
+    revised = tmp_path / "adjustments-revised.parquet"
+    connection.execute(
+        "COPY (SELECT '600001.SH' AS thscode, '600001' AS ticker, "
+        "1784217600000::BIGINT AS ex_date_ms, 0.6 AS dividend_per_share, "
+        "0.1 AS per_share_bonus, 0.0 AS allotment_ratio, "
+        "0.0 AS allotment_price, 'CNY' AS currency) TO ? (FORMAT PARQUET)",
+        [str(revised)],
+    )
+    _bulk_import_adjustments_duckdb(
+        connection, batch_id=3, source_name="hithink", path=revised
+    )
+    assert connection.execute(
+        "SELECT count(*) FROM raw.corporate_action WHERE symbol = '600001.SH'"
+    ).fetchone()[0] == 2
     assert connection.execute(
         "SELECT symbol, action_type FROM market.corporate_action"
-    ).fetchall() == [("600001.SH", "cash_dividend")]
+    ).fetchall() == [("600001.SH", "mixed")]
+    assert connection.execute(
+        "SELECT cash_dividend, bonus_share_ratio FROM market.corporate_action "
+        "WHERE symbol = '600001.SH'"
+    ).fetchone() == (Decimal("0.600000"), Decimal("0.10000000"))
+
+
+def test_adjustment_dump_rejects_conflicting_business_key(tmp_path: Path) -> None:
+    connection = duckdb.connect()
+    connection.execute("CREATE SCHEMA raw")
+    connection.execute("CREATE SCHEMA market")
+    connection.execute(
+        "CREATE TABLE raw.corporate_action (batch_id BIGINT, source_name VARCHAR, "
+        "symbol VARCHAR, ex_date DATE, dividend_per_share DECIMAL(18,6), "
+        "per_share_bonus DECIMAL(18,8), allotment_ratio DECIMAL(18,8), "
+        "allotment_price DECIMAL(18,6), raw_payload JSON, row_hash VARCHAR)"
+    )
+    connection.execute(
+        "CREATE TABLE market.corporate_action (symbol VARCHAR, ex_date DATE, "
+        "action_type VARCHAR, cash_dividend DECIMAL(18,6), "
+        "bonus_share_ratio DECIMAL(18,8), rights_issue_ratio DECIMAL(18,8), "
+        "rights_issue_price DECIMAL(18,6), source_name VARCHAR, raw_payload JSON, "
+        "UNIQUE(symbol, ex_date, action_type, source_name))"
+    )
+    source = tmp_path / "adjustment-conflict.parquet"
+    connection.execute(
+        "COPY (SELECT * FROM (VALUES "
+        "('600001.SH', '600001', 1784217600000::BIGINT, 0.5, 0.0, 0.0, 0.0, 'CNY'), "
+        "('600001.SH', '600001', 1784217600000::BIGINT, 0.6, 0.1, 0.0, 0.0, 'CNY')"
+        ") AS t(thscode, ticker, ex_date_ms, dividend_per_share, "
+        "per_share_bonus, allotment_ratio, allotment_price, currency)) "
+        "TO ? (FORMAT PARQUET)",
+        [str(source)],
+    )
+
+    with pytest.raises(ValueError, match="conflicting business keys"):
+        _bulk_import_adjustments_duckdb(
+            connection, batch_id=1, source_name="hithink", path=source
+        )
+
+    assert connection.execute("SELECT count(*) FROM raw.corporate_action").fetchone()[0] == 0
+    assert connection.execute("SELECT count(*) FROM market.corporate_action").fetchone()[0] == 0
 
 
 def test_zero_adjustment_is_invalid_in_row_import_path() -> None:

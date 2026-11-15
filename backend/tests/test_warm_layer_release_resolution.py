@@ -157,8 +157,8 @@ def test_release_chain_resolves_tables_from_grandparent(warm_root: Path) -> None
     con.close()
 
 
-def test_release_cycle_does_not_hang(warm_root: Path) -> None:
-    """A malformed parent cycle must terminate instead of looping forever."""
+def test_release_cycle_fails_closed(warm_root: Path) -> None:
+    """A malformed parent cycle must not become a readable release."""
     _write_release(
         warm_root,
         "20260101-0000",
@@ -173,9 +173,24 @@ def test_release_cycle_does_not_hang(warm_root: Path) -> None:
     )
 
     store = WarmLayerStore(warm_root)
-    lineage = store.release_lineage("20260101-0000")
-    assert lineage[0] == "20260101-0000"
-    assert len(lineage) == len(set(lineage))
+    with pytest.raises(ValueError, match="contains a cycle"):
+        store.release_lineage("20260101-0000")
+
+
+def test_release_chain_fails_closed_when_depth_exceeds_limit(warm_root: Path) -> None:
+    exported = warm_root / "exported"
+    for index in range(17):
+        tag = f"20260101-{index:04d}"
+        release = exported / tag
+        release.mkdir(parents=True)
+        parent = f"20260101-{index - 1:04d}" if index else None
+        (release / "export_summary.json").write_text(
+            json.dumps({"all_ok": True, "base_release_tag": parent}), encoding="utf-8"
+        )
+
+    store = WarmLayerStore(warm_root)
+    with pytest.raises(ValueError, match="exceeds 16 levels"):
+        store.release_lineage("20260101-0016")
 
 
 def test_latest_release_skips_failed_export(warm_root: Path) -> None:

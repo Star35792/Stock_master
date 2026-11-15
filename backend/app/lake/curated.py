@@ -18,9 +18,12 @@ columns in the raw layer, so no timezone conversion happens here.
 
 from __future__ import annotations
 
+import logging
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from time import sleep
 from uuid import uuid4
 
 import duckdb
@@ -28,6 +31,8 @@ import duckdb
 from app.lake.data_lake import DataLake, _compact_partitions
 from app.lake.qfq import create_qfq_view
 from app.lake.security_type import security_type_case_sql
+
+logger = logging.getLogger(__name__)
 
 # Line items pulled out of the raw ``metrics`` JSON into typed DECIMAL columns.
 # Each column coalesces across the vendor's alias spellings, mirroring the alias
@@ -86,6 +91,13 @@ class CuratedDatasetResult:
     checksum: str | None = None
 
 
+@dataclass(frozen=True)
+class PricesQfqPublishTransaction:
+    result: CuratedDatasetResult
+    staged_path: str
+    retired_path: str | None
+
+
 class CuratedLayer:
     """Builds analysis-ready datasets from the raw lake and vendor sources."""
 
@@ -108,9 +120,7 @@ class CuratedLayer:
         """
         target = self.root / "prices_qfq"
         if target.exists():
-            raise FileExistsError(
-                f"curated dataset already exists, drop it first: {target}"
-            )
+            raise FileExistsError(f"curated dataset already exists, drop it first: {target}")
         daily = Path(self.lake.latest("daily_bar").path) / "**" / "*.parquet"
         actions = Path(self.lake.latest("corporate_action").path) / "**" / "*.parquet"
         target.mkdir(parents=True, exist_ok=False)
@@ -118,9 +128,7 @@ class CuratedLayer:
         connection = duckdb.connect()
         try:
             connection.execute("SET threads = 1")
-            create_qfq_view(
-                connection, daily_glob=str(daily), action_glob=str(actions)
-            )
+            create_qfq_view(connection, daily_glob=str(daily), action_glob=str(actions))
             stats = _copy_prices_qfq(connection, target, turnover_rate_null=True)
         except Exception:
             _cleanup(target)
@@ -163,12 +171,10 @@ class CuratedLayer:
         temp_target = self.root / f".prices_qfq.tmp-{stamp}-{uuid4().hex[:8]}"
         temp_target.mkdir(parents=True, exist_ok=False)
 
-        qualified_filter = trusted_filter.replace(
-            "quality_status", "d.quality_status"
-        ).replace("adjust_type", "d.adjust_type")
-        factor_version_filter = (
-            "AND af.version = $factor_version" if factor_version else ""
+        qualified_filter = trusted_filter.replace("quality_status", "d.quality_status").replace(
+            "adjust_type", "d.adjust_type"
         )
+        factor_version_filter = "AND af.version = $factor_version" if factor_version else ""
         own_connection = connection is None
         connection = connection or duckdb.connect(db_path)
         try:
@@ -256,10 +262,16 @@ class CuratedLayer:
             result_path = temp_target
         return _result("prices_qfq", result_path, stats)
 
-    def publish_prices_qfq(
-        self, staged: CuratedDatasetResult
-    ) -> CuratedDatasetResult:
+    def publish_prices_qfq(self, staged: CuratedDatasetResult) -> CuratedDatasetResult:
         """Atomically publish a previously certified ``prices_qfq`` staging tree."""
+        transaction = self.prepare_prices_qfq_publish(staged)
+        self.finalize_prices_qfq_publish(transaction)
+        return transaction.result
+
+    def prepare_prices_qfq_publish(
+        self, staged: CuratedDatasetResult
+    ) -> PricesQfqPublishTransaction:
+        """Swap in staged data while retaining the previous tree for rollback."""
         source = Path(staged.path).resolve()
         root = self.root.resolve()
         if source.parent != root or not source.name.startswith(".prices_qfq.tmp-"):
@@ -267,8 +279,8 @@ class CuratedLayer:
         if not source.exists():
             raise FileNotFoundError(f"prices_qfq staging path does not exist: {source}")
         target = self.root / "prices_qfq"
-        _replace_directory(source, target)
-        return CuratedDatasetResult(
+        retired = _replace_directory(source, target, retain_retired=True)
+        result = CuratedDatasetResult(
             dataset=staged.dataset,
             path=str(target.resolve()),
             row_count=staged.row_count,
@@ -278,6 +290,38 @@ class CuratedLayer:
             release_id=staged.release_id,
             checksum=staged.checksum,
         )
+        return PricesQfqPublishTransaction(
+            result=result,
+            staged_path=str(source),
+            retired_path=str(retired) if retired is not None else None,
+        )
+
+    def finalize_prices_qfq_publish(self, transaction: PricesQfqPublishTransaction) -> None:
+        """Discard the retained tree only after release activation commits."""
+        if transaction.retired_path is None:
+            return
+        try:
+            _cleanup(Path(transaction.retired_path))
+        except OSError:
+            logger.warning(
+                "Could not remove superseded curated directory: %s",
+                transaction.retired_path,
+                exc_info=True,
+            )
+
+    def rollback_prices_qfq_publish(self, transaction: PricesQfqPublishTransaction) -> None:
+        """Restore the previous tree and keep the new tree staged for diagnosis."""
+        target = self.root / "prices_qfq"
+        staged = Path(transaction.staged_path)
+        if staged.exists():
+            raise FileExistsError(f"cannot roll back onto existing staging path: {staged}")
+        if target.exists():
+            _rename_directory(target, staged)
+        if transaction.retired_path is not None:
+            retired = Path(transaction.retired_path)
+            if not retired.exists():
+                raise FileNotFoundError(f"retained curated tree is missing: {retired}")
+            _rename_directory(retired, target)
 
     def build_fundamentals_pit(self, source: str | Path) -> CuratedDatasetResult:
         """Flatten financial statements into typed, point-in-time columns.
@@ -290,9 +334,7 @@ class CuratedLayer:
         """
         target = self.root / "fundamentals_pit"
         if target.exists():
-            raise FileExistsError(
-                f"curated dataset already exists, drop it first: {target}"
-            )
+            raise FileExistsError(f"curated dataset already exists, drop it first: {target}")
         source_glob = str(Path(source).resolve())
         target.mkdir(parents=True, exist_ok=False)
 
@@ -336,8 +378,7 @@ def _fundamentals_pit_select(source_glob: str) -> str:
     for statement_type, columns in _PIT_COLUMNS.items():
         for column, aliases in columns.items():
             extracts = [
-                f"try_cast(nullif(metrics->>'{alias}', '') AS DECIMAL(24,4))"
-                for alias in aliases
+                f"try_cast(nullif(metrics->>'{alias}', '') AS DECIMAL(24,4))" for alias in aliases
             ]
             coalesced = f"coalesce({', '.join(extracts)})"
             projections.append(
@@ -370,9 +411,7 @@ def _copy_prices_qfq(
         "SELECT count(*), min(trade_date), max(trade_date) FROM qfq_bars"
     ).fetchone()
     turnover_expr = (
-        "CAST(NULL AS DECIMAL(12,6)) AS turnover_rate"
-        if turnover_rate_null
-        else "turnover_rate"
+        "CAST(NULL AS DECIMAL(12,6)) AS turnover_rate" if turnover_rate_null else "turnover_rate"
     )
     connection.execute(
         f"""
@@ -400,39 +439,44 @@ def _copy_prices_qfq(
     return stats
 
 
-def _replace_directory(source: Path, target: Path) -> None:
-    """Atomically replace ``target`` directory with ``source`` directory.
-
-    The old target is kept as a timestamped backup directory instead of being
-    deleted inline.  Bulk-delete guards in the execution environment can block
-    the recursive removal of hundreds of parquet files, so cleanup is deferred
-    to an explicit maintenance step.
-    """
+def _replace_directory(source: Path, target: Path, *, retain_retired: bool = False) -> Path | None:
+    """Publish a staged directory and discard the superseded materialization."""
+    retired = target.parent / f".{target.name}.replacing-{uuid4().hex}"
     if target.exists():
-        backup = target.with_suffix(f".backup-{datetime.now(UTC):%Y%m%dT%H%M%S}")
-        target.rename(backup)
-    source.rename(target)
+        _rename_directory(target, retired)
+    try:
+        _rename_directory(source, target)
+    except Exception:
+        if retired.exists():
+            _rename_directory(retired, target)
+        raise
+    if retain_retired:
+        return retired if retired.exists() else None
+    # This is a temporary swap companion, not a retained backup. If cleanup is
+    # interrupted, the next maintenance pass can remove the orphaned directory.
+    try:
+        _cleanup(retired)
+    except OSError:
+        logger.warning("Could not remove superseded curated directory: %s", retired, exc_info=True)
+    return None
 
 
-def _cleanup(target: Path, batch_size: int = 30) -> None:
+def _rename_directory(source: Path, target: Path, *, attempts: int = 6) -> None:
+    """Rename a directory with a short retry for transient Windows file locks."""
+    for attempt in range(attempts):
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if attempt + 1 >= attempts:
+                raise
+            sleep(0.05 * (attempt + 1))
+
+
+def _cleanup(target: Path) -> None:
     if not target.exists():
         return
-    all_paths = sorted(target.rglob("*"), reverse=True)
-    files = [p for p in all_paths if p.is_file()]
-    # Delete files in small batches to avoid triggering bulk-delete guards.
-    for i in range(0, len(files), batch_size):
-        for path in files[i : i + batch_size]:
-            path.unlink()
-    for path in all_paths:
-        if path.is_dir():
-            try:
-                path.rmdir()
-            except OSError:
-                pass
-    try:
-        target.rmdir()
-    except OSError:
-        pass
+    shutil.rmtree(target)
 
 
 def _result(dataset: str, target: Path, stats: tuple) -> CuratedDatasetResult:

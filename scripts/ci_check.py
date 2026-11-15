@@ -72,6 +72,13 @@ def main(argv: list[str] | None = None) -> int:
         if executable is None:
             print(f"Missing executable on PATH: {command[0]}", flush=True)
             return 127
+        basetemp_arg = next(
+            (part for part in command if part.startswith("--basetemp=")), None
+        )
+        if basetemp_arg is not None:
+            Path(basetemp_arg.removeprefix("--basetemp=")).parent.mkdir(
+                parents=True, exist_ok=True
+            )
         try:
             subprocess.run([executable, *command[1:]], cwd=directory, check=True)
         except subprocess.CalledProcessError as error:

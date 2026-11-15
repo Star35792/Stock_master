@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from app.api.routes import strategy_research as strategy_research_routes
 from app.api.routes.backtests import router as backtests_router
 from app.api.routes.operations import router as operations_router
 from app.api.routes.strategy_research import router as research_router
@@ -17,6 +19,9 @@ from app.database.research_session import get_research_db, initialize_research_d
 from app.database.session import get_db, initialize_database
 from app.models.market import DailyBar, Security, TradingCalendar
 from app.models.strategy import BacktestRun
+from app.repositories.strategy import BacktestRepository
+from app.services.backtest import DailyBacktestService
+from app.services.strategy_research import StrategyResearchService
 from app.utils.duckdb_write_lock import DuckDbWriteLockTimeout, duckdb_write_lock
 from tests.test_price_value_backtest_service import backtest_payload
 
@@ -127,6 +132,120 @@ def test_split_database_missing_report_is_404(split_api):
     ):
         response = client.get(url)
         assert response.status_code == 404, response.text
+
+
+def _factor_selection_payload(name: str) -> dict:
+    return {
+        "name": name,
+        "factor_specs": [{"factor_name": "fixture_score", "factor_version": "v1"}],
+        "top_n": 1,
+        "start_date": "2026-01-05",
+        "end_date": "2026-01-09",
+        "initial_cash": "10000",
+        "code_version": "api-split-regression",
+        "data_version": "fixture-v1",
+    }
+
+
+def test_factor_selection_single_and_batch_persist_in_research_database(
+    split_api, monkeypatch
+):
+    client, market, research = split_api
+
+    class FixtureFactors:
+        def list_for_cross_section(self, db, **kwargs):
+            return [SimpleNamespace(
+                trade_date=date(2026, 1, 5), symbol="600001.SH",
+                value=Decimal("1"), run_id=1,
+            )]
+
+    monkeypatch.setattr(
+        strategy_research_routes,
+        "service",
+        StrategyResearchService(
+            factor_value_repository=FixtureFactors(),
+            backtest_service=DailyBacktestService(research_read_source="control"),
+        ),
+    )
+    root = "/api/v1/strategy-research/factor-selection/backtests"
+    single_payload = _factor_selection_payload("single")
+    single_payload.update(code_version="auto", data_version="auto")
+    single = client.post(root, json=single_payload)
+    assert single.status_code == 200, single.text
+    single_id = single.json()["run_id"]
+    single_run = client.get(f"/api/v1/backtests/runs/{single_id}")
+    assert single_run.status_code == 200
+    assert single_run.json()["code_version"].startswith("source-")
+    assert single_run.json()["data_version"].startswith("input-")
+    assert single_run.json()["parameters"]["data_version"] == (
+        single_run.json()["data_version"]
+    )
+
+    batch = client.post(f"{root}/batch", json={
+        "runs": [_factor_selection_payload("batch-a"), _factor_selection_payload("batch-b")],
+    })
+    assert batch.status_code == 200, batch.text
+    assert [item["status"] for item in batch.json()] == ["success", "success"]
+    run_ids = [single_id, *(item["result"]["run_id"] for item in batch.json())]
+    for run_id in run_ids:
+        assert client.get(f"/api/v1/backtests/runs/{run_id}").status_code == 200
+        equity = client.get(f"/api/v1/backtests/runs/{run_id}/equity")
+        assert equity.status_code == 200
+        assert equity.json()["total"] == 5
+
+    with Session(research) as db:
+        assert db.scalar(text("SELECT count(*) FROM strategy.backtest_run")) == 3
+        assert db.scalar(text("SELECT count(*) FROM strategy.backtest_equity")) == 15
+    with Session(market) as db:
+        assert db.scalar(text(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema='strategy' AND table_name='backtest_run'"
+        )) == 0
+
+
+def test_factor_selection_batch_rolls_back_failed_item_before_next_commit(
+    split_api, monkeypatch
+):
+    client, _, research = split_api
+
+    class FirstFails:
+        calls = 0
+
+        def run_factor_selection(self, db, **kwargs):
+            self.calls += 1
+            run = BacktestRepository().create_run(
+                kwargs["research_db"],
+                name=kwargs["name"], strategy_name=kwargs["strategy_name"],
+                parameters={}, code_version=kwargs["code_version"],
+                data_version=kwargs["data_version"],
+                start_date=kwargs["start_date"], end_date=kwargs["end_date"],
+                initial_cash=kwargs["initial_cash"],
+            )
+            if self.calls == 1:
+                raise ValueError("fixture rejected after research flush")
+            run.status = "success"
+            return SimpleNamespace(
+                run_id=run.id, quantile=None,
+                result=SimpleNamespace(
+                    initial_cash=kwargs["initial_cash"],
+                    final_equity=kwargs["initial_cash"],
+                    total_return=Decimal(), trades=[], equity_curve=[], positions=[],
+                ),
+            )
+
+    monkeypatch.setattr(strategy_research_routes, "service", FirstFails())
+    response = client.post(
+        "/api/v1/strategy-research/factor-selection/backtests/batch",
+        json={"runs": [
+            _factor_selection_payload("failed-first"),
+            _factor_selection_payload("successful-second"),
+        ]},
+    )
+    assert response.status_code == 200, response.text
+    assert [item["status"] for item in response.json()] == ["failed", "success"]
+    with Session(research) as db:
+        names = db.execute(text("SELECT name FROM strategy.backtest_run")).scalars().all()
+        assert names == ["successful-second"]
 
 
 def test_default_research_initialization_obeys_shared_lock(tmp_path, monkeypatch):

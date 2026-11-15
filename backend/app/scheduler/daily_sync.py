@@ -149,14 +149,27 @@ def run_recent_data_completion(
             gap = result.gap_backfill
             gap_market = result.gap_market_build
             job.rows_read = primary.collection.row_count + gap.fetched_rows
-            job.rows_inserted = (
-                primary.market_build.trusted_count + (gap_market.trusted_count if gap_market else 0)
+            job.rows_inserted = primary.market_build.trusted_count + (
+                gap_market.trusted_count if gap_market else 0
             )
             job.rows_failed = (
                 primary.collection.rejected_count
                 + primary.market_build.rejected_count
-                + gap.skipped_rows
+                + gap.rejected_rows
+                + gap.unresolved_actionable_rows
+                + (gap_market.rejected_count if gap_market else 0)
+                + (gap_market.suspect_count if gap_market else 0)
             )
+            if (
+                primary.collection.status == "partial"
+                or gap.status == "partial"
+                or primary.market_build.rejected_count
+                or gap.rejected_rows
+                or gap.unresolved_rows
+                or (gap_market and gap_market.rejected_count)
+                or (gap_market and gap_market.suspect_count)
+            ):
+                job.status = "partial"
             job.metadata_ = {
                 **(job.metadata_ or {}),
                 "primary_batch_no": primary.collection.batch_no,
@@ -169,7 +182,24 @@ def run_recent_data_completion(
                 "gap": {
                     "inserted_rows": gap.inserted_rows,
                     "skipped_rows": gap.skipped_rows,
+                    "skipped_unchanged_rows": gap.skipped_unchanged_rows,
+                    "skipped_duplicate_rows": gap.skipped_duplicate_rows,
+                    "ignored_in_scope_rows": gap.ignored_in_scope_rows,
+                    "rejected_rows": gap.rejected_rows,
+                    "conflicting_response_rows": gap.conflicting_response_rows,
+                    "status": gap.status,
+                    "source_error_count": gap.source_error_count,
+                    "unresolved_rows": gap.unresolved_rows,
+                    "unresolved_actionable_rows": gap.unresolved_actionable_rows,
+                    "missing_rows": gap.missing_rows,
+                    "partial_rows": gap.partial_rows,
+                    "suspect_rows": gap.suspect_rows,
+                    "status_explained_rows": gap.status_explained_rows,
+                    "lifecycle_unknown_rows": gap.lifecycle_unknown_rows,
+                    "status_conflict_rows": gap.status_conflict_rows,
                     "trusted_count": gap_market.trusted_count if gap_market else 0,
+                    "rejected_count": gap_market.rejected_count if gap_market else 0,
+                    "market_suspect_count": gap_market.suspect_count if gap_market else 0,
                     "issue_count": gap_market.issue_count if gap_market else 0,
                 },
             }
