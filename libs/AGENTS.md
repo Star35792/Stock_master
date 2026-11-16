@@ -4,8 +4,8 @@
 
 ## a_stock_data/（本地代码，被后端 import）
 
-- 只有一个模块：`loader.py` 把未入库的 `a-stock-data-main/SKILL.md`（「结构化 Markdown + 内嵌 Python」，约 87 个端点）净化成可 import 的模块。
-- 它是在用外部源的实现：`backend/app/data_sources/tencent.py:107` 与 `tdx_official.py`、`backend/scripts/ingest/reconcile_with_a_stock_data.py` 都把仓库根的 `libs/` 插进 `sys.path` 后 import 本包。
+- `loader.py` 把未入库的 `a-stock-data-main/SKILL.md`（结构化 Markdown 与内嵌 Python）净化成可 import 的模块。
+- 后端数据源适配器及对账脚本通过仓库根 `libs/` import 本包；调用位置以当前代码为准。
 - 必须保持的不变式：AST 白名单只保留「可安全执行的定义」，导入时**不得**发起任何外网请求。上游代码块常在模块级直接取数并 `print`，不净化就会 import 即打几十个请求（触发供应商风控）、灌满 stdout、耗时数十秒。
 - 改这里等于改数据源实现：按 T2 评审，并保持 `SKILL.md` 变更后 loader 的白名单仍然覆盖所需端点。
 

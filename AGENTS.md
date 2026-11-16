@@ -1,10 +1,10 @@
 # Stock Master · AI 协作规则
 
-本文件是本仓库 AI 协作规则的唯一真源，采用 AGENTS.md 开放格式（https://agents.md）的分层嵌套约定：根文件只承载跨模块稳定规则，模块专属规则写在该目录自己的 `AGENTS.md` 里。`AGENT.MD` 已降级为指向本文件的兼容入口，是当前唯一的旧路径适配层。其它工具目录（如 `.claude/settings.local.json` 的权限配置、`.workbuddy/` 的会话记忆）不属于规则层；为某个工具新增适配文件时，只写指向本文件的引用，不复制规则正文，不得演化成第二份需要人工同步的 project rule。
+本文件是本仓库跨模块 AI 协作规则的唯一真源，采用 AGENTS.md 开放格式（https://agents.md）的分层嵌套约定。模块 `AGENTS.md` 只补充本模块规则；`AGENT.MD` 只作旧路径兼容入口。工具配置、会话记忆和专项 Skill 不构成第二份项目规则；新增工具适配文件只引用本文件，不复制规则正文。
 
 ## 作用域与读取顺序
 
-1. 先读本文件，再读编辑目标所在目录链上的 `AGENTS.md`（`backend/`、`frontend/`、`scripts/`、`libs/`）。离被编辑文件最近的规则优先；仍冲突时以本文件为准。
+1. 先读本文件，再读编辑目标所在目录链上的 `AGENTS.md`（`backend/`、`frontend/`、`scripts/`、`libs/`）。模块规则补充本文件；同一事项冲突时以本文件的跨模块约束为准。
 2. 再读 `aiDoc/README.md` 的 Reference Map，按任务类型只打开直接相关的 `aiDoc/` 文档。不要为普通改动全量重读文档、测试或源码；优先 `rg` 定位，再读入口文件和受影响文件。
 3. 用户当前的明确指令优先于本文件中的所有规则。
 
@@ -12,9 +12,9 @@
 
 - Stock Master 是 Python 3.13 + FastAPI 的单机单用户个人量化平台，**只做选股研究与持仓管理**：不连接券商，不做实盘自动化交易，不发送任何真实订单。产出止于研究结论、选股名单、组合持仓方案、风险预算与持仓推演，由人工在外部终端自行下单。
 - `trade` 域只表示本地模拟推演账户，不是通向真实账户的跳板；不引入真实账户只读适配器、外部订单幂等状态机、券商回报对账或 kill switch。
-- 存储事实源（三个库都在 `backend/data/` 下）：主库 `backend/data/stock_master.duckdb` 承载控制面、事务事实与温层 release 链；研究库 `backend/data/research.duckdb` 承载 strategy 回测产物；真实持仓账本 `backend/data/positions.db` 用 SQLite（经评估保留的唯一例外）；大体量列式历史落本地 Parquet 温层。除此之外不引入 PostgreSQL、MinIO 或 Redis。
-- 库路径、`data_lake_root` 与 `.env` 都按**当前工作目录**解析（`app/config/settings.py` 的默认值是 `data/...` 相对路径），因此任务一律从 `backend/` 启动。从仓库根运行同一份代码不会报错，而是静默地另建一份空库、另一把写锁并跳过 `backend/.env`——那是与真实库并行的平行事实源，不是缓存。
-- 项目已从 V1 可信日线数据中心推进到 V6 最小运维工作台，当前优先目标是把已落地的因子、回测、组合、风控、模拟推演能力产品化、可观测化，同时保持可信数据中心规则。不要把项目实现为依赖单一 AKShare、Tushare 或网页接口的数据脚本。
+- 存储事实源（三个库都在 `backend/data/` 下）：主库 `backend/data/stock_master.duckdb` 承载控制面、事务事实与温层 release 链；研究库 `backend/data/research.duckdb` 承载 strategy 回测产物；人工记录的真实持仓账本 `backend/data/positions.db` 用 SQLite（经评估保留的唯一例外）；大体量列式历史落本地 Parquet 温层。除此之外不引入 PostgreSQL、MinIO 或 Redis。
+- 后端应用、数据维护和研究脚本必须以 `backend/` 为工作目录。库路径、`data_lake_root` 与 `.env` 按当前工作目录解析；从仓库根运行后端代码会静默另建一份空库、另一把写锁并跳过 `backend/.env`。仓库级 `scripts/ci_check.py` 会自行设置各步骤的工作目录，可从仓库根调用；前端命令按 `frontend/AGENTS.md` 执行。
+- 阶段状态与近期优先级以 `aiDoc/plans/roadmap.md` 为准。保持可信数据中心规则，不把项目实现为依赖单一 AKShare、Tushare 或网页接口的数据脚本。
 
 ## 工程规则
 
@@ -43,23 +43,22 @@
 
 - 使用 Python 3.13、FastAPI、SQLAlchemy 2.x。字段命名 snake_case；证券代码统一 `symbol`、交易日期统一 `trade_date`、复权类型统一 `adjust_type`。
 - 核心价格、金额和比率必须使用精确定点类型：DuckDB 用 `Numeric`/`DECIMAL`，Parquet 用 `DECIMAL`，不得用浮点保存核心金融数据。
+- 同一类可机械识别的错误反复出现时，优先改进代码结构、类型约束、lint、测试或 CI；文字规则和 Skill 主要承载仍需判断的事项，不堆叠同义提醒。
 
 ## 验证入口
 
-- 本地与 CI 共用同一入口：`uv run --project backend python scripts/ci_check.py --scope all|backend|frontend`，按步失败即停并保留退出码。Windows 上不要用裸 `python`（可能是商店别名，只会静默失败）。
+- 本地与 CI 共用同一入口。从仓库根运行 `uv run --project backend python scripts/ci_check.py --scope all`（也可选择 `backend` 或 `frontend`）；脚本自行进入对应模块目录，按步失败即停并保留退出码。Windows 上不要用裸 `python`（可能是商店别名，只会静默失败）。
 - 单模块命令与门写在该模块自己的 `AGENTS.md`；改公共门本身必须同步更新契约测试 `backend/tests/test_ci_check_runner.py`。
 
 ## 协作与提交门
 
 ### 长期协作团队
 
-非平凡开发任务默认按五个资深角色推进，由主代理汇总裁决：项目经理（阶段判断、优先级、验收门槛、测试与文档同步节奏，主动推动下一步，不等用户反复输入"继续"）、产品经理（产品价值、MVP 边界、用户流程、可验收标准与明确延期项）、金融专家（量化投资、组合构建、风控、选股与持仓管理边界、核心金融计算正确性）、后端工程师（FastAPI 分层、API/schema、service/repository 边界、测试、幂等、审计、安全写入）、前端工程师（Vue 实现、组件拆分、交互可用性、只读/写入边界表达、构建验证）。
-
-- 运行环境支持子代理时，恢复对应角色独立审查；不支持时，由主代理按同一清单逐角色审查并明确说明降级，不得省略产品、前端、后端、项目管理或金融风控视角。
+非平凡开发任务由主代理按影响范围统筹项目经理、产品经理、金融专家、后端工程师和前端工程师视角：项目经理定优先级和验收节奏；产品经理定用户流程与 MVP；金融专家核对数据时点、研究口径和风险边界；后端工程师核对分层、幂等与审计；前端工程师核对交互和构建。T0 只做常规检查，T1 只核对受影响的视角；T2 按评审协议中的风险触发条件选择独立复核角色，重合结论可直接复用。无独立复核条件时，由主代理自查并如实标明，不把分角色自查称为独立评审。
 
 ### 决策评审与提交
 
-- 任何任务先按 `aiDoc/plans/decision-review-protocol.md` 判定 T0、T1 或 T2；只有 T2 启动架构师、产品经理、金融行业专家和 Vibe Coding 规则编写者四角色评审。
+- 拟修改代码、规则或文档时，先按 `aiDoc/plans/decision-review-protocol.md` 判定 T0、T1 或 T2；纯只读问答无需变更分级。T2 是影响分级，不自动要求固定人数；独立复核按实际风险和受影响边界触发。
 - T2 包括规则、路线或 MVP、架构边界、公共 API、schema、数据契约与血缘、因子与策略口径、回测假设、组合、风控、持仓管理和核心金融计算变化；**项目级 AI 规则变更自身始终按 T2 处理**。
 - 执行 `git commit` 前必须检查 staged diff 并重新判级：T2 必须完成项目现状评审并关闭 P0；P1 只有经用户明确接受并记录后才可附条件提交，并给出有证据的优化建议。T0/T1 只做轻量 diff、测试、敏感信息和文档影响检查。
 - 评审结论必须包含触发原因、项目现状、证据、风险等级、阻断项、验证结果和文档同步；评审不替代测试，也不得借机扩大当前任务范围。

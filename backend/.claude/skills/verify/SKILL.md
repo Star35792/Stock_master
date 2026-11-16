@@ -1,32 +1,21 @@
 ---
 name: verify
-summary: Verify backend runtime surfaces after product-code changes.
+description: 按后端变更范围选择有界的运行态验证，并检查可观察结果。
 ---
 
-# Backend Verification
+# 后端运行态验证
 
-Run from `backend/`.
+工作目录为 `backend/`。先读根 `AGENTS.md` 与 `backend/AGENTS.md`，确认变更触及的 API、数据链、研究或模拟推演边界。验证范围由变更决定，不把一次真实采集或全历史回填当作通用检查。
 
-## HiThink dump ingestion
+## 选择验证路径
 
-1. Drive the real CLI with the recent dump:
-   ```bash
-   uv run python scripts/ingest/hithink/sync_hithink_dump.py --skip-reference-data
-   ```
-2. For full-history changes, drive the 10-year path:
-   ```bash
-   uv run python scripts/ingest/hithink/sync_hithink_dump.py --full --skip-reference-data
-   ```
-3. Start the API on an unused port and request `/health` plus a known symbol's earliest bars. Stop only the PID created by that shell:
-   ```bash
-   uv run uvicorn app.main:app --host 127.0.0.1 --port 8011 & server_pid=$!
-   curl -s http://127.0.0.1:8011/health
-   curl -s 'http://127.0.0.1:8011/api/v1/daily-bars/600519.SH?limit=2&offset=0'
-   kill $server_pid
-   ```
+1. 先运行受影响的单元或契约测试；跨模块变更再运行公共后端门：`uv run --extra dev python ../scripts/ci_check.py --scope backend`。
+2. API 行为变化时，用隔离的测试配置启动单 worker 服务，实际请求受影响端点并核对状态码、响应内容与持久化结果。记录启动进程的 PID，只停止本次启动的进程。不要使用 Bash 专属的 `&`、`$!`、`kill` 片段作为 Windows 命令。
+3. 数据导入变化时，先用小样本或测试夹具核对 `raw` 留痕、质量门与 `market` 发布结果；在隔离目标库重复同一输入，验证幂等。DuckDB 的 `INSERT ... ON CONFLICT` 受影响行数不可靠，以只读查询持久化行及业务键为准。
+4. 研究、组合和风控变化时，运行与改动直接相关的真实计算或只读 API，并检查输入版本、时点、精度、拒绝原因和最终输出；构建通过不等于业务结果正确。
 
-## Useful probes
+## 数据与进程边界
 
-- Repeat the recent dump command to verify idempotent market upserts.
-- Pass an invalid CLI option and expect argparse exit code 2 with a clear message.
-- The CLI reports `market_rows=0` under DuckDB because SQLAlchemy does not provide a reliable affected-row count for `INSERT ... ON CONFLICT`; verify persisted market rows through the API instead.
+- 运行前明确目标库、输入、预期写入量和产生的文件。默认使用隔离测试配置；写入真实事实源仅在当前任务确实需要时执行，并遵守根规则中的审计与单份数据边界。
+- 全历史导入、`--full` 回填和重复真实采集只在任务本身需要这些路径时执行，先确认容量、数据引用与可恢复性。
+- 收尾盘点本次产生的文件与进程；只清理自己生成、可再生产且已核对无引用的临时产物，保留必要的 raw 证据和审计记录。

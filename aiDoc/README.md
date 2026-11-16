@@ -8,13 +8,11 @@
 2. 根据任务类型只读下方相关 reference。
 3. 只有任务触碰对应边界时，才继续打开深入设计文档。
 4. 引用任何带时间戳前缀的文档前，先看它头部的 YAML `status`；批量判断口径新旧读[文档状态索引](20261115-1649-doc-status-index.md)。无时间戳前缀的 living docs 才承载当前状态。
-5. 完成代码任务前做一次文档影响检查：能力、API、schema、架构、路线、数据规则或长期记忆发生变化，就同步对应文档。
+5. 文档同步范围以根 `AGENTS.md` 的「文档同步门槛」为准。
 
-## 长期协作机制
+## 协作规则入口
 
-长期协作团队的唯一规则真源在根 `AGENTS.md` 的“长期协作团队”小节。进入非平凡开发任务时，主代理应按项目经理、产品经理、前端工程师、后端工程师、金融专家五个资深角色推进；能启动子代理就恢复对应角色，不能启动时由主代理逐角色审查并明确降级。
-
-默认推进顺序：项目经理定优先级，产品经理定价值和验收，金融专家定风控与交易边界，后端工程师定 API、审计和幂等，前端工程师定操作流和工程结构，最后由主代理整合实现、验证并做文档影响检查。
+角色与触发条件见根 [`AGENTS.md`](../AGENTS.md)；T0/T1/T2 分级和 T2 评审流程见[决策与提交评审协议](plans/decision-review-protocol.md)。本文件只负责文档导航，不另设协作顺序。
 
 ## Reference Map
 
@@ -46,31 +44,9 @@
 | 策略自演进（训练窗自动选参、rolling 选参策略） | [训练窗自动选参计划](plans/20261024-1522-training-window-selection-plan.md) | `aiDoc/plans/roadmap.md` V4.1、[首次实跑证据](research/20261024-1706-training-window-selection-first-run.md) |
 | 长期事实、偏好、踩坑 | `aiDoc/memory/README.md` | 通常不需要读正式文档 |
 | 某份时间戳文档现在是否还作数、谁取代了谁 | [文档状态索引](20261115-1649-doc-status-index.md) | 该文档头部的 YAML frontmatter（状态真源） |
-| 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | `aiDoc/plans/decision-review-protocol.md`、本文件长期协作机制小节 |
-
-## 推荐阅读顺序
-
-1. [计划与路线 Reference](plans/README.md)
-2. [系统关系 Reference](relations/system-map.md)
-3. [模块索引 Reference](modules/module-index.md)
-4. [V1 可信日线数据中心架构](relations/trusted-daily-data-center.md)
-5. [日线数据字段契约](data/daily-bar-contract.md)
-6. [数据源导入策略](data/source-ingestion-policy.md)
-7. [数据质量校验与修复设计](data/quality-validation-and-repair.md)
-8. [数据库 Schema 规划](modules/schema-plan.md)
-9. [路线图](plans/roadmap.md)
-10. [决策因子体系设计](research/decision-factor-framework.md)
-11. [产品与投资者视角评估](strategy/product-investment-assessment.md)
-12. [量化工具愿景](strategy/quantitative-tool-vision.md)
-13. [自动选股与持仓管控路线图](plans/auto-selection-position-roadmap.md)
-14. [前置硬门槛执行计划](plans/hard-gates-execution-plan.md)
-15. [研究产出最大化行动计划](plans/20261021-1708-research-output-maximization-plan.md)
-16. [估值历史回填与字段级 PIT 判定](data/20261026-valuation-history-backfill.md)
-17. [决策与提交评审协议](plans/decision-review-protocol.md)
+| 自主推进小组、多角色协作 | `aiDoc/relations/20260722-1519-autonomous-agent-team.md` | 根 `AGENTS.md` 的「长期协作团队」、`aiDoc/plans/decision-review-protocol.md` |
 
 ## 更新原则
 
-- 根 `AGENTS.md` 是 AI 协作规则唯一真源，并按 AGENTS.md 分层嵌套约定在各模块目录放 `AGENTS.md`；`AGENT.MD` 只是兼容入口，不承载规则。
-- `aiDoc/` 是项目文档唯一目录，按主题拆分，入口文件只负责导航。
-- 不要把临时过程写进项目文档；只把会影响后续实现的稳定结论写进去。
-- 带时间戳前缀的文档是**决策与证据的历史层**，正文一旦落定不再回改事实数字；它是否仍然作数只由头部 YAML `status` / `as_of` / `superseded_by` / `note` 表达，改动状态后重新生成[文档状态索引](20261115-1649-doc-status-index.md)。当前状态只写在 living docs（`roadmap.md`、`system-map.md`、`module-index.md`、`schema-plan.md`、`memory/README.md` 等无时间戳文件）与代码里。
+- `aiDoc/` 按主题保存项目文档；临时过程留在任务或审查记录，稳定结论写入对应主题文档。
+- 时间戳文档保存决策与证据历史，状态真源在其 YAML frontmatter；当前状态写入无时间戳的 living docs。状态字段变化后运行 `scripts/doc_status_index.py` 重建[文档状态索引](20261115-1649-doc-status-index.md)。详细格式与例外见根 `AGENTS.md` 的「文档维护」。
