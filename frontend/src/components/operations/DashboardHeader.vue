@@ -5,7 +5,7 @@ import { computed } from "vue";
 const props = defineProps<{
   page: string;
   generatedAt: string;
-  source: "api" | "demo";
+  source: "loading" | "api" | "partial" | "demo";
   errorMessage: string | null;
   isLoading: boolean;
   limit: number;
@@ -50,9 +50,13 @@ const emit = defineEmits<{
   </header>
 
   <section class="status-strip" aria-label="Connection status">
-    <span :class="['source-pill', source]">{{ source === "api" ? "API 已连接" : "演示数据" }}</span>
+    <span :class="['source-pill', source]">{{ source === "loading" ? "正在加载" : source === "api" ? "API 已连接" : source === "partial" ? "部分数据不可用" : "演示数据" }}</span>
     <span>生成时间 {{ generatedAt }}</span>
     <span class="readonly-pill">{{ pageCopy.scope }}</span>
     <span v-if="errorMessage" class="inline-error">{{ errorMessage }}</span>
+  </section>
+
+  <section v-if="source === 'demo'" class="demo-banner" role="alert">
+    后端运维接口不可用，当前页面展示的是内置演示数据，不代表真实运行状态；数据恢复前请勿据此做研究或持仓决策。
   </section>
 </template>

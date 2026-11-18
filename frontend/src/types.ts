@@ -275,6 +275,35 @@ export interface PortfolioConstraintsInput {
   max_symbol_weight: string;
   max_industry_weight: string;
   security_type_budgets: Record<string, string>;
+  risk_budget?: PortfolioRiskBudgetInput | null;
+}
+
+export interface PortfolioRiskBudgetInput {
+  max_industry_weight: string;
+  max_style_exposure: string | null;
+  max_tracking_error: string | null;
+  max_portfolio_volatility: string | null;
+  benchmark: string | null;
+}
+
+export interface PortfolioStyleRisk {
+  style_exposures: Array<{
+    style_name: string;
+    portfolio_exposure: string;
+    benchmark_exposure: string | null;
+    active_exposure: string | null;
+  }>;
+  tracking_error: string | null;
+  portfolio_volatility: string | null;
+  missing_styles: string[];
+  missing_benchmark: boolean;
+  factor_versions: Record<string, string>;
+  factor_evidence: Record<string, { run_id: number; observed_count: number; expected_count: number }>;
+  factor_as_of_date: string | null;
+  excluded_styles: string[];
+  sample_start_date: string | null;
+  sample_end_date: string | null;
+  return_observation_count: number;
 }
 
 export interface PortfolioPlanCreateRequest {
@@ -312,9 +341,20 @@ export interface PortfolioPlan {
   target_cash: string;
   cash_after: string;
   constraints: PortfolioConstraintsInput;
+  risk_budget: PortfolioRiskBudgetInput | null;
+  style_risk: PortfolioStyleRisk | null;
   code_version: string;
   created_at: string;
   targets: PortfolioTarget[];
+}
+
+export interface PortfolioPlanSummary {
+  plan_id: number;
+  name: string;
+  as_of_date: string;
+  total_equity: string;
+  code_version: string;
+  created_at: string;
 }
 
 export interface PortfolioReadinessCheck {
@@ -666,6 +706,8 @@ export interface PortfolioDriftRow {
   symbol: string;
   industry: string | null;
   security_type: string | null;
+  in_plan: boolean;
+  price_as_of: string | null;
   target_weight: string;
   current_weight: string;
   drift: string;
@@ -684,6 +726,9 @@ export interface PortfolioDriftSummary {
 
 export interface PortfolioPlanDrift {
   plan_id: number;
+  plan_name: string;
+  plan_as_of_date: string;
+  plan_total_equity: string;
   source: "position_book" | "paper_account";
   source_id: number;
   source_name: string | null;

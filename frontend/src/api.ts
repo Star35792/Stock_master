@@ -12,6 +12,7 @@ import type {
   PaperPerformance,
   PaperPositions,
   PortfolioPlan,
+  PortfolioPlanSummary,
   PortfolioPlanCreateRequest,
   PortfolioPlanDrift,
   PortfolioRiskReadiness,
@@ -197,6 +198,19 @@ export async function fetchPortfolioPlan(planId: number): Promise<PortfolioPlan>
     headers: { Accept: "application/json" },
   });
   return portfolioResponse(response);
+}
+
+export async function fetchPortfolioPlans(
+  limit = 50,
+  offset = 0,
+): Promise<ApiPage<PortfolioPlanSummary>> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return jsonApi(
+    await fetch(`/api/v1/portfolio/plans?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    }),
+    "组合草案列表读取失败",
+  );
 }
 
 export async function fetchPortfolioRiskReadiness(

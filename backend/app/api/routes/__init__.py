@@ -11,6 +11,7 @@ from app.api.routes.operations import router as operations_router
 from app.api.routes.paper_accounts import router as paper_accounts_router
 from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.position_books import router as position_books_router
+from app.api.routes.research_workflow import router as research_workflow_router
 from app.api.routes.securities import router as securities_router
 from app.api.routes.source_compares import router as source_compares_router
 from app.api.routes.strategy_research import router as strategy_research_router
@@ -30,6 +31,7 @@ __all__ = [
     "paper_accounts_router",
     "portfolio_router",
     "position_books_router",
+    "research_workflow_router",
     "securities_router",
     "source_compares_router",
     "strategy_research_router",

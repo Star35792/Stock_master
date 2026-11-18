@@ -1,522 +1,84 @@
 <script setup lang="ts">
 import { ClipboardList, Play, Plus, Search, ShieldCheck, Trash2, XCircle } from "@lucide/vue";
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { onMounted, onUnmounted } from "vue";
 
-import {
-  createPortfolioPlan,
-  createPaperExecutionApproval,
-  capturePaperEquitySnapshot,
-  createRiskEvaluation,
-  fetchPortfolioPlan,
-  fetchPortfolioRiskReadiness,
-  fetchPaperExecutionApproval,
-  fetchPaperExecutionByApproval,
-  fetchBacktestFinalHoldings,
-  fetchPositionBookHoldings,
-  fetchPositionBooks,
-  executePaperApproval,
-  revokePaperExecutionApproval,
-} from "../../api";
-import type {
-  PortfolioAssetInput,
-  PortfolioPlan,
-  PortfolioPlanCreateRequest,
-  PortfolioRiskReadiness,
-  PaperEquitySnapshot,
-  PaperExecutionApproval,
-  PaperExecution,
-  PositionBook,
-  RiskEvaluation,
-} from "../../types";
+import { createPortfolioPlanWorkflow } from "../../composables/portfolioPlan";
+import { useResearchStore } from "../../stores/research";
 import { historyStatusLabel, statusLabel } from "./formatters";
+import WeightDistribution from "./WeightDistribution.vue";
 
-const props = defineProps<{ writeEnabled: boolean; accountId?: number }>();
+const props = defineProps<{ writeEnabled?: boolean; accountId?: number }>();
 const emit = defineEmits<{ busyChange: [value: boolean] }>();
+const researchStore = useResearchStore();
 
-const newAsset = (): PortfolioAssetInput => ({
-  symbol: "",
-  security_type: "stock",
-  industry: "",
-  price: "",
-  current_quantity: 0,
-  requested_weight: "0",
-  lot_size: 100,
-});
-
-const form = reactive<PortfolioPlanCreateRequest>({
-  name: "手工模拟组合草案",
-  as_of_date: new Date().toISOString().slice(0, 10),
-  cash: "100000",
-  assets: [newAsset(), newAsset()],
-  constraints: {
-    cash_reserve_rate: "0.05",
-    max_symbol_weight: "0.20",
-    max_industry_weight: "0.40",
-    security_type_budgets: {},
-  },
-});
-
-const isPrefilling = ref(false);
-const prefillBooks = ref<PositionBook[]>([]);
-const prefillBookId = ref<number | null>(null);
-const prefillRunId = ref("");
-const isPrefillingFromRun = ref(false);
-const backtestPrefillNote = ref<string | null>(null);
-
-async function prefillFromBacktestRun() {
-  const runId = Number(prefillRunId.value);
-  if (!Number.isFinite(runId) || runId <= 0) {
-    errorMessage.value = "请输入有效的回测 run ID。";
-    return;
-  }
-  isPrefillingFromRun.value = true;
-  errorMessage.value = null;
-  try {
-    const report = await fetchBacktestFinalHoldings(runId);
-    if (report.holdings.length === 0) {
-      errorMessage.value = `回测 #${runId} 最优交易日没有持仓快照，无法预填。`;
-      return;
-    }
-    form.assets = report.holdings.map((row) => ({
-      symbol: row.symbol,
-      security_type: row.security_type === "etf" ? "etf" : "stock",
-      industry: row.industry ?? "",
-      price: row.close,
-      current_quantity: 0,
-      requested_weight: row.weight,
-      lot_size: 100,
-    }));
-    // 复制目标权重且当前持仓为零：全部权益作为草案预算，不能仅使用剩余现金。
-    form.cash = report.total_equity;
-    backtestPrefillNote.value = `已复制回测 #${runId} 截至 ${report.as_of_date} 的目标权重，预算 ${report.total_equity} 元。当前持仓设为零，未复制历史实际持仓；请按所选账户核对预算与现仓。`;
-    form.name = `预填自回测 #${runId}（截至 ${report.as_of_date}）`;
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "回测持仓预填失败";
-  } finally {
-    isPrefillingFromRun.value = false;
-  }
-}
-
-async function loadPrefillBooks() {
-  try {
-    prefillBooks.value = await fetchPositionBooks();
-    if (prefillBookId.value === null || !prefillBooks.value.some((book) => book.id === prefillBookId.value)) {
-      prefillBookId.value = prefillBooks.value[0]?.id ?? null;
-    }
-  } catch {
-    // 账本不可用时保持空列表，预填按钮会给出可读错误。
-    prefillBooks.value = [];
-    prefillBookId.value = null;
-  }
-}
-
-async function prefillFromPositionBook() {
-  backtestPrefillNote.value = null;
-  isPrefilling.value = true;
-  errorMessage.value = null;
-  try {
-    await loadPrefillBooks();
-    if (prefillBooks.value.length === 0) {
-      errorMessage.value = "还没有持仓账本，请先在「持仓分析」页创建账本并记账。";
-      return;
-    }
-    const book =
-      prefillBooks.value.find((item) => item.id === prefillBookId.value) ?? prefillBooks.value[0];
-    const holdings = await fetchPositionBookHoldings(book.id);
-    const priced = holdings.holdings.filter((row) => row.price !== null);
-    if (priced.length === 0) {
-      errorMessage.value = `账本「${book.name}」没有可信价持仓，无法预填草案。`;
-      return;
-    }
-    form.assets = priced.map((row) => ({
-      symbol: row.symbol,
-      security_type: row.security_type === "etf" ? "etf" : "stock",
-      industry: row.industry ?? "",
-      price: row.price ?? "0",
-      current_quantity: row.quantity,
-      requested_weight: String(Number(row.weight)),
-      lot_size: 100,
-    }));
-    // 草案的现金字段必须填账本现金本身：组合总权益由 cash + Σ现价×当前数量
-    // 推导（见 builder），当前数量已预填，若填 total_equity 会双计持仓市值。
-    form.cash = String(Number(holdings.cash));
-    form.name = `预填自账本「${book.name}」`;
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "持仓账本预填失败";
-  } finally {
-    isPrefilling.value = false;
-  }
-}
-
-const plan = ref<PortfolioPlan | null>(null);
-const lookupId = ref("");
-const approvalLookupId = ref("");
-const isSubmitting = ref(false);
-const isLoading = ref(false);
-const isLoadingApproval = ref(false);
-const isCheckingReadiness = ref(false);
-const errorMessage = ref<string | null>(null);
-const paperAccountId = ref(props.accountId ? String(props.accountId) : "");
-const readiness = ref<PortfolioRiskReadiness | null>(null);
-const equitySnapshot = ref<PaperEquitySnapshot | null>(null);
-const riskEvaluation = ref<RiskEvaluation | null>(null);
-const approval = ref<PaperExecutionApproval | null>(null);
-const execution = ref<PaperExecution | null>(null);
-const confirmationPhrase = ref("");
-const isCapturingEquity = ref(false);
-const isEvaluatingRisk = ref(false);
-const isApproving = ref(false);
-const isRevokingApproval = ref(false);
-const isExecuting = ref(false);
-const clock = ref(Date.now());
-let equityIdempotencyKey: string | null = null;
-let riskIdempotencyKey: string | null = null;
-let approvalIdempotencyKey: string | null = null;
-let revocationIdempotencyKey: string | null = null;
-let executionIdempotencyKey: string | null = null;
-let pendingIdempotencyKey: string | null = null;
-let clockTimer: number | undefined;
-let accountGeneration = 0;
-
-const accountBusy = computed(() =>
-  isCheckingReadiness.value ||
-  isCapturingEquity.value ||
-  isEvaluatingRisk.value ||
-  isApproving.value ||
-  isRevokingApproval.value ||
-  isExecuting.value ||
-  isLoadingApproval.value,
-);
-
-const expectedConfirmationPhrase = computed(() =>
-  riskEvaluation.value ? `CONFIRM PAPER EXECUTION ${riskEvaluation.value.check_id}` : "",
-);
-const displayedApprovalStatus = computed(() => {
-  if (!approval.value) return null;
-  if (execution.value) return "consumed";
-  if (
-    approval.value.effective_status === "pending" &&
-    clock.value >= new Date(approval.value.expires_at).getTime()
-  ) {
-    return "expired";
-  }
-  return approval.value.effective_status;
-});
-const estimatedCashAfter = computed(() => {
-  const value = approval.value?.confirmation_policy.estimated_cash_after;
-  return typeof value === "string" ? value : null;
-});
-
-onMounted(() => {
-  clockTimer = window.setInterval(() => {
-    clock.value = Date.now();
-  }, 1000);
-  void loadPrefillBooks();
-});
-
-onUnmounted(() => window.clearInterval(clockTimer));
-
-watch(
+const {
   form,
-  () => {
-    pendingIdempotencyKey = null;
-  },
-  { deep: true },
-);
+  newAsset,
+  riskBudgetEnabled,
+  styleBudgetEnabled,
+  trackingErrorBudgetEnabled,
+  volatilityBudgetEnabled,
+  riskBudgetDraft,
+  isPrefilling,
+  prefillBooks,
+  prefillBookId,
+  prefillRunId,
+  isPrefillingFromRun,
+  prefillNote,
+  prefillFromBacktestRun,
+  prefillFromPositionBook,
+  plan,
+  lookupId,
+  approvalLookupId,
+  isSubmitting,
+  isLoading,
+  isLoadingApproval,
+  isCheckingReadiness,
+  errorMessage,
+  paperAccountId,
+  readiness,
+  equitySnapshot,
+  riskEvaluation,
+  approval,
+  execution,
+  confirmationPhrase,
+  isCapturingEquity,
+  isEvaluatingRisk,
+  isApproving,
+  isRevokingApproval,
+  isExecuting,
+  writeEnabled,
+  expectedConfirmationPhrase,
+  displayedApprovalStatus,
+  estimatedCashAfter,
+  submitPlan,
+  loadPlan,
+  captureEquity,
+  evaluateRisk,
+  confirmPaperExecution,
+  executeApprovedPaperBatch,
+  loadApproval,
+  revokeApproval,
+  checkReadiness,
+  hashFingerprint,
+  formatDateTime,
+  formatDecimal,
+  formatPercent,
+  reasonLabels,
+  styleLabels,
+  industrySlices,
+  symbolSlices,
+  start,
+  stop,
+} = createPortfolioPlanWorkflow(undefined, {
+  writeEnabled: () => props.writeEnabled !== false,
+  accountId: () => props.accountId,
+  onBusyChange: (value) => emit("busyChange", value),
+  getLastRunId: () => researchStore.lastRunId,
+});
 
-watch(
-  () => props.accountId,
-  (value) => {
-    accountGeneration += 1;
-    paperAccountId.value = value ? String(value) : "";
-    readiness.value = null;
-    equitySnapshot.value = null;
-    riskEvaluation.value = null;
-    approval.value = null;
-    execution.value = null;
-  },
-);
-
-watch(accountBusy, (value) => emit("busyChange", value), { immediate: true });
-
-function makeIdempotencyKey() {
-  return crypto.randomUUID();
-}
-
-async function submitPlan() {
-  if (!props.writeEnabled || isSubmitting.value) return;
-  isSubmitting.value = true;
-  errorMessage.value = null;
-  pendingIdempotencyKey ??= makeIdempotencyKey();
-  try {
-    plan.value = await createPortfolioPlan(form, pendingIdempotencyKey);
-    readiness.value = null;
-    equitySnapshot.value = null;
-    riskEvaluation.value = null;
-    approval.value = null;
-    execution.value = null;
-    confirmationPhrase.value = "";
-    lookupId.value = String(plan.value.plan_id);
-    pendingIdempotencyKey = null;
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "组合草案创建失败";
-  } finally {
-    isSubmitting.value = false;
-  }
-}
-
-async function loadPlan() {
-  const planId = Number(lookupId.value);
-  if (!Number.isInteger(planId) || planId <= 0 || isLoading.value) {
-    errorMessage.value = "请输入有效的草案 ID";
-    return;
-  }
-  isLoading.value = true;
-  errorMessage.value = null;
-  try {
-    plan.value = await fetchPortfolioPlan(planId);
-    readiness.value = null;
-    equitySnapshot.value = null;
-    riskEvaluation.value = null;
-    approval.value = null;
-    execution.value = null;
-    confirmationPhrase.value = "";
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "组合草案读取失败";
-  } finally {
-    isLoading.value = false;
-  }
-}
-
-async function captureEquity() {
-  if (!plan.value || !readiness.value?.ready_for_risk_check || isCapturingEquity.value) return;
-  const accountId = Number(paperAccountId.value);
-  const generation = accountGeneration;
-  isCapturingEquity.value = true;
-  errorMessage.value = null;
-  equityIdempotencyKey ??= makeIdempotencyKey();
-  try {
-    const result = await capturePaperEquitySnapshot(
-      accountId,
-      plan.value.as_of_date,
-      equityIdempotencyKey,
-    );
-    if (generation !== accountGeneration) return;
-    equitySnapshot.value = result;
-    riskEvaluation.value = null;
-    approval.value = null;
-    execution.value = null;
-    confirmationPhrase.value = "";
-    equityIdempotencyKey = null;
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    errorMessage.value = error instanceof Error ? error.message : "账户净值快照创建失败";
-  } finally {
-    isCapturingEquity.value = false;
-  }
-}
-
-async function evaluateRisk() {
-  if (!plan.value || !equitySnapshot.value || isEvaluatingRisk.value) return;
-  const accountId = Number(paperAccountId.value);
-  const generation = accountGeneration;
-  isEvaluatingRisk.value = true;
-  errorMessage.value = null;
-  riskIdempotencyKey ??= makeIdempotencyKey();
-  try {
-    const result = await createRiskEvaluation(
-      plan.value.plan_id,
-      accountId,
-      equitySnapshot.value.snapshot_id,
-      riskIdempotencyKey,
-    );
-    if (generation !== accountGeneration) return;
-    riskEvaluation.value = result;
-    approval.value = null;
-    execution.value = null;
-    confirmationPhrase.value = "";
-    riskIdempotencyKey = null;
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    errorMessage.value = error instanceof Error ? error.message : "正式风险评估失败";
-  } finally {
-    isEvaluatingRisk.value = false;
-  }
-}
-
-async function confirmPaperExecution() {
-  if (
-    !props.writeEnabled ||
-    !riskEvaluation.value?.risk_passed ||
-    confirmationPhrase.value !== expectedConfirmationPhrase.value ||
-    isApproving.value
-  ) return;
-  isApproving.value = true;
-  const generation = accountGeneration;
-  errorMessage.value = null;
-  approvalIdempotencyKey ??= makeIdempotencyKey();
-  try {
-    const result = await createPaperExecutionApproval(
-      riskEvaluation.value.check_id,
-      riskEvaluation.value.evaluation_hash,
-      confirmationPhrase.value,
-      approvalIdempotencyKey,
-    );
-    if (generation !== accountGeneration) return;
-    approval.value = result;
-    execution.value = null;
-    approvalIdempotencyKey = null;
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    errorMessage.value = error instanceof Error ? error.message : "模拟执行确认失败";
-  } finally {
-    isApproving.value = false;
-  }
-}
-
-async function executeApprovedPaperBatch() {
-  if (
-    !props.writeEnabled ||
-    !approval.value ||
-    displayedApprovalStatus.value !== "pending" ||
-    isExecuting.value
-  ) return;
-  const confirmed = window.confirm(
-    `执行 ${approval.value.order_summary.length} 笔本地模拟交易？卖单先于买单，且不会向券商、交易所或真实账户发送订单。`,
-  );
-  if (!confirmed) return;
-  const activeApproval = approval.value;
-  isExecuting.value = true;
-  const generation = accountGeneration;
-  errorMessage.value = null;
-  executionIdempotencyKey ??= makeIdempotencyKey();
-  try {
-    const result = await executePaperApproval(
-      activeApproval.approval_id,
-      activeApproval.approval_hash,
-      executionIdempotencyKey,
-    );
-    if (generation !== accountGeneration) return;
-    execution.value = result;
-    executionIdempotencyKey = null;
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    try {
-      const result = await fetchPaperExecutionByApproval(activeApproval.approval_id);
-      if (generation !== accountGeneration) return;
-      execution.value = result;
-      executionIdempotencyKey = null;
-    } catch {
-      errorMessage.value = error instanceof Error ? error.message : "模拟交易执行失败";
-    }
-  } finally {
-    isExecuting.value = false;
-  }
-}
-
-async function loadApproval() {
-  const approvalId = Number(approvalLookupId.value);
-  if (!Number.isInteger(approvalId) || approvalId <= 0 || isLoadingApproval.value) {
-    errorMessage.value = "请输入有效的确认 ID";
-    return;
-  }
-  isLoadingApproval.value = true;
-  const generation = accountGeneration;
-  errorMessage.value = null;
-  try {
-    const loaded = await fetchPaperExecutionApproval(approvalId);
-    if (generation !== accountGeneration) return;
-    if (plan.value && loaded.plan_id !== plan.value.plan_id) {
-      throw new Error("确认记录不属于当前组合草案");
-    }
-    const selectedAccountId = Number(paperAccountId.value);
-    if (!Number.isInteger(selectedAccountId) || loaded.account_id !== selectedAccountId) {
-      throw new Error("确认记录不属于当前选择的模拟账户");
-    }
-    approval.value = loaded;
-    execution.value = null;
-    if (loaded.effective_status === "consumed") {
-      execution.value = await fetchPaperExecutionByApproval(loaded.approval_id);
-    }
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    errorMessage.value = error instanceof Error ? error.message : "确认记录读取失败";
-  } finally {
-    isLoadingApproval.value = false;
-  }
-}
-
-async function revokeApproval() {
-  if (!approval.value || displayedApprovalStatus.value !== "pending" || isRevokingApproval.value) return;
-  isRevokingApproval.value = true;
-  const generation = accountGeneration;
-  errorMessage.value = null;
-  revocationIdempotencyKey ??= makeIdempotencyKey();
-  try {
-    const result = await revokePaperExecutionApproval(
-      approval.value.approval_id,
-      "operator cancelled",
-      revocationIdempotencyKey,
-    );
-    if (generation !== accountGeneration) return;
-    approval.value = result;
-    revocationIdempotencyKey = null;
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    errorMessage.value = error instanceof Error ? error.message : "模拟执行确认撤销失败";
-  } finally {
-    isRevokingApproval.value = false;
-  }
-}
-
-function hashFingerprint(value: string) {
-  return `${value.slice(0, 10)}…${value.slice(-8)}`;
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "short",
-    timeStyle: "medium",
-  }).format(new Date(value));
-}
-
-async function checkReadiness() {
-  if (!plan.value || !props.writeEnabled || isCheckingReadiness.value) return;
-  const accountId = Number(paperAccountId.value);
-  if (!Number.isInteger(accountId) || accountId <= 0) {
-    errorMessage.value = "请输入有效的模拟账户 ID";
-    return;
-  }
-  isCheckingReadiness.value = true;
-  const generation = accountGeneration;
-  errorMessage.value = null;
-  try {
-    const result = await fetchPortfolioRiskReadiness(plan.value.plan_id, accountId);
-    if (generation !== accountGeneration) return;
-    readiness.value = result;
-  } catch (error) {
-    if (generation !== accountGeneration) return;
-    errorMessage.value = error instanceof Error ? error.message : "风险前数据核对失败";
-  } finally {
-    isCheckingReadiness.value = false;
-  }
-}
-
-function formatDecimal(value: string) {
-  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 6 }).format(Number(value));
-}
-
-function formatPercent(value: string) {
-  return `${(Number(value) * 100).toFixed(2)}%`;
-}
-
-const reasonLabels: Record<string, string> = {
-  max_symbol_weight: "单标的上限",
-  security_type_budget: "证券类型预算",
-  industry_budget: "行业预算",
-  cash_reserve: "现金留存",
-  lot_rounding: "整手取整",
-};
+onMounted(start);
+onUnmounted(stop);
 </script>
 
 <template>
@@ -536,6 +98,34 @@ const reasonLabels: Record<string, string> = {
           <label>现金留存率<input v-model="form.constraints.cash_reserve_rate" required inputmode="decimal" /></label>
           <label>单标的上限<input v-model="form.constraints.max_symbol_weight" required inputmode="decimal" /></label>
           <label>行业上限<input v-model="form.constraints.max_industry_weight" required inputmode="decimal" /></label>
+        </div>
+
+        <div class="readiness-panel">
+          <label><input v-model="riskBudgetEnabled" type="checkbox" /> 启用组合风险预算</label>
+          <p class="section-note">草案预算约束目标权重；不等于真实持仓的当前风险或正式风控。</p>
+          <template v-if="riskBudgetEnabled">
+            <label>行业风险上限（比例）
+              <input v-model="riskBudgetDraft.max_industry_weight" required type="number" min="0" max="1" step="any" />
+            </label>
+            <p class="section-note">与上方行业上限同时生效，取更严格者；0.40 表示 40%。</p>
+            <label><input v-model="styleBudgetEnabled" type="checkbox" /> 限制三因子风格代理暴露</label>
+            <label v-if="styleBudgetEnabled">代理暴露绝对值上限（标准化因子分数）
+              <input v-model="riskBudgetDraft.max_style_exposure" required type="number" min="0" step="any" placeholder="如 0.50" />
+            </label>
+            <p v-if="styleBudgetEnabled" class="section-note">仅评估草案日期的动量、波动率、流动性三个因子；规模与估值未纳入。缺任一正权重标的的当日因子时拒绝创建。</p>
+            <label><input v-model="trackingErrorBudgetEnabled" type="checkbox" /> 限制年化跟踪误差</label>
+            <label v-if="trackingErrorBudgetEnabled">基准代码
+              <input v-model.trim="riskBudgetDraft.benchmark" required maxlength="100" placeholder="如 000300.SH" />
+            </label>
+            <label v-if="trackingErrorBudgetEnabled">跟踪误差上限（比例）
+              <input v-model="riskBudgetDraft.max_tracking_error" required type="number" min="0" max="1" step="any" placeholder="如 0.08" />
+            </label>
+            <label><input v-model="volatilityBudgetEnabled" type="checkbox" /> 限制年化波动率</label>
+            <label v-if="volatilityBudgetEnabled">波动率上限（比例）
+              <input v-model="riskBudgetDraft.max_portfolio_volatility" required type="number" min="0" max="1" step="any" placeholder="如 0.20" />
+            </label>
+            <p v-if="trackingErrorBudgetEnabled || volatilityBudgetEnabled" class="section-note">采用截至草案日期的可信前复权价格与至少 60 条同日收益，按恒定目标权重估计历史年化风险；缺日或缺基准时拒绝创建。</p>
+          </template>
         </div>
 
         <div class="asset-editor">
@@ -558,10 +148,10 @@ const reasonLabels: Record<string, string> = {
                 placeholder="回测 run ID"
                 class="prefill-run-input"
               />
-              <button type="button" class="secondary-action" :disabled="isPrefilling" @click="prefillFromPositionBook">
+              <button type="button" class="secondary-action" :disabled="isPrefilling || isPrefillingFromRun" @click="prefillFromPositionBook">
                 {{ isPrefilling ? "预填中…" : "从持仓账本预填" }}
               </button>
-              <button type="button" class="secondary-action" :disabled="isPrefillingFromRun" @click="prefillFromBacktestRun">
+              <button type="button" class="secondary-action" :disabled="isPrefilling || isPrefillingFromRun" @click="prefillFromBacktestRun">
                 {{ isPrefillingFromRun ? "预填中…" : "复制回测目标权重" }}
               </button>
               <button type="button" class="secondary-action" @click="form.assets.push(newAsset())">
@@ -569,7 +159,7 @@ const reasonLabels: Record<string, string> = {
               </button>
             </div>
           </div>
-          <p v-if="backtestPrefillNote" class="section-note">{{ backtestPrefillNote }}</p>
+          <p v-if="prefillNote" class="section-note">{{ prefillNote }}</p>
           <div v-for="(asset, index) in form.assets" :key="index" class="asset-row">
             <label>代码<input v-model.trim="asset.symbol" required maxlength="20" /></label>
             <label>类型
@@ -592,8 +182,8 @@ const reasonLabels: Record<string, string> = {
           </div>
         </div>
 
-        <p class="form-warning">价格、持仓、行业和现金均为操作者手工输入，仅用于草案计算，不代表可信账户或实时行情。</p>
-        <p v-if="!writeEnabled" class="inline-error">当前为演示数据模式，禁止创建草案。连接后端后才会启用写入。</p>
+        <p class="form-warning">请核对价格、持仓、行业、现金与草案日期；预填仅复制所示来源快照，草案不代表实时行情或真实账户指令。</p>
+        <p v-if="!writeEnabled" class="inline-error">请连接后端并选择模拟账户后再操作。</p>
         <p v-if="errorMessage" class="inline-error">{{ errorMessage }}</p>
         <button class="primary-action" type="submit" :disabled="!writeEnabled || isSubmitting">
           {{ isSubmitting ? "保存中…" : "保存不可执行草案" }}
@@ -617,6 +207,34 @@ const reasonLabels: Record<string, string> = {
             <div><span>总权益</span><strong>{{ formatDecimal(plan.total_equity) }}</strong></div>
             <div><span>目标现金</span><strong>{{ formatDecimal(plan.target_cash) }}</strong></div>
             <div><span>预计现金</span><strong>{{ formatDecimal(plan.cash_after) }}</strong></div>
+          </div>
+          <div v-if="industrySlices.length || symbolSlices.length" class="plan-distribution">
+            <div class="distribution-block">
+              <strong>行业权重分布（约束后）</strong>
+              <WeightDistribution :slices="industrySlices" label="行业" />
+            </div>
+            <div class="distribution-block">
+              <strong>单标的权重分布（约束后）</strong>
+              <WeightDistribution :slices="symbolSlices" label="标的" />
+            </div>
+          </div>
+          <div v-if="plan.risk_budget" class="readiness-panel">
+            <strong>草案风险预算 · 截至 {{ plan.as_of_date }}</strong>
+            <p class="section-note">行业上限 {{ formatPercent(plan.risk_budget.max_industry_weight) }}；与基础行业上限取更严格者。以下是目标组合的历史代理估计，不是当前真实持仓风险或未来保证。</p>
+            <template v-if="plan.risk_budget.max_style_exposure !== null">
+              <p class="section-note">三因子宽截面代理绝对暴露上限 {{ formatDecimal(plan.risk_budget.max_style_exposure) }} 个标准化因子分数；规模与估值未评估。</p>
+              <p v-if="plan.style_risk?.factor_as_of_date" class="section-note">因子日期 {{ plan.style_risk.factor_as_of_date }} · {{ Object.entries(plan.style_risk.factor_versions).map(([name, version]) => `${styleLabels[name] ?? name} ${version}`).join("、") }}</p>
+              <p v-for="[name, evidence] in Object.entries(plan.style_risk?.factor_evidence ?? {})" :key="name" class="section-note">{{ styleLabels[name] ?? name }} 截面 {{ evidence.observed_count }}/{{ evidence.expected_count }} · 因子运行 #{{ evidence.run_id }}</p>
+              <ul v-if="plan.style_risk?.style_exposures.length">
+                <li v-for="exposure in plan.style_risk.style_exposures" :key="exposure.style_name">
+                  {{ styleLabels[exposure.style_name] ?? exposure.style_name }}：{{ formatDecimal(exposure.portfolio_exposure) }} 个标准化因子分数
+                </li>
+              </ul>
+              <p v-if="plan.style_risk?.missing_styles.length" class="inline-error">缺少因子：{{ plan.style_risk.missing_styles.join("、") }}</p>
+            </template>
+            <p v-if="plan.risk_budget.max_tracking_error !== null" class="section-note">年化跟踪误差：{{ plan.style_risk?.tracking_error === null || !plan.style_risk ? "未计算" : formatPercent(plan.style_risk.tracking_error) }} / 上限 {{ formatPercent(plan.risk_budget.max_tracking_error) }} · 基准 {{ plan.risk_budget.benchmark ?? "未指定" }}</p>
+            <p v-if="plan.risk_budget.max_portfolio_volatility !== null" class="section-note">年化波动率：{{ plan.style_risk?.portfolio_volatility === null || !plan.style_risk ? "未计算" : formatPercent(plan.style_risk.portfolio_volatility) }} / 上限 {{ formatPercent(plan.risk_budget.max_portfolio_volatility) }}</p>
+            <p v-if="plan.style_risk && plan.style_risk.return_observation_count > 0" class="section-note">历史收益样本 {{ plan.style_risk.sample_start_date }} 至 {{ plan.style_risk.sample_end_date }} · {{ plan.style_risk.return_observation_count }} 条同日收益 · 恒定目标权重估计</p>
           </div>
           <div class="table-panel full">
             <table>
@@ -648,7 +266,6 @@ const reasonLabels: Record<string, string> = {
                 @click="checkReadiness"
               >{{ isCheckingReadiness ? "核对中…" : "重新核对" }}</button>
             </div>
-            <p v-if="!writeEnabled" class="inline-error">Demo 模式不提供真实账户核对。</p>
             <div class="lookup-row approval-lookup">
               <div>
                 <strong>恢复确认或执行结果</strong>

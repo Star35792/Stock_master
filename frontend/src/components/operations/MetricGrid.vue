@@ -6,7 +6,7 @@ import { formatNumber } from "./formatters";
 defineProps<{
   cards: Array<{
     label: string;
-    value: number;
+    value: number | null;
     detail: string;
     tone: string;
     icon: Component;

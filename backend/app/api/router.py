@@ -13,6 +13,7 @@ from app.api.routes import (
     paper_accounts_router,
     portfolio_router,
     position_books_router,
+    research_workflow_router,
     securities_router,
     source_compares_router,
     strategy_research_router,
@@ -36,3 +37,4 @@ api_router.include_router(operations_router)
 api_router.include_router(paper_accounts_router)
 api_router.include_router(portfolio_router)
 api_router.include_router(position_books_router)
+api_router.include_router(research_workflow_router)

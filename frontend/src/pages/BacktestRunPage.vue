@@ -2,11 +2,12 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { fetchBacktestFinalHoldingsTyped } from "../factorSelectionApi";
+import EquityChart from "./components/EquityChart.vue";
 
-type Run = { id: number; name: string; strategy_name: string; status: string; error_message: string | null; start_date: string; end_date: string; initial_cash: string; final_equity: string | null; total_return: string | null; parameters: Record<string, unknown>; code_version: string; data_version: string };
+type Run = { id: number; name: string; strategy_name: string; status: string; error_message: string | null; start_date: string; end_date: string; initial_cash: string; final_equity: string | null; total_return: string | null; parameters: Record<string, unknown>; code_version: string; data_version: string; sharpe_ratio: string | null; performance_status: "analyzed" | "derived" | "missing_equity" | "invalid_equity" | "not_applicable"; performance_code_version: string | null };
 type Equity = { trade_date: string; cash: string; market_value: string; total_equity: string };
 type Trade = { id: number; trade_date: string; signal_date: string; symbol: string; side: string; quantity: number; reference_price: string; fill_price: string; commission: string };
-type Performance = { annualized_return: string; maximum_drawdown: string; sharpe_ratio: string | null; turnover_rate: string; total_commission: string; symbol_contributions: Record<string, unknown>; industry_exposure: Record<string, unknown>; style_exposure: Record<string, unknown> };
+type Performance = { annualized_return: string; maximum_drawdown: string; sharpe_ratio: string | null; turnover_rate: string; total_commission: string; code_version: string; symbol_contributions: Record<string, unknown>; industry_exposure: Record<string, unknown>; style_exposure: Record<string, unknown> };
 type Benchmark = { benchmark: string; input_source: "run_snapshot" | "current_market_unversioned"; strategy_total_return: string; benchmark_total_return: string; excess_return: string; start_date: string; end_date: string };
 type ExecutionEvent = { signal_date: string; trade_date: string; symbol: string; side: "buy" | "sell" | "target"; status: string; reason: string; next_execution_date: string | null };
 type ExecutionEventSummary = { total: number; truncated: boolean; items: ExecutionEvent[] };
@@ -21,6 +22,9 @@ const tradeTotal = ref(0);
 const tradeOffset = ref(0);
 const performance = ref<Performance | null>(null);
 const performanceNote = ref("");
+const performanceMissing = ref(false);
+const calculatingPerformance = ref(false);
+const calculationError = ref("");
 const benchmark = ref<Benchmark | null>(null);
 const benchmarkNote = ref("");
 const holdings = ref<Awaited<ReturnType<typeof fetchBacktestFinalHoldingsTyped>> | null>(null);
@@ -32,11 +36,15 @@ const error = ref("");
 const equityNote = ref("");
 let controller: AbortController | null = null;
 
+class HttpError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 async function getJson<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { headers: { Accept: "application/json" }, signal });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(body?.detail || `读取失败（HTTP ${response.status}）`);
+    throw new HttpError(body?.detail || `读取失败（HTTP ${response.status}）`, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -49,6 +57,13 @@ function numberText(value: string | number | null | undefined, digits = 2): stri
 function percent(value: string | null | undefined): string {
   return value === null || value === undefined ? "暂无" : `${numberText(Number(value) * 100)}%`;
 }
+const sharpeDisplay = computed(() => {
+  if (performance.value) return performance.value.sharpe_ratio === null ? "不可计算" : numberText(performance.value.sharpe_ratio, 3);
+  if (run.value?.performance_status === "missing_equity") return "缺净值";
+  if (run.value?.performance_status === "invalid_equity") return "净值无效";
+  if (run.value?.performance_status === "derived") return run.value.sharpe_ratio === null ? "不可计算" : numberText(run.value.sharpe_ratio, 3);
+  return "暂不可用";
+});
 function contractText(value: unknown): string {
   if (value === undefined || value === null) return "未记录";
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -63,22 +78,8 @@ const executionEventSummary = computed(() => {
   return Array.isArray(summary.items) ? summary : null;
 });
 
-const drawdowns = computed(() => {
-  let peak = Number(run.value?.initial_cash || 0);
-  return equities.value.map((row) => {
-    const equity = Number(row.total_equity);
-    peak = Math.max(peak, equity);
-    return peak > 0 ? (equity / peak - 1) * 100 : 0;
-  });
-});
-const chartPoints = computed(() => {
-  const values = equities.value.map((row) => Number(row.total_equity));
-  if (values.length < 2 || values.some((value) => !Number.isFinite(value))) return "";
-  const low = Math.min(...values);
-  const high = Math.max(...values);
-  const span = high - low || 1;
-  return values.map((value, index) => `${(index / (values.length - 1)) * 100},${90 - ((value - low) / span) * 80}`).join(" ");
-});
+const equityPoints = computed(() => equities.value.map((row) => ({ trade_date: row.trade_date, total_equity: row.total_equity })));
+const initialCash = computed(() => run.value?.initial_cash ?? "0");
 
 async function loadTrades(signal: AbortSignal, offset = 0) {
   tradeLoading.value = true;
@@ -96,7 +97,8 @@ async function load() {
   controller = new AbortController();
   const signal = controller.signal;
   run.value = null; equities.value = []; trades.value = []; performance.value = null; benchmark.value = null; holdings.value = null;
-  performanceNote.value = ""; benchmarkNote.value = ""; holdingsNote.value = ""; equityNote.value = ""; tradeError.value = ""; error.value = "";
+  performanceNote.value = ""; performanceMissing.value = false; calculatingPerformance.value = false; calculationError.value = "";
+  benchmarkNote.value = ""; holdingsNote.value = ""; equityNote.value = ""; tradeError.value = ""; error.value = "";
   if (!Number.isSafeInteger(runId.value) || runId.value <= 0) { error.value = "无效的回测编号。"; return; }
   loading.value = true;
   try {
@@ -118,7 +120,8 @@ async function load() {
     } else equityNote.value = `净值读取失败：${equityResult.reason.message}`;
     if (tradeResult.status === "rejected") tradeError.value = `成交记录读取失败：${tradeResult.reason.message}`;
     if (performanceResult.status === "fulfilled") performance.value = performanceResult.value;
-    else performanceNote.value = `绩效暂无：${performanceResult.reason.message}`;
+    else if (performanceResult.reason instanceof HttpError && performanceResult.reason.status === 404) performanceMissing.value = true;
+    else performanceNote.value = `绩效读取失败：${performanceResult.reason instanceof Error ? performanceResult.reason.message : "未知错误"}`;
     if (benchmarkResult.status === "fulfilled") benchmark.value = benchmarkResult.value;
     else benchmarkNote.value = `基准不可比较：${benchmarkResult.reason.message}`;
     if (holdingsResult.status === "fulfilled") holdings.value = holdingsResult.value;
@@ -126,6 +129,32 @@ async function load() {
   } catch (cause) {
     if (!signal.aborted) error.value = cause instanceof Error ? cause.message : "回测读取失败";
   } finally { if (!signal.aborted) loading.value = false; }
+}
+
+async function calculatePerformance() {
+  if (!run.value || run.value.status !== "success" || !performanceMissing.value || calculatingPerformance.value || !controller) return;
+  const signal = controller.signal;
+  calculatingPerformance.value = true;
+  calculationError.value = "";
+  try {
+    const response = await fetch(`/api/v1/backtests/runs/${runId.value}/performance`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: "{}",
+      signal,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { detail?: string } | null;
+      throw new HttpError(body?.detail || `计算失败（HTTP ${response.status}）`, response.status);
+    }
+    const result = await response.json() as Performance;
+    if (signal.aborted) return;
+    performance.value = result;
+    performanceMissing.value = false;
+    performanceNote.value = "";
+  } catch (cause) {
+    if (!signal.aborted) calculationError.value = cause instanceof Error ? `绩效计算失败：${cause.message}` : "绩效计算失败";
+  } finally { if (!signal.aborted) calculatingPerformance.value = false; }
 }
 
 async function changeTradePage(offset: number) {
@@ -140,7 +169,7 @@ watch(runId, load);
 
 <template>
   <div class="run-page">
-    <p><RouterLink to="/backtests">← 回测列表</RouterLink></p>
+    <p><RouterLink :to="{ path: '/backtests', query: route.query }">← 回测列表</RouterLink></p>
     <h1>回测运行详情</h1>
     <p v-if="loading" role="status">正在读取回测…</p>
     <p v-if="error" class="warning" role="alert">{{ error }}</p>
@@ -149,7 +178,7 @@ watch(runId, load);
       <section class="card"><h2>研究合同与资格</h2><dl class="grid"><div><dt>代码版本</dt><dd>{{ run.code_version }}</dd></div><div><dt>数据版本</dt><dd>{{ run.data_version }}</dd></div><div><dt>因子</dt><dd>{{ contractText(run.parameters.factor_specs) }}</dd></div><div><dt>费用模型</dt><dd>{{ contractText(run.parameters.fee_model_version) }}</dd></div><div><dt>费用参数</dt><dd>佣金率 {{ contractText(run.parameters.commission_rate) }} · 最低佣金 {{ contractText(run.parameters.min_commission) }} · 卖出印花税 {{ contractText(run.parameters.sell_stamp_duty_rate) }} · 过户费 {{ contractText(run.parameters.transfer_fee_rate) }} · 规费 {{ contractText(run.parameters.exchange_fee_rate) }} · 滑点 {{ contractText(run.parameters.slippage_bps) }} bps</dd></div><div><dt>复权与成交</dt><dd>{{ contractText(run.parameters.adjust_type) }} / 未复权执行价</dd></div><div><dt>验证模式</dt><dd>{{ contractText(run.parameters.validation_mode) }}</dd></div><div><dt>数据快照</dt><dd>{{ contractText(run.parameters.data_snapshot) }}</dd></div></dl><p class="caveat">单次探索性回测不构成样本外收益认证。历史 ST、行业、退市与公司行为等证据资格以实际研究合同和上游数据为准；缺涨跌停依据时可交易性判断可能放行。</p></section>
       <p v-if="run.parameters.stock_stamp_duty_rule === 'legal_20230828_v1'" class="caveat">股票卖出印花税按成交日期分段；上方 0.0005 是 2023-08-28 起适用的费率。ETF 不收取股票印花税。</p>
       <template v-if="run.status === 'success'">
-        <section class="card"><h2>收益与回撤</h2><div class="grid"><div>期末权益<strong>{{ numberText(run.final_equity) }}</strong></div><div>全期收益<strong>{{ percent(run.total_return) }}</strong></div><div>最大回撤<strong>{{ performance ? percent(performance.maximum_drawdown) : '暂无' }}</strong></div><div>夏普<strong>{{ performance ? numberText(performance.sharpe_ratio) : '暂无' }}</strong></div></div><p v-if="equityNote" class="warning">{{ equityNote }}</p><svg v-if="chartPoints && !equityNote" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="每日权益变化曲线"><polyline :points="chartPoints" fill="none" stroke="#2563eb" stroke-width="1.4" vector-effect="non-scaling-stroke" /></svg><p v-if="!equities.length && !equityNote">暂无净值记录。</p><p v-if="equities.length">净值区间：{{ equities[0].trade_date }} 至 {{ equities[equities.length - 1].trade_date }}；末日回撤 {{ numberText(drawdowns[drawdowns.length - 1]) }}%。</p><p v-if="performanceNote">{{ performanceNote }}</p></section>
+        <section class="card"><h2>收益与回撤</h2><div class="grid"><div>期末权益<strong>{{ numberText(run.final_equity) }}</strong></div><div>全期收益<strong>{{ percent(run.total_return) }}</strong></div><div>最大回撤<strong>{{ performance ? percent(performance.maximum_drawdown) : '暂无' }}</strong></div><div>年化夏普<strong>{{ sharpeDisplay }}</strong></div></div><p class="caveat">夏普按日净值收益、252 个交易日年化，无风险利率取 0；波动为零时不可计算。不同回测区间和研究合同不宜直接比较。</p><p v-if="performance" class="caveat">已保存绩效 · 计算版本：{{ performance.code_version }}</p><p v-else-if="run.performance_status === 'derived'" class="caveat">净值只读推导 · 计算版本：{{ run.performance_code_version }}。完整绩效尚未保存。</p><button v-if="performanceMissing && run.performance_status === 'derived'" type="button" :disabled="calculatingPerformance" @click="calculatePerformance">{{ calculatingPerformance ? '正在计算绩效…' : '计算完整绩效' }}</button><p v-if="calculationError" class="warning" role="alert">{{ calculationError }}</p><p v-if="equityNote" class="warning">{{ equityNote }}</p><EquityChart v-if="equities.length && !equityNote" :points="equityPoints" :initial-cash="initialCash" :loading="loading" /><p v-if="!equities.length && !equityNote">暂无净值记录。</p><p v-if="performanceNote" class="warning" role="alert">{{ performanceNote }}</p></section>
         <section class="card"><h2>基准比较</h2><p v-if="benchmark">{{ benchmark.benchmark }} · {{ benchmark.start_date }} 至 {{ benchmark.end_date }}：策略 {{ percent(benchmark.strategy_total_return) }}，基准 {{ percent(benchmark.benchmark_total_return) }}，超额 {{ percent(benchmark.excess_return) }}。{{ benchmark.input_source === 'run_snapshot' ? '使用运行时固定基准快照。' : '旧运行按当前可信行情重算，结果可能随行情修订变化。' }}</p><p v-else class="warning">{{ benchmarkNote || '基准不可比较。' }}</p></section>
         <section class="card"><h2>最终持仓</h2><p v-if="holdingsNote" class="warning">{{ holdingsNote }}</p><p v-else-if="holdings && !holdings.holdings.length">末日无持仓。</p><div v-if="holdings?.holdings.length" class="scroll"><table><thead><tr><th>证券</th><th>名称</th><th>数量</th><th>市值</th><th>权重</th></tr></thead><tbody><tr v-for="item in holdings.holdings" :key="item.symbol"><td>{{ item.symbol }}</td><td>{{ item.name || '—' }}</td><td>{{ item.quantity }}</td><td>{{ numberText(item.market_value) }}</td><td>{{ percent(item.weight) }}</td></tr></tbody></table></div></section>
         <section class="card"><h2>成交记录</h2><p v-if="tradeError" class="warning" role="alert">{{ tradeError }}</p><p v-else-if="tradeTotal === 0 && !tradeLoading">本次回测无成交；请核对信号和可交易性限制。</p><div class="scroll" v-if="trades.length"><table><thead><tr><th>成交日</th><th>证券</th><th>方向</th><th>数量</th><th>参考价</th><th>成交价</th><th>费用合计</th></tr></thead><tbody><tr v-for="trade in trades" :key="trade.id"><td>{{ trade.trade_date }}</td><td>{{ trade.symbol }}</td><td>{{ trade.side === 'buy' ? '买入' : '卖出' }}</td><td>{{ trade.quantity }}</td><td>{{ numberText(trade.reference_price) }}</td><td>{{ numberText(trade.fill_price) }}</td><td>{{ numberText(trade.commission) }}</td></tr></tbody></table></div><p v-if="tradeTotal">第 {{ tradeOffset + 1 }}–{{ Math.min(tradeOffset + 100, tradeTotal) }} / {{ tradeTotal }} 笔 <button :disabled="tradeOffset === 0 || tradeLoading" @click="changeTradePage(tradeOffset - 100)">上一页</button> <button :disabled="tradeOffset + 100 >= tradeTotal || tradeLoading" @click="changeTradePage(tradeOffset + 100)">下一页</button></p><p class="caveat">费用合计包含显式交易费用；滑点已体现在成交价，不重复计入费用。</p></section>

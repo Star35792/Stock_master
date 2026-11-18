@@ -1,327 +1,63 @@
 <script setup lang="ts">
 import { ArrowLeftRight, BookOpen, CircleAlert, Pencil, Plus, RefreshCw, Trash2, Wallet } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { onMounted } from "vue";
 
-import {
-  createPositionBook,
-  createPositionTrade,
-  deletePositionTrade,
-  fetchPositionBookHoldings,
-  fetchPositionBooks,
-  fetchPositionTrades,
-  fetchPortfolioPlanDrift,
-  PortfolioDriftApiError,
-  updatePositionBook,
-} from "../api";
-import type { PortfolioPlanDrift, PositionBook, PositionBookHoldings, PositionTrade } from "../types";
-import { formatDate, formatNumber, formatPercent } from "../components/operations/formatters";
+import { createPositionBookWorkspace } from "../composables/positionBook";
+import { formatNumber, formatPercent } from "../components/operations/formatters";
 
-const books = ref<PositionBook[]>([]);
-const selectedBookId = ref<number | null>(null);
-const holdings = ref<PositionBookHoldings | null>(null);
-const trades = ref<PositionTrade[]>([]);
-const loading = ref(false);
-const actionError = ref<string | null>(null);
-const notice = ref<string | null>(null);
+const {
+  books,
+  selectedBookId,
+  selectedBook,
+  holdings,
+  trades,
+  loading,
+  actionError,
+  notice,
+  newBookName,
+  newBookCash,
+  creatingBook,
+  editingBook,
+  editForm,
+  savingBook,
+  sortKey,
+  sortAsc,
+  industryFilter,
+  sortedFilteredHoldings,
+  industryOptions,
+  tradeForm,
+  recordingTrade,
+  driftPlanId,
+  driftThreshold,
+  planOptions,
+  planTotal,
+  planOffset,
+  planOptionsLoading,
+  planOptionsLoaded,
+  planOptionsError,
+  selectedPlan,
+  drift,
+  driftLoading,
+  driftOutsidePlanCount,
+  driftEarlierQuoteCount,
+  quoteCoverage,
+  directionLabels,
+  toggleSort,
+  startEditBook,
+  saveBookEdit,
+  loadPlanOptions,
+  loadBooks,
+  refreshBookData,
+  handleCreateBook,
+  handleRecordTrade,
+  handleDeleteTrade,
+  handleFetchDrift,
+  pnlTone,
+  maxExposureWeight,
+  start,
+} = createPositionBookWorkspace();
 
-const newBookName = ref("");
-const newBookCash = ref("0");
-const creatingBook = ref(false);
-
-const editingBook = ref(false);
-const editingBookId = ref<number | null>(null);
-const editForm = reactive({ name: "", cash: "", note: "" });
-const savingBook = ref(false);
-
-const sortKey = ref<"market_value" | "unrealized_pnl_pct" | "weight">("market_value");
-const sortAsc = ref(false);
-const industryFilter = ref("");
-
-const sortedFilteredHoldings = computed(() => {
-  const rows = [...(holdings.value?.holdings ?? [])];
-  const filtered = industryFilter.value
-    ? rows.filter((row) => (row.industry ?? "-") === industryFilter.value)
-    : rows;
-  const key = sortKey.value;
-  filtered.sort((a, b) => {
-    const left = Number(a[key] ?? 0);
-    const right = Number(b[key] ?? 0);
-    return sortAsc.value ? left - right : right - left;
-  });
-  return filtered;
-});
-
-const industryOptions = computed(() => {
-  const values = new Set<string>();
-  for (const row of holdings.value?.holdings ?? []) {
-    values.add(row.industry ?? "-");
-  }
-  return [...values].sort((a, b) => a.localeCompare(b, "zh-CN"));
-});
-
-function toggleSort(key: typeof sortKey.value) {
-  if (sortKey.value === key) {
-    sortAsc.value = !sortAsc.value;
-  } else {
-    sortKey.value = key;
-    sortAsc.value = false;
-  }
-}
-
-function startEditBook() {
-  const book = selectedBook.value;
-  if (!book) return;
-  editingBookId.value = book.id;
-  editForm.name = book.name;
-  editForm.cash = book.cash;
-  editForm.note = book.note ?? "";
-  editingBook.value = true;
-}
-
-async function saveBookEdit() {
-  const bookId = editingBookId.value;
-  if (!editingBook.value || bookId === null || bookId !== selectedBookId.value || savingBook.value) return;
-  const name = editForm.name.trim();
-  if (!name) {
-    actionError.value = "账本名称不能为空。";
-    return;
-  }
-  savingBook.value = true;
-  actionError.value = null;
-  try {
-    await updatePositionBook(bookId, {
-      name,
-      cash: editForm.cash,
-      note: editForm.note || null,
-    });
-    editingBook.value = false;
-    notice.value = "账本已更新。";
-    await loadBooks(bookId);
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : "账本更新失败";
-  } finally {
-    savingBook.value = false;
-  }
-}
-
-const tradeForm = reactive({
-  side: "buy" as "buy" | "sell",
-  symbol: "",
-  quantity: "100",
-  price: "",
-  fee: "0",
-  trade_date: new Date().toISOString().slice(0, 10),
-});
-const recordingTrade = ref(false);
-
-const driftPlanId = ref("");
-const driftThreshold = ref("0.02");
-const drift = ref<PortfolioPlanDrift | null>(null);
-const driftLoading = ref(false);
-
-let tradeIdempotencyKey: string | null = null;
-let tradeRequestFingerprint: string | null = null;
-let bookRequestGeneration = 0;
-let driftRequestGeneration = 0;
-
-watch(selectedBookId, () => {
-  bookRequestGeneration += 1;
-  driftRequestGeneration += 1;
-  editingBook.value = false;
-  editingBookId.value = null;
-  holdings.value = null;
-  trades.value = [];
-  drift.value = null;
-  loading.value = false;
-  driftLoading.value = false;
-  actionError.value = null;
-  notice.value = null;
-  industryFilter.value = "";
-}, { flush: "sync" });
-
-onBeforeUnmount(() => {
-  bookRequestGeneration += 1;
-  driftRequestGeneration += 1;
-});
-
-const selectedBook = computed(() => books.value.find((book) => book.id === selectedBookId.value) ?? null);
-
-async function loadBooks(preferredId?: number) {
-  actionError.value = null;
-  try {
-    books.value = await fetchPositionBooks();
-    if (books.value.length === 0) {
-      selectedBookId.value = null;
-      holdings.value = null;
-      trades.value = [];
-      return;
-    }
-    const nextId = preferredId ?? selectedBookId.value ?? books.value[0].id;
-    selectedBookId.value = books.value.some((book) => book.id === nextId) ? nextId : books.value[0].id;
-    await refreshBookData();
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : "账本读取失败";
-  }
-}
-
-async function refreshBookData() {
-  const bookId = selectedBookId.value;
-  const generation = ++bookRequestGeneration;
-  holdings.value = null;
-  trades.value = [];
-  if (bookId === null) return;
-  loading.value = true;
-  actionError.value = null;
-  try {
-    const [holdingsResult, tradesResult] = await Promise.all([
-      fetchPositionBookHoldings(bookId),
-      fetchPositionTrades(bookId),
-    ]);
-    if (generation !== bookRequestGeneration || bookId !== selectedBookId.value) return;
-    holdings.value = holdingsResult;
-    trades.value = tradesResult;
-  } catch (error) {
-    if (generation !== bookRequestGeneration) return;
-    actionError.value = error instanceof Error ? error.message : "持仓读取失败";
-  } finally {
-    if (generation === bookRequestGeneration) loading.value = false;
-  }
-}
-
-async function handleCreateBook() {
-  const name = newBookName.value.trim();
-  if (!name) {
-    actionError.value = "请输入账本名称。";
-    return;
-  }
-  creatingBook.value = true;
-  actionError.value = null;
-  try {
-    const book = await createPositionBook({ name, cash: newBookCash.value || "0" });
-    newBookName.value = "";
-    newBookCash.value = "0";
-    notice.value = `账本「${book.name}」已创建。`;
-    await loadBooks(book.id);
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : "账本创建失败";
-  } finally {
-    creatingBook.value = false;
-  }
-}
-
-async function handleRecordTrade() {
-  const bookId = selectedBookId.value;
-  if (bookId === null || recordingTrade.value) return;
-  const symbol = tradeForm.symbol.trim();
-  const quantity = Number(tradeForm.quantity);
-  if (!symbol || !Number.isSafeInteger(quantity) || quantity <= 0 || !tradeForm.price) {
-    actionError.value = "请完整填写代码、数量（正整数）和价格。";
-    return;
-  }
-  recordingTrade.value = true;
-  actionError.value = null;
-  const payload = {
-    side: tradeForm.side,
-    symbol,
-    quantity,
-    price: tradeForm.price,
-    fee: tradeForm.fee || "0",
-    trade_date: tradeForm.trade_date,
-  };
-  const fingerprint = JSON.stringify({ bookId, ...payload });
-  if (fingerprint !== tradeRequestFingerprint) {
-    tradeIdempotencyKey = null;
-    tradeRequestFingerprint = fingerprint;
-  }
-  try {
-    tradeIdempotencyKey = tradeIdempotencyKey ?? crypto.randomUUID();
-    await createPositionTrade(
-      bookId,
-      payload,
-      tradeIdempotencyKey,
-    );
-    tradeIdempotencyKey = null;
-    tradeRequestFingerprint = null;
-    if (bookId !== selectedBookId.value) return;
-    notice.value = `已记录${payload.side === "buy" ? "买入" : "卖出"} ${symbol} ${quantity} 股。`;
-    tradeForm.symbol = "";
-    tradeForm.price = "";
-    await refreshBookData();
-  } catch (error) {
-    // 响应丢失时提交结果未知；相同账本和请求重试必须继续使用原键。
-    if (bookId === selectedBookId.value) {
-      actionError.value = error instanceof Error ? error.message : "记账失败";
-    }
-  } finally {
-    recordingTrade.value = false;
-  }
-}
-
-async function handleDeleteTrade(tradeId: number) {
-  if (selectedBookId.value === null) return;
-  if (!window.confirm(`确认删除流水 #${tradeId}？持仓将按剩余流水重新推导。`)) return;
-  actionError.value = null;
-  try {
-    await deletePositionTrade(selectedBookId.value, tradeId);
-    notice.value = `流水 #${tradeId} 已删除。`;
-    await refreshBookData();
-  } catch (error) {
-    actionError.value = error instanceof Error ? error.message : "流水删除失败";
-  }
-}
-
-async function handleFetchDrift() {
-  const bookId = selectedBookId.value;
-  const generation = ++driftRequestGeneration;
-  const planId = Number(driftPlanId.value);
-  if (!Number.isFinite(planId) || planId <= 0 || bookId === null) {
-    actionError.value = "偏离检测需要组合草案 ID 和已选账本。";
-    return;
-  }
-  driftLoading.value = true;
-  actionError.value = null;
-  try {
-    const result = await fetchPortfolioPlanDrift(planId, {
-      positionBookId: bookId,
-      threshold: driftThreshold.value || "0.02",
-    });
-    if (generation === driftRequestGeneration) drift.value = result;
-  } catch (error) {
-    if (generation !== driftRequestGeneration) return;
-    drift.value = null;
-    if (
-      error instanceof PortfolioDriftApiError
-      && error.code === "portfolio_drift_missing_trusted_prices"
-      && error.symbols.length > 0
-    ) {
-      actionError.value = `以下非零持仓缺少可信价格，暂不能计算组合偏离：${error.symbols.join("、")}。请先补齐或修复可信行情后重试。`;
-    } else {
-      actionError.value = error instanceof Error ? error.message : "偏离检测失败";
-    }
-  } finally {
-    if (generation === driftRequestGeneration) driftLoading.value = false;
-  }
-}
-
-const directionLabels: Record<string, string> = {
-  buy: "增持",
-  sell: "减持",
-  hold: "持有",
-};
-
-function pnlTone(value: string | null): string {
-  if (value === null) return "neutral";
-  return Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "neutral";
-}
-
-function maxExposureWeight(): number {
-  const rows = holdings.value?.industry_exposure ?? [];
-  return rows.reduce((max, row) => Math.max(max, Number(row.weight)), 0);
-}
-
-onMounted(() => {
-  void loadBooks();
-});
+onMounted(start);
 </script>
 
 <template>
@@ -382,14 +118,15 @@ onMounted(() => {
     </div>
 
     <div v-if="holdings" class="summary-grid">
-      <div class="metric-card"><span>总权益</span><strong>{{ formatNumber(holdings.total_equity) }}</strong><small>现金 {{ formatNumber(holdings.cash) }} + 持仓 {{ formatNumber(holdings.positions_market_value) }}</small></div>
+      <div class="metric-card"><span>总权益</span><strong>{{ formatNumber(holdings.total_equity) }}</strong><small>现金 {{ formatNumber(holdings.cash) }} + 持仓 {{ formatNumber(holdings.positions_market_value) }}</small><small v-if="quoteCoverage.missing">含 {{ quoteCoverage.missing }} 只成本替代估值，非完整市价权益</small></div>
       <div class="metric-card"><span>已实现盈亏</span><strong :class="pnlTone(holdings.realized_pnl)">{{ formatNumber(holdings.realized_pnl) }}</strong><small>流水重放推导</small></div>
       <div class="metric-card"><span>集中度 HHI</span><strong>{{ formatPercent(holdings.concentration.hhi) }}</strong><small>Top5 {{ formatPercent(holdings.concentration.top5_weight) }} · 最大单票 {{ formatPercent(holdings.concentration.max_symbol_weight) }}</small></div>
       <div class="metric-card" :class="{ warning: holdings.price_stale }">
-        <span>估值基准</span>
-        <strong>{{ holdings.price_as_of ? formatDate(holdings.price_as_of) : "无可信价" }}</strong>
-        <small>{{ holdings.price_stale ? "存在缺价持仓，按成本估值" : "最新可信未复权收盘价" }}</small>
+        <span>最新报价日</span>
+        <strong>{{ holdings.price_as_of ?? "无可信价" }}</strong>
+        <small>可信未复权收盘；仅是持仓中最晚日期</small>
       </div>
+      <div class="metric-card" :class="{ warning: quoteCoverage.missing || quoteCoverage.earlier }"><span>逐仓报价覆盖</span><strong>{{ quoteCoverage.priced }} / {{ quoteCoverage.total }}</strong><small>缺可信价 {{ quoteCoverage.missing }} 只 · 报价早于最晚日 {{ quoteCoverage.earlier }} 只</small></div>
     </div>
 
     <div v-if="holdings && holdings.holdings.length > 0" class="table-panel full">
@@ -407,7 +144,7 @@ onMounted(() => {
         <thead>
           <tr>
             <th>代码</th><th>名称</th><th>行业</th><th>数量</th><th>成本</th>
-            <th>现价</th>
+            <th>现价 / 报价日</th>
             <th class="sortable" @click="toggleSort('market_value')">市值 {{ sortKey === "market_value" ? (sortAsc ? "↑" : "↓") : "" }}</th>
             <th>浮盈</th>
             <th class="sortable" @click="toggleSort('unrealized_pnl_pct')">收益率 {{ sortKey === "unrealized_pnl_pct" ? (sortAsc ? "↑" : "↓") : "" }}</th>
@@ -424,12 +161,14 @@ onMounted(() => {
             <td>
               {{ row.price ? formatNumber(row.price) : "-" }}
               <small v-if="row.price_stale" class="stale-tag">缺价</small>
+              <small v-else-if="row.price_as_of">{{ row.price_as_of }}<span v-if="holdings.price_as_of && row.price_as_of < holdings.price_as_of"> · 早于最晚报价</span></small>
+              <small v-else class="stale-tag">报价日未记录</small>
               <small v-if="row.sequence_anomaly" class="stale-tag">乱序</small>
             </td>
-            <td>{{ formatNumber(row.market_value) }}</td>
+            <td>{{ formatNumber(row.market_value) }}<small v-if="row.price_stale" class="stale-tag">成本替代，非市价</small></td>
             <td :class="pnlTone(row.unrealized_pnl)">{{ row.unrealized_pnl === null ? "-" : formatNumber(row.unrealized_pnl) }}</td>
             <td :class="pnlTone(row.unrealized_pnl_pct)">{{ row.unrealized_pnl_pct === null ? "-" : formatPercent(row.unrealized_pnl_pct) }}</td>
-            <td>{{ formatPercent(row.weight) }}</td>
+            <td>{{ formatPercent(row.weight) }}<small v-if="row.price_stale" class="stale-tag">估算</small></td>
           </tr>
         </tbody>
       </table>
@@ -438,6 +177,7 @@ onMounted(() => {
 
     <div v-if="holdings && holdings.industry_exposure.length > 0" class="exposure-panel">
       <h3><BookOpen :size="15" />行业暴露</h3>
+      <p v-if="quoteCoverage.missing" class="section-note">行业权重含缺价持仓的成本替代估值，仅供定位敞口。</p>
       <div v-for="row in holdings.industry_exposure" :key="row.industry" class="exposure-row">
         <span class="exposure-label">{{ row.industry }}（{{ row.symbol_count }} 只）</span>
         <div class="exposure-bar">
@@ -478,7 +218,7 @@ onMounted(() => {
         </thead>
         <tbody>
           <tr v-for="trade in trades" :key="trade.id">
-            <td>{{ formatDate(trade.trade_date) }}</td>
+            <td>{{ trade.trade_date }}</td>
             <td :class="trade.side === 'buy' ? 'positive' : 'negative'">{{ trade.side === "buy" ? "买入" : "卖出" }}</td>
             <td>{{ trade.symbol }}</td>
             <td>{{ formatNumber(trade.quantity) }}</td>
@@ -496,34 +236,52 @@ onMounted(() => {
 
     <div class="drift-panel">
       <h3><ArrowLeftRight :size="15" />组合草案偏离检测</h3>
-      <div class="lookup-row">
-        <input v-model="driftPlanId" inputmode="numeric" placeholder="组合草案 ID" />
+      <div class="lookup-row drift-lookup">
+        <select v-model="driftPlanId" aria-label="选择组合草案" :disabled="planOptionsLoading && planOptions.length === 0">
+          <option value="">选择组合草案</option>
+          <option v-for="item in planOptions" :key="item.plan_id" :value="String(item.plan_id)">#{{ item.plan_id }} · {{ item.name }} · {{ item.as_of_date }}</option>
+        </select>
+        <input v-model="driftPlanId" inputmode="numeric" aria-label="组合草案 ID" placeholder="或输入草案 ID" />
         <input v-model="driftThreshold" inputmode="decimal" placeholder="阈值，默认 0.02" />
         <button class="secondary-action" type="button" :disabled="driftLoading" @click="handleFetchDrift">
           {{ driftLoading ? "检测中…" : "检测偏离" }}
         </button>
       </div>
+      <div class="plan-picker-actions">
+        <button class="secondary-action" type="button" :disabled="planOptionsLoading" @click="loadPlanOptions(true)">刷新草案</button>
+        <button v-if="planOffset < planTotal" class="secondary-action" type="button" :disabled="planOptionsLoading" @click="loadPlanOptions()">加载更多（{{ planOffset }}/{{ planTotal }}）</button>
+      </div>
+      <p v-if="planOptionsError" class="section-note">{{ planOptionsError }}；仍可手动输入草案 ID。</p>
+      <p v-else-if="planOptionsLoaded && !planOptionsLoading && planTotal === 0" class="section-note">尚无组合草案。可先到 <RouterLink to="/portfolio">组合页</RouterLink> 创建，再返回此处刷新草案。</p>
+      <p v-if="selectedPlan" class="section-note">已选「{{ selectedPlan.name }}」：草案截至 {{ selectedPlan.as_of_date }}，草案预算 {{ formatNumber(selectedPlan.total_equity) }} 元；请核对与当前账本的时点和资金规模。</p>
       <p class="section-note">把草案最终权重与当前账本实仓权重对比，只读建议，不生成订单。</p>
+      <p v-if="quoteCoverage.earlier" class="section-note">{{ quoteCoverage.earlier }} 只持仓报价早于账本最晚报价日；日期较早可能由停牌等原因造成。偏离计算会阻断缺可信价持仓，但较早的可信价仍会参与，请核对逐仓日期后解释结果。</p>
       <div v-if="drift" class="drift-result">
+        <p class="section-note">草案「{{ drift.plan_name }}」截至 {{ drift.plan_as_of_date }}，草案预算 {{ formatNumber(drift.plan_total_equity) }} 元；当前账本权益 {{ formatNumber(drift.total_equity) }} 元。请按当前持仓和行情重新判断该草案是否仍适用。</p>
+        <p v-if="drift.price_as_of && drift.plan_as_of_date !== drift.price_as_of" class="section-note">草案截至日与持仓最晚报价日不同；草案目标可能已过期，偏离结果不等于当日可执行方案。</p>
         <div class="plan-metrics">
           <div><span>偏离超阈值</span><strong>{{ drift.summary.off_threshold_count }} / {{ drift.rows.length }}</strong></div>
           <div><span>最大偏离</span><strong>{{ formatPercent(drift.summary.max_abs_drift) }}</strong></div>
           <div><span>现金权重</span><strong>{{ formatPercent(drift.summary.cash_weight) }} / 目标 {{ formatPercent(drift.summary.cash_target_weight) }}</strong></div>
-          <div><span>估值基准</span><strong>{{ drift.price_as_of ? formatDate(drift.price_as_of) : "缺价" }}</strong></div>
+          <div><span>最晚报价日</span><strong>{{ drift.price_as_of ?? "缺价" }}</strong></div>
         </div>
+        <p v-if="driftOutsidePlanCount" class="section-note">{{ driftOutsidePlanCount }} 只草案外持仓已按目标权重和目标数量 0 纳入偏离结果；方向仍按所设阈值判断，阈值内显示“持有”表示暂不提示调整。</p>
+        <p v-if="driftEarlierQuoteCount" class="section-note">{{ driftEarlierQuoteCount }} 只持仓报价早于最晚报价日，目标数量按各行对应的可信价格估算，请核对日期。</p>
         <div class="table-panel full">
           <table>
             <thead>
-              <tr><th>代码</th><th>目标权重</th><th>当前权重</th><th>偏离</th><th>方向</th><th>当前/目标数量</th><th>原因</th></tr>
+              <tr><th>代码</th><th>草案</th><th>报价日</th><th>目标权重</th><th>当前权重</th><th>偏离</th><th>方向</th><th>当前/草案目标数量</th><th>原因</th></tr>
             </thead>
             <tbody>
               <tr v-for="row in drift.rows" :key="row.symbol">
                 <td>{{ row.symbol }}</td>
+                <td>{{ row.in_plan ? "已纳入" : "草案外" }}</td>
+                <td>{{ row.price_as_of ?? "无报价" }}<span v-if="row.price_as_of && drift.price_as_of && row.price_as_of < drift.price_as_of"> · 较早</span></td>
                 <td>{{ formatPercent(row.target_weight) }}</td>
                 <td>{{ formatPercent(row.current_weight) }}</td>
                 <td :class="pnlTone(row.drift)">{{ formatPercent(row.drift) }}</td>
                 <td :class="row.direction === 'buy' ? 'positive' : row.direction === 'sell' ? 'negative' : ''">
-                  {{ directionLabels[row.direction] }}
+                  {{ directionLabels[row.direction] }}<small v-if="!row.in_plan && row.direction === 'hold'"> · 阈值内暂不调整</small>
                 </td>
                 <td>{{ formatNumber(row.current_quantity) }} / {{ row.target_quantity === null ? "-" : formatNumber(row.target_quantity) }}</td>
                 <td>{{ row.reasons.join("、") }}</td>
@@ -623,6 +381,23 @@ onMounted(() => {
   gap: 6px;
   font-size: 14px;
   margin: 0;
+}
+
+.drift-lookup {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.drift-lookup select {
+  min-width: min(100%, 320px);
+  max-width: 100%;
+  min-height: 36px;
+}
+
+.plan-picker-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .exposure-row {
