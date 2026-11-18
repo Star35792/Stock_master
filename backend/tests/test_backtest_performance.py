@@ -95,3 +95,25 @@ def test_first_day_loss_counts_in_drawdown_and_returns() -> None:
     assert report.maximum_drawdown == Decimal("-0.1")
     assert report.daily_win_rate == 0
     assert report.annualized_return < 0
+
+
+def test_read_only_equity_metrics_match_full_performance_report() -> None:
+    analyzer = BacktestPerformanceAnalyzer()
+    equity_rows = [
+        _equity(date(2026, 7, 1), "102"),
+        _equity(date(2026, 7, 2), "99"),
+        _equity(date(2026, 7, 3), "105"),
+    ]
+    preview = analyzer.analyze_equity(
+        initial_cash=Decimal("100"),
+        equities=[row.total_equity for row in equity_rows],
+    )
+    report = analyzer.analyze(
+        run=SimpleNamespace(initial_cash=Decimal("100")),
+        equity_rows=equity_rows,
+        trade_rows=[], position_rows=[], industries={},
+    )
+    assert preview.sharpe_ratio == report.sharpe_ratio
+    assert preview.maximum_drawdown == report.maximum_drawdown
+    assert preview.annualized_return == report.annualized_return
+    assert preview.total_return == report.total_return

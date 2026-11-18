@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.dependencies import DatabaseSession, ResearchDatabaseSession
+from app.config.settings import settings
 from app.schemas import Page
 from app.schemas.research_validation import (
     ResearchValidationReportRead,
@@ -12,6 +13,7 @@ from app.schemas.research_validation import (
 from app.schemas.strategy import (
     BacktestBenchmarkRead,
     BacktestComparisonItem,
+    BacktestComparisonPreviewItem,
     BacktestComparisonRequest,
     BacktestDriftRead,
     BacktestDriftRequest,
@@ -20,7 +22,7 @@ from app.schemas.strategy import (
     BacktestPerformanceAnalyzeRequest,
     BacktestPerformanceRead,
     BacktestPositionRead,
-    BacktestRunRead,
+    BacktestRunListItemRead,
     BacktestTradeRead,
 )
 from app.services import BacktestQueryService
@@ -81,11 +83,22 @@ def compare_backtest_runs(
         ) from exc
 
 
+@router.post("/runs/compare-preview", response_model=list[BacktestComparisonPreviewItem])
+def compare_backtest_preview(
+    research_db: ResearchDatabaseSession,
+    payload: BacktestComparisonRequest,
+) -> list[BacktestComparisonPreviewItem]:
+    try:
+        return service.compare_preview(research_db, run_ids=payload.run_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _raise_not_found(message: str) -> None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
 
 
-@router.get("/runs", response_model=Page[BacktestRunRead])
+@router.get("/runs", response_model=Page[BacktestRunListItemRead])
 def list_backtest_runs(
     research_db: ResearchDatabaseSession,
     strategy_name: str | None = None,
@@ -93,11 +106,13 @@ def list_backtest_runs(
         default=None,
         alias="status",
     ),
+    validation_mode: Annotated[str | None, Query(max_length=50)] = None,
+    data_version: Annotated[str | None, Query(max_length=100)] = None,
     start_date: date | None = None,
     end_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> Page[BacktestRunRead]:
+) -> Page[BacktestRunListItemRead]:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -107,6 +122,8 @@ def list_backtest_runs(
         research_db,
         strategy_name=strategy_name,
         status=status_,
+        validation_mode=validation_mode,
+        data_version=data_version,
         start_date=start_date,
         end_date=end_date,
         limit=limit,
@@ -114,11 +131,11 @@ def list_backtest_runs(
     )
 
 
-@router.get("/runs/{run_id}", response_model=BacktestRunRead)
+@router.get("/runs/{run_id}", response_model=BacktestRunListItemRead)
 def get_backtest_run(
     research_db: ResearchDatabaseSession, run_id: int
-) -> BacktestRunRead:
-    run = service.get_run(research_db, run_id=run_id)
+) -> BacktestRunListItemRead:
+    run = service.get_run_summary(research_db, run_id=run_id)
     if run is None:
         _raise_not_found("backtest run not found")
     return run
@@ -261,8 +278,17 @@ def analyze_backtest_performance(
     run_id: int,
     payload: BacktestPerformanceAnalyzeRequest,
 ) -> BacktestPerformanceRead:
+    if payload.code_version is not None and payload.code_version != settings.app_code_version:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="performance analysis code_version must match the running server",
+        )
     if service.get_run(research_db, run_id=run_id) is None:
         _raise_not_found("backtest run not found")
+    if payload.code_version is None and not payload.style_factors:
+        existing = service.get_performance(research_db, run_id=run_id)
+        if existing is not None:
+            return existing
     style_factors = {
         style_name: (ref.factor_name, ref.factor_version)
         for style_name, ref in payload.style_factors.items()
@@ -272,7 +298,7 @@ def analyze_backtest_performance(
             db,
             research_db=research_db,
             run_id=run_id,
-            code_version=payload.code_version,
+            code_version=settings.app_code_version,
             style_factors=style_factors,
         )
         research_db.commit()

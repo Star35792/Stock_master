@@ -22,7 +22,42 @@ class PerformanceReport:
     style_exposure: dict[str, Decimal]
 
 
+@dataclass(frozen=True)
+class EquityPerformance:
+    total_return: Decimal
+    annualized_return: Decimal
+    maximum_drawdown: Decimal
+    annualized_volatility: Decimal
+    sharpe_ratio: Decimal | None
+
+
 class BacktestPerformanceAnalyzer:
+    def analyze_equity(
+        self, *, initial_cash: Decimal, equities: list[Decimal]
+    ) -> EquityPerformance:
+        if not equities:
+            raise ValueError("backtest equity curve is empty")
+        if not initial_cash.is_finite() or initial_cash <= 0 or any(
+            not equity.is_finite() or equity <= 0 for equity in equities
+        ):
+            raise ValueError("performance requires positive initial cash and equity")
+        daily_returns = [equities[0] / initial_cash - Decimal(1)]
+        daily_returns.extend(
+            equities[index] / equities[index - 1] - Decimal(1)
+            for index in range(1, len(equities))
+        )
+        total_return = equities[-1] / initial_cash - Decimal(1)
+        daily_mean = self._mean(daily_returns) or Decimal()
+        daily_std = self._standard_deviation(daily_returns) or Decimal()
+        annualizer = Decimal(str(sqrt(252)))
+        return EquityPerformance(
+            total_return=total_return,
+            annualized_return=self._annualized_return(total_return, len(daily_returns)),
+            maximum_drawdown=self._maximum_drawdown([initial_cash, *equities]),
+            annualized_volatility=daily_std * annualizer,
+            sharpe_ratio=daily_mean / daily_std * annualizer if daily_std else None,
+        )
+
     def analyze(
         self,
         *,
@@ -33,28 +68,17 @@ class BacktestPerformanceAnalyzer:
         industries: dict[str, str],
         style_values: dict[str, dict[str, Decimal]] | None = None,
     ) -> PerformanceReport:
-        if not equity_rows:
-            raise ValueError("backtest equity curve is empty")
         equity_rows = sorted(equity_rows, key=lambda row: row.trade_date)
         equities = [row.total_equity for row in equity_rows]
-        if run.initial_cash <= 0 or any(equity <= 0 for equity in equities):
-            raise ValueError("performance requires positive initial cash and equity")
+        equity = self.analyze_equity(initial_cash=run.initial_cash, equities=equities)
         daily_returns = [equities[0] / run.initial_cash - Decimal(1)]
         daily_returns.extend(
             equities[index] / equities[index - 1] - Decimal(1)
             for index in range(1, len(equities))
         )
-        total_return = equities[-1] / run.initial_cash - Decimal(1)
-        annualized_return = self._annualized_return(total_return, len(daily_returns))
-        maximum_drawdown = self._maximum_drawdown([run.initial_cash, *equities])
-        daily_mean = self._mean(daily_returns) or Decimal()
-        daily_std = self._standard_deviation(daily_returns) or Decimal()
-        annualized_volatility = daily_std * Decimal(str(sqrt(252)))
-        sharpe_ratio = (
-            daily_mean / daily_std * Decimal(str(sqrt(252))) if daily_std else None
-        )
         calmar_ratio = (
-            annualized_return / abs(maximum_drawdown) if maximum_drawdown else None
+            equity.annualized_return / abs(equity.maximum_drawdown)
+            if equity.maximum_drawdown else None
         )
         positive_returns = [value for value in daily_returns if value > 0]
         negative_returns = [value for value in daily_returns if value < 0]
@@ -91,11 +115,11 @@ class BacktestPerformanceAnalyzer:
             style_values=style_values or {},
         )
         return PerformanceReport(
-            total_return=total_return,
-            annualized_return=annualized_return,
-            maximum_drawdown=maximum_drawdown,
-            annualized_volatility=annualized_volatility,
-            sharpe_ratio=sharpe_ratio,
+            total_return=equity.total_return,
+            annualized_return=equity.annualized_return,
+            maximum_drawdown=equity.maximum_drawdown,
+            annualized_volatility=equity.annualized_volatility,
+            sharpe_ratio=equity.sharpe_ratio,
             calmar_ratio=calmar_ratio,
             daily_win_rate=daily_win_rate,
             profit_loss_ratio=profit_loss_ratio,

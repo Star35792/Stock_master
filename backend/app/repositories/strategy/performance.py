@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,20 @@ from app.models.strategy import (
 
 
 class BacktestPerformanceRepository:
+    def list_sharpe_by_run_ids(
+        self, db: Session, *, run_ids: list[int]
+    ) -> dict[int, tuple[Decimal | None, str]]:
+        if not run_ids:
+            return {}
+        rows = db.execute(
+            select(
+                BacktestPerformance.run_id,
+                BacktestPerformance.sharpe_ratio,
+                BacktestPerformance.code_version,
+            ).where(BacktestPerformance.run_id.in_(run_ids))
+        )
+        return {run_id: (sharpe, code_version) for run_id, sharpe, code_version in rows}
+
     def get_by_run_id(
         self,
         db: Session,

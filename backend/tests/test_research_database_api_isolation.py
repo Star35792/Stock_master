@@ -102,6 +102,37 @@ def test_split_database_report_profit_benchmark_and_failure_plan(split_api):
     assert benchmark.json()["benchmark"] == "600001.SH"
     assert Decimal(benchmark.json()["benchmark_total_return"]) == Decimal(13) / Decimal(6) - 1
 
+    before_analysis = client.get("/api/v1/backtests/runs", params={"limit": 20})
+    assert before_analysis.status_code == 200, before_analysis.text
+    listed = next(item for item in before_analysis.json()["items"] if item["id"] == run_id)
+    assert listed["performance_status"] == "derived"
+    assert listed["sharpe_ratio"] is None
+    assert listed["performance_code_version"].startswith("source-")
+    detail = client.get(f"/api/v1/backtests/runs/{run_id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["performance_status"] == "derived"
+    assert detail.json()["sharpe_ratio"] is None
+
+    stale_version = client.post(
+        f"/api/v1/backtests/runs/{run_id}/performance",
+        json={"code_version": "old-client-version"},
+    )
+    assert stale_version.status_code == 422
+    analyzed = client.post(f"/api/v1/backtests/runs/{run_id}/performance", json={})
+    assert analyzed.status_code == 200, analyzed.text
+    assert analyzed.json()["code_version"].startswith("source-")
+    # A flat fixture equity curve has zero volatility, so Sharpe is undefined.
+    assert analyzed.json()["sharpe_ratio"] is None
+    fetched_performance = client.get(f"/api/v1/backtests/runs/{run_id}/performance")
+    assert fetched_performance.json() == analyzed.json()
+    repeated = client.post(f"/api/v1/backtests/runs/{run_id}/performance", json={})
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json() == analyzed.json()
+    after_analysis = client.get("/api/v1/backtests/runs", params={"limit": 20})
+    listed = next(item for item in after_analysis.json()["items"] if item["id"] == run_id)
+    assert listed["performance_status"] == "analyzed"
+    assert listed["sharpe_ratio"] == analyzed.json()["sharpe_ratio"]
+
     with Session(research) as db:
         run = db.get(BacktestRun, run_id)
         run.status = "failed"
@@ -121,6 +152,53 @@ def test_split_database_report_profit_benchmark_and_failure_plan(split_api):
             "'backtest_run', 'backtest_trade', 'backtest_equity', "
             "'backtest_position', 'backtest_performance', 'training_artifact')"
         )) == 0
+
+
+def test_compare_preview_reads_research_runs_without_saving_performance(split_api):
+    client, _, research = split_api
+    root = "/api/v1/strategy-research/price-value/backtests"
+    first = client.post(root, json=backtest_payload().model_dump(mode="json"))
+    second = client.post(root, json=backtest_payload().model_dump(mode="json"))
+    assert first.status_code == second.status_code == 200
+    run_ids = [second.json()["run_id"], first.json()["run_id"]]
+
+    response = client.post(
+        "/api/v1/backtests/runs/compare-preview", json={"run_ids": run_ids}
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert [item["run_id"] for item in items] == run_ids
+    assert [item["metric_source"] for item in items] == ["derived", "derived"]
+    assert all(item["metric_code_version"] for item in items)
+    assert all(item["data_version"] for item in items)
+    assert all(item["strategy_contract"]["strategy_name"] for item in items)
+    assert items[0]["strategy_differences"] == []
+    assert items[1]["strategy_differences"] == []
+    assert all("signals" not in item["strategy_contract"] for item in items)
+    with Session(research) as db:
+        assert db.scalar(text("SELECT count(*) FROM strategy.backtest_performance")) == 0
+
+
+def test_backtest_list_filters_validation_and_data_version_before_paging(split_api):
+    client, _, research = split_api
+    with Session(research) as db:
+        for mode, version in (("rolling", "warm-a"), ("none", "warm-b"), ("rolling", "warm-b")):
+            db.add(BacktestRun(
+                name=f"{mode}-{version}", strategy_name="factor_selection",
+                parameters={"validation_mode": mode}, code_version="fixture",
+                data_version=version, start_date=date(2026, 1, 5),
+                end_date=date(2026, 1, 9), initial_cash=Decimal("10000"),
+                status="success",
+            ))
+        db.commit()
+
+    response = client.get(
+        "/api/v1/backtests/runs",
+        params={"validation_mode": "rolling", "data_version": "warm-b", "limit": 1},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 1
+    assert [item["name"] for item in response.json()["items"]] == ["rolling-warm-b"]
 
 
 def test_split_database_missing_report_is_404(split_api):

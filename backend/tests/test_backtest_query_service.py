@@ -10,6 +10,14 @@ from app.services import BacktestQueryService
 class FakeBacktestRepository:
     def __init__(self) -> None:
         self.trade_kwargs: dict | None = None
+        self.equity_batch_calls: list[list[int]] = []
+
+    def list_equity_values_by_run_ids(self, db: object, *, run_ids: list[int]):
+        self.equity_batch_calls.append(run_ids)
+        return {1: [Decimal("100000"), Decimal("110000")]} if 1 in run_ids else {}
+
+    def list_equity_dates_by_run_ids(self, db: object, *, run_ids: list[int]):
+        return {run_id: (date(2026, 7, 1), date(2026, 7, 2)) for run_id in run_ids}
 
     def list_runs(self, db: object, **kwargs: object) -> tuple[list[SimpleNamespace], int]:
         return [
@@ -69,6 +77,11 @@ class FakeBacktestRepository:
 
 
 class FakePerformanceRepository:
+    def list_sharpe_by_run_ids(
+        self, db: object, *, run_ids: list[int]
+    ) -> dict[int, tuple[Decimal | None, str]]:
+        return {}
+
     def get_by_run_id(self, db: object, *, run_id: int) -> None:
         return None
 
@@ -103,8 +116,9 @@ class FakeDailyBarRepository:
 
 
 def test_backtest_query_service_lists_runs() -> None:
+    repository = FakeBacktestRepository()
     page = BacktestQueryService(
-        backtest_repository=FakeBacktestRepository(),
+        backtest_repository=repository,
         performance_repository=FakePerformanceRepository(),
     ).list_runs(
         object(),
@@ -119,6 +133,200 @@ def test_backtest_query_service_lists_runs() -> None:
     assert page.total == 1
     assert page.items[0].name == "factor-smoke"
     assert page.items[0].parameters["factor_specs"][0]["factor_version"] == "v1-qfq"
+    assert page.items[0].performance_status == "derived"
+    assert page.items[0].sharpe_ratio is not None
+    assert repository.equity_batch_calls == [[1]]
+
+
+def test_backtest_list_uses_persisted_sharpe_without_recalculation() -> None:
+    class PersistedSharpe(FakePerformanceRepository):
+        def list_sharpe_by_run_ids(self, db: object, *, run_ids: list[int]):
+            assert run_ids == [1]
+            return {1: (Decimal("1.25"), "analysis-v2")}
+
+    repository = FakeBacktestRepository()
+    page = BacktestQueryService(
+        backtest_repository=repository,
+        performance_repository=PersistedSharpe(),
+    ).list_runs(object(), limit=20, offset=0)
+
+    assert page.items[0].performance_status == "analyzed"
+    assert page.items[0].sharpe_ratio == Decimal("1.25")
+    assert page.items[0].performance_code_version == "analysis-v2"
+    assert repository.equity_batch_calls == [[]]
+
+
+def test_backtest_preview_preserves_order_contract_and_metric_source() -> None:
+    class PreviewRuns(FakeBacktestRepository):
+        def get_run(self, db: object, *, run_id: int):
+            base = self.list_runs(db)[0][0]
+            return SimpleNamespace(
+                **{
+                    **vars(base),
+                    "id": run_id,
+                    "data_version": "market-v2" if run_id == 2 else "market-v1",
+                    "parameters": {
+                        "validation_mode": "out_of_sample" if run_id == 2 else "exploratory",
+                        "fee_model_version": "a_share_cost_v2",
+                        "commission_rate": "0.0003",
+                    },
+                }
+            )
+
+    class PreviewPerformance(FakePerformanceRepository):
+        def get_by_run_id(self, db: object, *, run_id: int):
+            if run_id == 1:
+                return SimpleNamespace(
+                    total_return=Decimal("0.02"),
+                    annualized_return=Decimal("0.2"),
+                    maximum_drawdown=Decimal("-0.04"),
+                    sharpe_ratio=Decimal("1.5"),
+                    turnover_rate=Decimal("0.3"),
+                    total_commission=Decimal("12"),
+                    code_version="saved-v1",
+                )
+            return None
+
+        def load_inputs(self, db: object, *, run_id: int):
+            run = PreviewRuns().get_run(db, run_id=run_id)
+            if run_id == 3:
+                return run, [], [], []
+            return run, [
+                SimpleNamespace(trade_date=date(2026, 7, 1), total_equity=Decimal("100000")),
+                SimpleNamespace(trade_date=date(2026, 7, 2), total_equity=Decimal("101000")),
+            ], [], []
+
+    items = BacktestQueryService(
+        backtest_repository=PreviewRuns(), performance_repository=PreviewPerformance()
+    ).compare_preview(object(), run_ids=[2, 1, 3])
+    assert [item.run_id for item in items] == [2, 1, 3]
+    assert [item.metric_source for item in items] == ["derived", "persisted", "missing_equity"]
+    assert items[0].data_version == "market-v2"
+    assert items[0].validation_mode == "out_of_sample"
+    assert items[0].fee_parameters["commission_rate"] == "0.0003"
+    assert items[0].sharpe_ratio is not None
+    assert items[0].delta_status == "baseline"
+    assert items[1].delta_status == "unavailable"
+    assert "data_version" in items[1].delta_reasons
+    assert items[1].metric_code_version == "saved-v1"
+    assert items[2].sharpe_ratio is None
+
+
+def test_backtest_preview_delta_requires_aligned_observations_and_metric_version() -> None:
+    fee_contract = {
+        "fee_model_version": "a_share_cost_v2",
+        "commission_rate": "0.0003",
+        "min_commission": "5",
+        "sell_stamp_duty_rate": "0.0005",
+        "transfer_fee_rate": "0.00001",
+        "exchange_fee_rate": "0.0000487",
+        "slippage_bps": "2",
+        "security_type_fee_rule": "stock_or_etf_v1",
+        "stock_stamp_duty_rule": "legal_20230828_v1",
+        "supported_trade_date_start": "2022-04-29",
+        "validation_mode": "rolling",
+        "adjust_type": "qfq",
+        "factor_specs": [{"factor_name": "momentum_20", "higher_is_better": True}],
+        "symbols": ["AAA", "BBB"],
+        "signals": [{"trade_date": "2026-07-01", "symbol": "AAA"}],
+        "strategy_input_snapshot": {"sha256": "input-v1", "row_count": 100},
+        "data_snapshot": {"sha256": "market-v1", "bar_count": 100},
+    }
+
+    class Runs(FakeBacktestRepository):
+        candidate_parameters = {
+            **fee_contract,
+            "factor_specs": [{"factor_name": "momentum_20", "higher_is_better": False}],
+            "symbols": ["BBB", "AAA"],
+            "data_snapshot": {"sha256": "market-v2", "bar_count": 100},
+        }
+        candidate_dates = (date(2026, 7, 1), date(2026, 7, 2))
+        candidate_training_artifact_id = 10
+
+        def get_run(self, db: object, *, run_id: int):
+            base = self.list_runs(db)[0][0]
+            return SimpleNamespace(**{
+                **vars(base), "id": run_id,
+                "training_artifact_id": 10 if run_id == 1 else self.candidate_training_artifact_id,
+                "parameters": fee_contract if run_id == 1 else self.candidate_parameters,
+            })
+
+        def list_equity_dates_by_run_ids(self, db: object, *, run_ids: list[int]):
+            assert run_ids == [1, 2]
+            return {1: (date(2026, 7, 1), date(2026, 7, 2)),
+                    2: self.candidate_dates}
+
+    class Performance(FakePerformanceRepository):
+        candidate_version = "analysis-v1"
+        candidate_sharpe = Decimal("1.2")
+
+        def get_by_run_id(self, db: object, *, run_id: int):
+            return SimpleNamespace(
+                total_return=Decimal("0.10") if run_id == 1 else Decimal("0.13"),
+                annualized_return=Decimal("0.2"),
+                maximum_drawdown=Decimal("-0.04") if run_id == 1 else Decimal("-0.06"),
+                sharpe_ratio=Decimal("1.5") if run_id == 1 else self.candidate_sharpe,
+                turnover_rate=Decimal("0.3"), total_commission=Decimal("12"),
+                code_version="analysis-v1" if run_id == 1 else self.candidate_version,
+            )
+
+    runs = Runs()
+    performance = Performance()
+
+    def preview():
+        return BacktestQueryService(
+            backtest_repository=runs, performance_repository=performance,
+        ).compare_preview(object(), run_ids=[1, 2])[1]
+
+    aligned = preview()
+    assert aligned.delta_status == "available"
+    assert aligned.total_return_delta == Decimal("0.03")
+    assert aligned.maximum_drawdown_delta == Decimal("-0.02")
+    assert aligned.sharpe_ratio_delta == Decimal("-0.3")
+    assert aligned.strategy_differences == ["factor_specs", "data_snapshot_sha256"]
+    assert aligned.strategy_contract["factor_specs"][0]["higher_is_better"] is False
+    assert aligned.strategy_contract["strategy_input_sha256"] == "input-v1"
+    assert aligned.strategy_contract["data_snapshot_sha256"] == "market-v2"
+    assert aligned.strategy_contract["training_artifact_id"] == 10
+    assert "signals" not in aligned.strategy_contract
+    assert "strategy_input_snapshot" not in aligned.strategy_contract
+
+    runs.candidate_training_artifact_id = 11
+    training_change = preview()
+    assert "training_artifact_id" in training_change.strategy_differences
+    runs.candidate_training_artifact_id = 10
+
+    runs.candidate_parameters = {**runs.candidate_parameters, "symbols": ["BBB", "CCC"]}
+    universe_change = preview()
+    assert "symbols" in universe_change.strategy_differences
+    runs.candidate_parameters = {**runs.candidate_parameters, "symbols": ["BBB", "AAA"]}
+
+    performance.candidate_sharpe = None
+    no_sharpe = preview()
+    assert no_sharpe.delta_status == "available"
+    assert no_sharpe.total_return_delta == Decimal("0.03")
+    assert no_sharpe.sharpe_ratio_delta is None
+
+    performance.candidate_version = "analysis-v2"
+    version_mismatch = preview()
+    assert version_mismatch.delta_status == "unavailable"
+    assert "metric_code_version" in version_mismatch.delta_reasons
+    assert version_mismatch.total_return_delta is None
+
+    performance.candidate_version = "analysis-v1"
+    runs.candidate_dates = (date(2026, 7, 1), date(2026, 7, 3))
+    date_mismatch = preview()
+    assert "equity_dates_differ" in date_mismatch.delta_reasons
+    assert date_mismatch.sharpe_ratio_delta is None
+
+    runs.candidate_dates = ()
+    missing_dates = preview()
+    assert "equity_dates_missing" in missing_dates.delta_reasons
+
+    runs.candidate_dates = (date(2026, 7, 1), date(2026, 7, 2))
+    runs.candidate_parameters = {**fee_contract, "stock_stamp_duty_rule": "fixed_rate_v1"}
+    fee_mismatch = preview()
+    assert "fee_parameters" in fee_mismatch.delta_reasons
 
 
 def test_backtest_query_service_normalizes_trade_symbol_filter() -> None:

@@ -46,6 +46,14 @@ class BacktestRunRead(BaseModel):
     created_at: datetime
 
 
+class BacktestRunListItemRead(BacktestRunRead):
+    sharpe_ratio: Decimal | None = None
+    performance_status: Literal[
+        "analyzed", "derived", "missing_equity", "invalid_equity", "not_applicable"
+    ]
+    performance_code_version: str | None = None
+
+
 class BacktestTradeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -143,13 +151,43 @@ class BacktestComparisonItem(BaseModel):
     turnover_rate: Decimal
 
 
+class BacktestComparisonPreviewItem(BaseModel):
+    run_id: int
+    name: str
+    strategy_name: str
+    start_date: date
+    end_date: date
+    data_version: str
+    run_code_version: str
+    initial_cash: Decimal
+    validation_mode: str | None
+    fee_model_version: str | None
+    fee_parameters: dict[str, Any]
+    adjust_type: str | None
+    strategy_contract: dict[str, Any]
+    strategy_differences: list[str]
+    metric_source: Literal["persisted", "derived", "missing_equity", "invalid_equity"]
+    metric_code_version: str | None
+    total_return: Decimal | None
+    annualized_return: Decimal | None
+    maximum_drawdown: Decimal | None
+    sharpe_ratio: Decimal | None
+    turnover_rate: Decimal | None
+    total_commission: Decimal | None
+    delta_status: Literal["baseline", "available", "unavailable"]
+    delta_reasons: list[str]
+    total_return_delta: Decimal | None = None
+    maximum_drawdown_delta: Decimal | None = None
+    sharpe_ratio_delta: Decimal | None = None
+
+
 class StyleFactorRef(BaseModel):
     factor_name: str = Field(min_length=1)
     factor_version: str = Field(min_length=1)
 
 
 class BacktestPerformanceAnalyzeRequest(BaseModel):
-    code_version: str = Field(min_length=1)
+    code_version: str | None = Field(default=None, min_length=1)
     style_factors: dict[str, StyleFactorRef] = Field(default_factory=dict)
 
 

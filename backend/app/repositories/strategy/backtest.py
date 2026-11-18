@@ -15,6 +15,37 @@ from app.models.strategy import (
 
 
 class BacktestRepository:
+    def list_equity_dates_by_run_ids(
+        self, db: Session, *, run_ids: list[int]
+    ) -> dict[int, tuple[date, ...]]:
+        """Return each run's observed dates for comparison-window checks."""
+        if not run_ids:
+            return {}
+        rows = db.execute(
+            select(BacktestEquity.run_id, BacktestEquity.trade_date)
+            .where(BacktestEquity.run_id.in_(run_ids))
+            .order_by(BacktestEquity.run_id, BacktestEquity.trade_date)
+        )
+        values: dict[int, list[date]] = {}
+        for run_id, trade_date in rows:
+            values.setdefault(run_id, []).append(trade_date)
+        return {run_id: tuple(dates) for run_id, dates in values.items()}
+
+    def list_equity_values_by_run_ids(
+        self, db: Session, *, run_ids: list[int]
+    ) -> dict[int, list[Decimal]]:
+        if not run_ids:
+            return {}
+        rows = db.execute(
+            select(BacktestEquity.run_id, BacktestEquity.total_equity)
+            .where(BacktestEquity.run_id.in_(run_ids))
+            .order_by(BacktestEquity.run_id, BacktestEquity.trade_date)
+        )
+        values: dict[int, list[Decimal]] = {}
+        for run_id, total_equity in rows:
+            values.setdefault(run_id, []).append(total_equity)
+        return values
+
     def get_run(self, db: Session, *, run_id: int) -> BacktestRun | None:
         return db.get(BacktestRun, run_id)
 
@@ -24,6 +55,8 @@ class BacktestRepository:
         *,
         strategy_name: str | None = None,
         status: str | None = None,
+        validation_mode: str | None = None,
+        data_version: str | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
         limit: int = 100,
@@ -34,6 +67,14 @@ class BacktestRepository:
             filters.append(BacktestRun.strategy_name == strategy_name)
         if status:
             filters.append(BacktestRun.status == status)
+        if validation_mode:
+            filters.append(
+                func.json_extract_string(
+                    BacktestRun.parameters, "$.validation_mode"
+                ) == validation_mode
+            )
+        if data_version:
+            filters.append(BacktestRun.data_version == data_version)
         if start_date:
             filters.append(BacktestRun.start_date >= start_date)
         if end_date:
