@@ -259,6 +259,24 @@ def test_risk_budget_roundtrips_through_persisted_parameters() -> None:
     assert result.risk_budget.max_industry_weight == Decimal("0.25")
 
 
+def test_factor_map_and_benchmark_symbol_roundtrip_in_constraints() -> None:
+    repository = FakePortfolioRepository()
+    service = PortfolioConstructionService(repository=repository)
+    result = service.build(
+        FakeSession(), name="map draft", as_of_date=date(2026, 7, 21),
+        assets=[PortfolioAsset("600519.SH", "stock", "食品饮料", Decimal("200"), 0,
+                               Decimal("0.20"))],
+        cash=Decimal("100000"), constraints=PortfolioConstraints(),
+        code_version="test", idempotency_key="map-1", input_snapshot={"assets": []},
+        style_factor_map={"momentum": ("momentum_20", "v1-qfq")},
+        benchmark_symbol="000300.SH",
+    )
+    assert result.constraints.style_factor_map is not None
+    assert result.constraints.style_factor_map.momentum == ("momentum_20", "v1-qfq")
+    assert result.constraints.benchmark_symbol == "000300.SH"
+    assert service.get_plan(FakeSession(), plan_id=result.plan_id).constraints == result.constraints
+
+
 def test_enforcement_mode_roundtrips_through_persisted_parameters() -> None:
     from app.schemas.portfolio import PortfolioConstraintsRequest
 

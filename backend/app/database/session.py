@@ -200,6 +200,7 @@ def apply_schema_compatibility(bind: Engine) -> None:
                         "WHERE evidence_eligibility IS NULL"
                     )
                 )
+
         if table == "factor.factor_profile" and "evidence_eligibility_reason" in existing_columns:
             with bind.begin() as conn:
                 conn.execute(
@@ -209,6 +210,36 @@ def apply_schema_compatibility(bind: Engine) -> None:
                         "WHERE evidence_eligibility_reason IS NULL"
                     )
                 )
+
+    # Older plan tables predate persisted style exposure and target scores.
+    # Both fields are optional; preserve existing rows as NULL. DuckDB needs
+    # an individual commit for each ALTER on a populated table.
+    for table, column in (
+        ("portfolio.portfolio_plan", "style_risk JSON"),
+        ("portfolio.portfolio_target", "score DECIMAL(18, 10)"),
+    ):
+        schema, name = table.split(".")
+        with bind.connect() as conn:
+            exists = conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns "
+                    "WHERE table_catalog = current_database() "
+                    "AND table_schema = :schema AND table_name = :name "
+                    "AND column_name = :column"
+                ),
+                {"schema": schema, "name": name, "column": column.split()[0]},
+            ).scalar_one()
+            table_exists = conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_catalog = current_database() "
+                    "AND table_schema = :schema AND table_name = :name"
+                ),
+                {"schema": schema, "name": name},
+            ).scalar_one()
+        if table_exists and not exists:
+            with bind.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}"))
 
     # Existing pre-artifact databases need an additive upgrade: create_all does
     # not add columns or indexes to tables that are already present. Keep the

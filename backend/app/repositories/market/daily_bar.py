@@ -10,6 +10,17 @@ from app.models.raw import RawDailyBar
 
 
 class DailyBarRepository:
+    def list_trusted_stock_universe(self, db: Session, *, trade_date: date) -> set[str]:
+        return set(db.scalars(
+            select(DailyBar.symbol).where(
+                DailyBar.trade_date == trade_date,
+                DailyBar.adjust_type == "none",
+                DailyBar.security_type == "stock",
+                DailyBar.quality_status.in_(("trusted", "manual_fixed")),
+                DailyBar.is_suspect.is_(False),
+            )
+        ).all())
+
     def mark_rejected(
         self,
         db: Session,

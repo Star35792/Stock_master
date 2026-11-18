@@ -336,6 +336,43 @@ def test_get_portfolio_plan_returns_saved_draft(monkeypatch) -> None:
     assert response.json()["status"] == "draft"
 
 
+def test_list_portfolio_plans_returns_paged_summaries(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_list(db, *, limit: int, offset: int):
+        captured.update(limit=limit, offset=offset)
+        return [
+            SimpleNamespace(
+                id=11,
+                name="研究组合",
+                as_of_date=date(2026, 7, 21),
+                total_equity=Decimal("2500.0000"),
+                code_version="v1",
+                created_at=datetime(2026, 7, 21, tzinfo=UTC),
+            )
+        ], 3
+
+    monkeypatch.setattr(portfolio_module.service.repository, "list_plans", fake_list)
+    response = client.get("/api/v1/portfolio/plans", params={"limit": 1, "offset": 2})
+
+    assert response.status_code == 200
+    assert captured == {"limit": 1, "offset": 2}
+    assert response.json() == {
+        "items": [{
+            "plan_id": 11,
+            "name": "研究组合",
+            "as_of_date": "2026-07-21",
+            "total_equity": "2500.0000",
+            "code_version": "v1",
+            "created_at": "2026-07-21T00:00:00Z",
+        }],
+        "total": 3,
+        "limit": 1,
+        "offset": 2,
+    }
+    assert client.get("/api/v1/portfolio/plans", params={"limit": 101}).status_code == 422
+
+
 def test_create_portfolio_plan_maps_idempotency_conflict_to_409(monkeypatch) -> None:
     def fake_build(db, **kwargs):
         raise PortfolioIdempotencyConflict(

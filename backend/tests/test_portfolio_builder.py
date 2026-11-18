@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -9,6 +10,26 @@ from app.portfolio import (
     PortfolioConstraints,
     PortfolioRiskBudget,
 )
+
+
+def test_portfolio_amounts_use_persisted_four_place_scale() -> None:
+    plan = PortfolioBuilder().build(
+        assets=[PortfolioAsset(
+            "A", "stock", "Tech", Decimal("10.123456"), 101, Decimal("0.5"),
+            lot_size=1,
+        )],
+        cash=Decimal("1000.0000"),
+        constraints=PortfolioConstraints(
+            cash_reserve_rate=Decimal("0.333333"),
+            max_symbol_weight=Decimal("1"),
+            max_industry_weight=Decimal("1"),
+        ),
+    )
+    assert plan.total_equity == Decimal("2022.4691")
+    assert plan.cash_before == Decimal("1000.0000")
+    assert plan.target_cash.as_tuple().exponent == -4
+    assert plan.cash_after.as_tuple().exponent == -4
+    assert plan.cash_after >= plan.target_cash
 
 
 def test_portfolio_builder_applies_budgets_and_preserves_cash() -> None:
@@ -348,44 +369,74 @@ def test_score_is_preserved_on_portfolio_target() -> None:
     assert plan.targets[0].score == Decimal("0.75")
 
 
+def _dated_prices(prices: list[Decimal]) -> dict[date, Decimal]:
+    return {date(2026, 1, 1) + timedelta(days=index): price for index, price in enumerate(prices)}
+
+
+def _alternating_prices(return_scale: Decimal = Decimal("1")) -> list[Decimal]:
+    prices = [Decimal("1000")]
+    for index in range(60):
+        change = Decimal("0.02") if index % 2 == 0 else Decimal("-0.02")
+        prices.append(prices[-1] * (Decimal("1") + change * return_scale))
+    return prices
+
+
 class FakeStyleDataService:
     def __init__(
         self,
         style_exposures: dict[str, dict[str, Decimal]] | None = None,
-        historical_prices: dict[str, list[Decimal]] | None = None,
-        benchmark_prices: list[Decimal] | None = None,
+        historical_prices: dict[str, dict[date, Decimal]] | None = None,
+        benchmark_prices: dict[date, Decimal] | None = None,
     ) -> None:
         self.style_exposures = style_exposures or {}
         self.historical_prices = historical_prices or {}
         self.benchmark_prices = benchmark_prices
 
-    def load_style_exposures(self, db, *, as_of_date, symbols, style_factor_map=None):
+    def load_style_exposures(
+        self, db, *, as_of_date, symbols, style_factor_map=None,
+        include_valuation_styles=True, strict_budget=False, factor_evidence=None,
+    ):
+        if factor_evidence is not None:
+            for style in self.style_exposures:
+                factor_evidence[style] = {
+                    "run_id": 1, "observed_count": 100, "expected_count": 100,
+                }
         return {
             style: {symbol: value for symbol, value in values.items() if symbol in symbols}
             for style, values in self.style_exposures.items()
         }
 
-    def load_historical_prices(self, db, *, symbols, end_date, window_days=60, adjust_type="none"):
-        return {s: self.historical_prices.get(s, []) for s in symbols}
+    def load_historical_prices(self, db, *, symbols, end_date, window_days=60, adjust_type="qfq"):
+        return {s: self.historical_prices.get(s, {}) for s in symbols}
 
     def load_benchmark_prices(
-        self, db, *, benchmark_symbol, end_date, window_days=60, adjust_type="none"
+        self, db, *, benchmark_symbol, end_date, window_days=60, adjust_type="qfq"
     ):
         return self.benchmark_prices
+
+    def load_risk_prices(self, db, *, symbols, benchmark_symbol, end_date, window_days=60):
+        return (
+            self.load_historical_prices(db, symbols=symbols, end_date=end_date),
+            self.benchmark_prices if benchmark_symbol else None,
+        )
 
 
 def test_portfolio_builder_scales_weights_for_style_exposure_budget() -> None:
     style_exposures = {
+        "size": {"A": Decimal("0"), "B": Decimal("0")},
+        "value": {"A": Decimal("0"), "B": Decimal("0")},
         "momentum": {"A": Decimal("2"), "B": Decimal("-1")},
+        "volatility": {"A": Decimal("0"), "B": Decimal("0")},
+        "liquidity": {"A": Decimal("0"), "B": Decimal("0")},
     }
     builder = PortfolioBuilder(
         style_data_service=FakeStyleDataService(
             style_exposures=style_exposures,
             historical_prices={
-                "A": [Decimal("10")] * 61,
-                "B": [Decimal("10")] * 61,
+                "A": _dated_prices([Decimal("10")] * 61),
+                "B": _dated_prices([Decimal("10")] * 61),
             },
-            benchmark_prices=[Decimal("100")] * 61,
+            benchmark_prices=_dated_prices([Decimal("100")] * 61),
         )
     )
 
@@ -402,22 +453,91 @@ def test_portfolio_builder_scales_weights_for_style_exposure_budget() -> None:
             max_industry_weight=Decimal("1"),
             risk_budget=PortfolioRiskBudget(
                 max_style_exposure=Decimal("0.50"),
-                benchmark="000300.SH",
             ),
         ),
         db=object(),
-        as_of_date=object(),
+        as_of_date=date(2026, 3, 2),
     )
 
     targets = {target.symbol: target for target in plan.targets}
-    # 组合风格暴露 = 0.50*2 + 0.30*(-1) = 0.70；无基准因子，active=portfolio
+    # 组合绝对代理暴露 = 0.50*2 + 0.30*(-1) = 0.70。
     # 缩放比例 = 0.50 / 0.70 = 0.714...；缩放后 A=0.357, B=0.214
     # 之后行业预算把总量从 0.571 压回 0.40，等比例压缩
     assert targets["A"].constrained_weight == Decimal("0.25")
     assert targets["B"].constrained_weight == Decimal("0.15")
     assert "style_budget" in targets["A"].reasons
     assert plan.style_risk is not None
-    assert plan.style_risk.tracking_error == Decimal("0")
+    assert plan.style_risk.tracking_error is None
+    assert plan.style_risk.style_exposures[1].active_exposure is None
+    assert plan.style_risk.factor_as_of_date == date(2026, 3, 2)
+    assert plan.style_risk.factor_versions == {
+        "momentum": "v1-qfq", "volatility": "v1-qfq", "liquidity": "v1-qfq",
+    }
+    assert plan.style_risk.excluded_styles == ("size", "value")
+
+
+def test_style_budget_rejects_partial_positive_holding_factor_coverage() -> None:
+    builder = PortfolioBuilder(style_data_service=FakeStyleDataService(style_exposures={
+        "momentum": {"A": Decimal("1"), "B": Decimal("-1")},
+        "volatility": {"A": Decimal("1")},
+        "liquidity": {"A": Decimal("1"), "B": Decimal("-1")},
+    }))
+    with pytest.raises(ValueError, match="volatility.*B"):
+        builder.build(
+            assets=[
+                PortfolioAsset("A", "stock", "Tech", Decimal("10"), 0, Decimal("0.5")),
+                PortfolioAsset("B", "stock", "Tech", Decimal("10"), 0, Decimal("0.5")),
+            ],
+            cash=Decimal("10000"),
+            constraints=PortfolioConstraints(
+                risk_budget=PortfolioRiskBudget(max_style_exposure=Decimal("0.5")),
+            ),
+            db=object(),
+            as_of_date=date(2026, 11, 13),
+        )
+
+
+def test_style_budget_allows_exiting_an_old_etf_holding() -> None:
+    class StockOnlyStyles(FakeStyleDataService):
+        def load_style_exposures(self, db, *, symbols, **kwargs):
+            assert symbols == ["A"]
+            return super().load_style_exposures(db, symbols=symbols, **kwargs)
+
+    builder = PortfolioBuilder(style_data_service=StockOnlyStyles(style_exposures={
+        "momentum": {"A": Decimal("0.1")},
+        "volatility": {"A": Decimal("0.1")},
+        "liquidity": {"A": Decimal("0.1")},
+    }))
+    plan = builder.build(
+        assets=[
+            PortfolioAsset("A", "stock", "Tech", Decimal("10"), 0, Decimal("0.5")),
+            PortfolioAsset("510300.SH", "etf", "ETF", Decimal("10"), 100, Decimal("0")),
+        ],
+        cash=Decimal("10000"),
+        constraints=PortfolioConstraints(
+            risk_budget=PortfolioRiskBudget(max_style_exposure=Decimal("1")),
+        ),
+        db=object(),
+        as_of_date=date(2026, 11, 13),
+    )
+    exiting_etf = next(target for target in plan.targets if target.symbol == "510300.SH")
+    assert exiting_etf.target_quantity == 0
+
+
+def test_style_budget_rejects_missing_configured_style() -> None:
+    builder = PortfolioBuilder(
+        style_data_service=FakeStyleDataService(style_exposures={"size": {"A": Decimal("1")}})
+    )
+    with pytest.raises(ValueError, match="requires all configured style factors"):
+        builder.build(
+            assets=[PortfolioAsset("A", "stock", "Tech", Decimal("10"), 0, Decimal("0.5"))],
+            cash=Decimal("10000"),
+            constraints=PortfolioConstraints(
+                risk_budget=PortfolioRiskBudget(max_style_exposure=Decimal("1")),
+            ),
+            db=object(),
+            as_of_date=date(2026, 3, 2),
+        )
 
 
 def test_portfolio_builder_rejects_missing_benchmark_for_tracking_error() -> None:
@@ -453,7 +573,7 @@ def test_portfolio_builder_scales_weights_for_volatility_budget() -> None:
         style_data_service=FakeStyleDataService(
             style_exposures={},
             historical_prices={
-                "A": [Decimal("10")] * 30 + [Decimal("20")] * 31,
+                "A": _dated_prices([Decimal("10")] * 30 + [Decimal("20")] * 31),
             },
             benchmark_prices=None,
         )
@@ -473,7 +593,7 @@ def test_portfolio_builder_scales_weights_for_volatility_budget() -> None:
             ),
         ),
         db=object(),
-        as_of_date=object(),
+        as_of_date=date(2026, 3, 2),
     )
 
     targets = {target.symbol: target for target in plan.targets}
@@ -483,3 +603,53 @@ def test_portfolio_builder_scales_weights_for_volatility_budget() -> None:
     assert plan.style_risk is not None
     assert plan.style_risk.portfolio_volatility is not None
     assert plan.style_risk.portfolio_volatility <= Decimal("0.10")
+
+
+def test_final_group_scaling_cannot_raise_tracking_error_above_budget() -> None:
+    series = _dated_prices(_alternating_prices())
+    builder = PortfolioBuilder(
+        style_data_service=FakeStyleDataService(
+            historical_prices={"A": series}, benchmark_prices=series,
+        )
+    )
+
+    with pytest.raises(ValueError, match="final portfolio exceeds tracking error budget"):
+        builder.build(
+            assets=[PortfolioAsset("A", "stock", "Tech", Decimal("1000"), 0, Decimal("1"))],
+            cash=Decimal("100000"),
+            constraints=PortfolioConstraints(
+                max_symbol_weight=Decimal("1"),
+                max_industry_weight=Decimal("0.5"),
+                risk_budget=PortfolioRiskBudget(
+                    max_tracking_error=Decimal("0.05"), benchmark="BM",
+                ),
+            ),
+            db=object(),
+            as_of_date=date(2026, 3, 2),
+        )
+
+
+def test_final_lot_rounding_cannot_raise_tracking_error_above_budget() -> None:
+    builder = PortfolioBuilder(
+        style_data_service=FakeStyleDataService(
+            historical_prices={"A": _dated_prices(_alternating_prices())},
+            benchmark_prices=_dated_prices(_alternating_prices(Decimal("0.8"))),
+        )
+    )
+
+    with pytest.raises(ValueError, match="final portfolio exceeds tracking error budget"):
+        builder.build(
+            assets=[PortfolioAsset(
+                "A", "stock", "Tech", Decimal("1000"), 0, Decimal("0.8"), lot_size=10,
+            )],
+            cash=Decimal("99000"),
+            constraints=PortfolioConstraints(
+                max_symbol_weight=Decimal("1"),
+                max_industry_weight=Decimal("1"),
+                risk_budget=PortfolioRiskBudget(
+                    max_tracking_error=Decimal("0.01"), benchmark="BM",
+                ),
+            ),
+            db=object(),
+            as_of_date=date(2026, 3, 2),
+        )

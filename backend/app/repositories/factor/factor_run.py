@@ -8,6 +8,9 @@ from app.models.factor import FactorDefinition, FactorRun
 
 
 class FactorRunRepository:
+    def get_by_id(self, db: Session, run_id: int) -> FactorRun | None:
+        return db.get(FactorRun, run_id)
+
     def create(
         self,
         db: Session,

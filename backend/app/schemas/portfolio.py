@@ -15,11 +15,11 @@ class PortfolioAssetRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=20)
     security_type: Literal["stock", "etf", "index"]
     industry: str = Field(min_length=1, max_length=100)
-    price: Decimal = Field(gt=0)
+    price: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
     current_quantity: int = Field(ge=0)
-    requested_weight: Decimal = Field(ge=0, le=1)
+    requested_weight: Decimal = Field(ge=0, le=1, max_digits=18, decimal_places=10)
     lot_size: int = Field(default=100, gt=0)
-    score: Decimal | None = None
+    score: Decimal | None = Field(default=None, max_digits=18, decimal_places=10)
 
     @field_validator("symbol")
     @classmethod
@@ -46,7 +46,7 @@ class PortfolioRiskBudgetRequest(BaseModel):
         default=_POLICY.max_industry_weight, gt=0, le=1
     )
     max_style_exposure: Decimal | None = Field(
-        default=_POLICY.max_style_exposure, ge=0, le=1
+        default=_POLICY.max_style_exposure, ge=0
     )
     max_tracking_error: Decimal | None = Field(
         default=_POLICY.max_tracking_error, ge=0, le=1
@@ -107,7 +107,7 @@ class PortfolioConstraintsRequest(BaseModel):
 class PortfolioPlanCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     as_of_date: date
-    cash: Decimal = Field(ge=0)
+    cash: Decimal = Field(ge=0, max_digits=24, decimal_places=4)
     assets: list[PortfolioAssetRequest] = Field(min_length=1)
     constraints: PortfolioConstraintsRequest = Field(default_factory=PortfolioConstraintsRequest)
 
@@ -166,6 +166,13 @@ class PortfolioStyleRiskRead(BaseModel):
     portfolio_volatility: Decimal | None
     missing_styles: list[str]
     missing_benchmark: bool
+    factor_versions: dict[str, str] = Field(default_factory=dict)
+    factor_evidence: dict[str, dict[str, int | str]] = Field(default_factory=dict)
+    factor_as_of_date: date | None = None
+    excluded_styles: list[str] = Field(default_factory=list)
+    sample_start_date: date | None = None
+    sample_end_date: date | None = None
+    return_observation_count: int = 0
 
 
 class PortfolioPlanRead(BaseModel):
@@ -185,6 +192,17 @@ class PortfolioPlanRead(BaseModel):
     targets: list[PortfolioTargetRead]
     risk_budget: PortfolioRiskBudgetRequest | None = None
     style_risk: PortfolioStyleRiskRead | None = None
+
+
+class PortfolioPlanSummaryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    plan_id: int = Field(validation_alias="id")
+    name: str
+    as_of_date: date
+    total_equity: Decimal
+    code_version: str
+    created_at: datetime
 
 
 class PortfolioReadinessCheck(BaseModel):
@@ -217,6 +235,8 @@ class PortfolioDriftRowRead(BaseModel):
     symbol: str
     industry: str | None = None
     security_type: str | None = None
+    in_plan: bool
+    price_as_of: date | None
     target_weight: Decimal
     current_weight: Decimal
     drift: Decimal
@@ -235,6 +255,9 @@ class PortfolioDriftSummaryRead(BaseModel):
 
 class PortfolioPlanDriftRead(BaseModel):
     plan_id: int
+    plan_name: str
+    plan_as_of_date: date
+    plan_total_equity: Decimal
     source: Literal["position_book", "paper_account"]
     source_id: int
     source_name: str | None = None

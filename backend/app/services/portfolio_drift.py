@@ -145,10 +145,25 @@ class PortfolioDriftService:
             else Decimal()
         )
 
+        target_symbols = {target.symbol for target in targets}
+        row_inputs = [
+            (
+                target.symbol,
+                Decimal(target.final_weight),
+                target.industry,
+                target.security_type,
+                True,
+            )
+            for target in targets
+        ]
+        row_inputs.extend(
+            (symbol, Decimal(), None, None, False)
+            for symbol in sorted(valuations)
+            if valuations[symbol].quantity > 0 and symbol not in target_symbols
+        )
         rows: list[PortfolioDriftRowRead] = []
-        for target in targets:
-            target_weight = Decimal(target.final_weight)
-            current_weight = weights.get(target.symbol, Decimal())
+        for symbol, target_weight, industry, security_type, in_plan in row_inputs:
+            current_weight = weights.get(symbol, Decimal())
             drift = current_weight - target_weight
             if drift <= -threshold:
                 direction, direction_reason = "buy", "underweight beyond threshold"
@@ -157,11 +172,15 @@ class PortfolioDriftService:
             else:
                 direction, direction_reason = "hold", "within drift threshold"
             reasons = [direction_reason]
+            if not in_plan:
+                reasons.insert(0, "holding is not in the plan")
 
             target_quantity: int | None = None
-            valuation = valuations.get(target.symbol)
+            valuation = valuations.get(symbol)
             price = valuation.price if valuation else None
-            if price is not None and total_equity > 0:
+            if not in_plan:
+                target_quantity = 0
+            elif price is not None and total_equity > 0:
                 raw_quantity = target_weight * total_equity / price
                 lots = (raw_quantity / LOT_SIZE).to_integral_value(rounding=ROUND_FLOOR)
                 target_quantity = int(lots) * LOT_SIZE
@@ -172,9 +191,11 @@ class PortfolioDriftService:
 
             rows.append(
                 PortfolioDriftRowRead(
-                    symbol=target.symbol,
-                    industry=target.industry,
-                    security_type=target.security_type,
+                    symbol=symbol,
+                    industry=industry,
+                    security_type=security_type,
+                    in_plan=in_plan,
+                    price_as_of=valuation.price_as_of if valuation else None,
                     target_weight=quantize_ratio(target_weight),
                     current_weight=quantize_ratio(current_weight),
                     drift=quantize_ratio(drift),
@@ -195,6 +216,9 @@ class PortfolioDriftService:
         )
         return PortfolioPlanDriftRead(
             plan_id=plan.id,
+            plan_name=plan.name,
+            plan_as_of_date=plan.as_of_date,
+            plan_total_equity=plan_total,
             source=source,
             source_id=source_id,
             source_name=(

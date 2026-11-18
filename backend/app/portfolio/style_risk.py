@@ -1,6 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from math import sqrt
+
+MIN_RISK_RETURN_OBSERVATIONS = 60
 
 
 @dataclass(frozen=True)
@@ -18,6 +21,13 @@ class PortfolioStyleRisk:
     portfolio_volatility: Decimal | None
     missing_styles: tuple[str, ...]
     missing_benchmark: bool
+    factor_versions: dict[str, str] = field(default_factory=dict)
+    factor_as_of_date: date | None = None
+    excluded_styles: tuple[str, ...] = ()
+    sample_start_date: date | None = None
+    sample_end_date: date | None = None
+    return_observation_count: int = 0
+    factor_evidence: dict[str, dict[str, int | str]] = field(default_factory=dict)
 
 
 def _to_float(value: Decimal) -> float:
@@ -45,6 +55,8 @@ def _std(values: list[Decimal]) -> Decimal:
 def compute_returns(prices: list[Decimal]) -> list[Decimal]:
     if len(prices) < 2:
         return []
+    if any(price <= 0 or not price.is_finite() for price in prices):
+        return []
     return [(prices[i] - prices[i - 1]) / prices[i - 1] for i in range(1, len(prices))]
 
 
@@ -52,11 +64,12 @@ def compute_tracking_error(
     portfolio_returns: list[Decimal],
     benchmark_returns: list[Decimal],
 ) -> Decimal | None:
-    if len(portfolio_returns) < 2 or len(benchmark_returns) < 2:
+    if len(portfolio_returns) < 2 or len(portfolio_returns) != len(benchmark_returns):
         return None
-    n = min(len(portfolio_returns), len(benchmark_returns))
-    diffs = [portfolio_returns[-(i + 1)] - benchmark_returns[-(i + 1)] for i in range(n)]
-    return _annualize(_std(list(reversed(diffs))))
+    diffs = [portfolio - benchmark for portfolio, benchmark in zip(
+        portfolio_returns, benchmark_returns, strict=True
+    )]
+    return _annualize(_std(diffs))
 
 
 def compute_portfolio_volatility(
@@ -106,11 +119,6 @@ def compute_style_exposures(
                         normalized_bm[s] * factor_values[s] for s in bm_available
                     )
                     active_exposure = portfolio_exposure - benchmark_exposure
-            # If benchmark symbols are not present in the cross-sectional factor
-            # snapshot, fall back to portfolio exposure as the active exposure so
-            # that style budgets still constrain the absolute portfolio tilt.
-            if active_exposure is None:
-                active_exposure = portfolio_exposure
         exposures.append(
             StyleExposure(
                 style_name=style_name,
@@ -135,7 +143,11 @@ def scale_style_exposures(
         benchmark_weights=benchmark_weights,
     )
     max_abs = max(
-        (abs(exp.active_exposure) for exp in exposures if exp.active_exposure is not None),
+        (
+            abs(exp.portfolio_exposure if benchmark_weights is None else exp.active_exposure)
+            for exp in exposures
+            if benchmark_weights is None or exp.active_exposure is not None
+        ),
         default=Decimal(),
     )
     if max_abs <= 0 or max_abs <= max_active_exposure:
@@ -148,32 +160,49 @@ def build_portfolio_style_risk(
     *,
     weights: dict[str, Decimal],
     style_factors: dict[str, dict[str, Decimal]],
-    portfolio_prices: dict[str, list[Decimal]],
-    benchmark_prices: list[Decimal] | None = None,
+    portfolio_prices: dict[str, dict[date, Decimal]],
+    benchmark_prices: dict[date, Decimal] | None = None,
+    benchmark_weights: dict[str, Decimal] | None = None,
+    factor_versions: dict[str, str] | None = None,
+    factor_as_of_date: date | None = None,
+    excluded_styles: tuple[str, ...] = (),
+    factor_evidence: dict[str, dict[str, int | str]] | None = None,
 ) -> PortfolioStyleRisk:
     exposures, missing_styles = compute_style_exposures(
         weights=weights,
         style_factors=style_factors,
+        benchmark_weights=benchmark_weights,
     )
 
     portfolio_returns: list[Decimal] = []
-    symbols = sorted(weights.keys())
-    if symbols and portfolio_prices:
-        aligned_prices: dict[str, list[Decimal]] = {s: portfolio_prices.get(s, []) for s in symbols}
-        min_len = min(len(p) for p in aligned_prices.values())
-        if min_len >= 2:
-            for i in range(1, min_len):
-                day_return = Decimal()
-                for s in symbols:
-                    prev = aligned_prices[s][i - 1]
-                    curr = aligned_prices[s][i]
-                    if prev > 0:
-                        day_return += weights[s] * (curr - prev) / prev
-                portfolio_returns.append(day_return)
+    symbols = sorted(symbol for symbol, weight in weights.items() if weight > 0)
+    portfolio_dates: list[date] = []
+    if symbols and all(portfolio_prices.get(symbol) for symbol in symbols):
+        date_sets = [set(portfolio_prices[symbol]) for symbol in symbols]
+        if all(dates == date_sets[0] for dates in date_sets[1:]):
+            portfolio_dates = sorted(date_sets[0])
+            price_series = [
+                [portfolio_prices[symbol][day] for day in portfolio_dates]
+                for symbol in symbols
+            ]
+            returns_by_symbol = [compute_returns(prices) for prices in price_series]
+            if len(portfolio_dates) > MIN_RISK_RETURN_OBSERVATIONS and all(
+                len(returns) == len(portfolio_dates) - 1 for returns in returns_by_symbol
+            ):
+                portfolio_returns = [
+                    sum(
+                        (
+                            weights[symbol] * returns_by_symbol[j][i]
+                            for j, symbol in enumerate(symbols)
+                        ),
+                        Decimal(),
+                    )
+                    for i in range(len(portfolio_dates) - 1)
+                ]
 
     benchmark_returns: list[Decimal] = []
-    if benchmark_prices is not None and len(benchmark_prices) >= 2:
-        benchmark_returns = compute_returns(benchmark_prices)
+    if benchmark_prices is not None and set(benchmark_prices) == set(portfolio_dates):
+        benchmark_returns = compute_returns([benchmark_prices[day] for day in portfolio_dates])
 
     tracking_error = None
     if benchmark_returns and portfolio_returns:
@@ -186,5 +215,12 @@ def build_portfolio_style_risk(
         tracking_error=tracking_error,
         portfolio_volatility=portfolio_volatility,
         missing_styles=tuple(missing_styles),
-        missing_benchmark=benchmark_prices is None,
+        missing_benchmark=benchmark_prices is None or not benchmark_returns,
+        factor_versions=factor_versions or {},
+        factor_as_of_date=factor_as_of_date,
+        excluded_styles=excluded_styles,
+        sample_start_date=portfolio_dates[0] if portfolio_returns else None,
+        sample_end_date=portfolio_dates[-1] if portfolio_returns else None,
+        return_observation_count=len(portfolio_returns),
+        factor_evidence=factor_evidence or {},
     )

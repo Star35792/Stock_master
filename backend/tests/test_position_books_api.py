@@ -216,6 +216,7 @@ def test_plan_drift_happy_path_over_http(monkeypatch) -> None:
     plan = SimpleNamespace(
         id=3,
         name="draft",
+        as_of_date=date(2026, 7, 20),
         total_equity=Decimal("2500"),
         target_cash=Decimal("250"),
     )
@@ -252,13 +253,21 @@ def test_plan_drift_happy_path_over_http(monkeypatch) -> None:
         realized_pnl=Decimal("0"),
         extras={},
     )
+    outside_plan = SimpleNamespace(
+        symbol="000001.SZ",
+        quantity=100,
+        price=Decimal("10"),
+        price_as_of=date(2026, 7, 1),
+        price_stale=False,
+        market_value=Decimal("1000"),
+    )
     monkeypatch.setattr(
         drift_module.drift_service.position_book_service,
         "get_valuation",
         lambda positions_db, market_db, *, book_id: (
             SimpleNamespace(id=book_id, name="偏离账本", cash_quants=10_000_000),
             Decimal("1000"),
-            {"600000.SH": valuation},
+            {"600000.SH": valuation, "000001.SZ": outside_plan},
             date(2026, 7, 21),
         ),
     )
@@ -268,10 +277,21 @@ def test_plan_drift_happy_path_over_http(monkeypatch) -> None:
     payload = response.json()
     assert payload["source"] == "position_book"
     assert payload["source_name"] == "偏离账本"
+    assert payload["plan_name"] == "draft"
+    assert payload["plan_as_of_date"] == "2026-07-20"
+    assert payload["plan_total_equity"] == "2500"
     row = payload["rows"][0]
     assert row["direction"] == "sell"
-    assert row["drift"] == "0.2000000000"
-    assert payload["summary"]["off_threshold_count"] == 1
+    assert row["drift"] == "0.0285714286"
+    assert row["in_plan"] is True
+    assert row["price_as_of"] == "2026-07-21"
+    outside_row = payload["rows"][1]
+    assert outside_row["symbol"] == "000001.SZ"
+    assert outside_row["in_plan"] is False
+    assert outside_row["price_as_of"] == "2026-07-01"
+    assert outside_row["target_weight"] == "0E-10"
+    assert outside_row["target_quantity"] == 0
+    assert payload["summary"]["off_threshold_count"] == 2
 
 
 def test_plan_drift_rejects_stale_position_valuation_over_http(monkeypatch) -> None:
@@ -281,6 +301,7 @@ def test_plan_drift_rejects_stale_position_valuation_over_http(monkeypatch) -> N
     plan = SimpleNamespace(
         id=3,
         name="draft",
+        as_of_date=date(2026, 7, 20),
         total_equity=Decimal("2500"),
         target_cash=Decimal("250"),
     )

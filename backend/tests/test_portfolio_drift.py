@@ -59,6 +59,7 @@ def _plan(plan_id=3, total="2500", target_cash="250"):
     return SimpleNamespace(
         id=plan_id,
         name="draft",
+        as_of_date=date(2026, 7, 20),
         total_equity=Decimal(total),
         target_cash=Decimal(target_cash),
         created_at=NOW,
@@ -177,12 +178,17 @@ def test_book_drift_flags_overweight_and_sizes_target_lots() -> None:
 
     assert report.source == "position_book"
     assert report.source_name == "主账户"
+    assert report.plan_name == "draft"
+    assert report.plan_as_of_date == date(2026, 7, 20)
+    assert report.plan_total_equity == Decimal("2500")
     assert report.total_equity == Decimal("2500.0000")
     row = report.rows[0]
     assert row.current_weight == Decimal("0.6000000000")
     assert row.target_weight == Decimal("0.4000000000")
     assert row.drift == Decimal("0.2000000000")
     assert row.direction == "sell"
+    assert row.in_plan is True
+    assert row.price_as_of == date(2026, 7, 21)
     assert row.current_quantity == 150
     assert row.target_quantity == 100
     assert report.summary.off_threshold_count == 1
@@ -287,6 +293,62 @@ def test_old_but_trusted_price_does_not_block_drift() -> None:
 
     assert report.price_as_of == date(2026, 7, 1)
     assert report.rows[0].direction == "sell"
+    assert report.rows[0].price_as_of == date(2026, 7, 1)
+
+
+def test_drift_includes_out_of_plan_holdings_and_their_quote_dates() -> None:
+    service = _drift_service(
+        plan=_plan(),
+        targets=[_target()],
+        book_valuation=StubBookValuation(
+            "1000",
+            {
+                "600000.SH": _valuation(),
+                "000002.SZ": _valuation(
+                    symbol="000002.SZ", quantity=100, price_as_of=date(2026, 7, 1)
+                ),
+                "000001.SZ": _valuation(
+                    symbol="000001.SZ", quantity=100, price_as_of=date(2026, 7, 10)
+                ),
+                "300001.SZ": _stale_valuation("300001.SZ", quantity=0),
+            },
+        ),
+    )
+
+    report = service.get_drift(None, None, plan_id=3, position_book_id=5)
+
+    assert [row.symbol for row in report.rows] == ["600000.SH", "000001.SZ", "000002.SZ"]
+    for row in report.rows[1:]:
+        assert row.in_plan is False
+        assert row.target_weight == Decimal("0E-10")
+        assert row.target_quantity == 0
+        assert row.direction == "sell"
+        assert "holding is not in the plan" in row.reasons
+    assert report.rows[1].price_as_of == date(2026, 7, 10)
+    assert report.rows[2].price_as_of == date(2026, 7, 1)
+    assert report.summary.off_threshold_count == 3
+    assert report.summary.max_abs_drift == Decimal("0.2222222222")
+
+
+def test_small_out_of_plan_holding_is_visible_without_threshold_signal() -> None:
+    service = _drift_service(
+        plan=_plan(),
+        targets=[],
+        book_valuation=StubBookValuation(
+            "99000", {"000001.SZ": _valuation(symbol="000001.SZ", quantity=100)}
+        ),
+    )
+
+    report = service.get_drift(None, None, plan_id=3, position_book_id=5)
+
+    assert len(report.rows) == 1
+    row = report.rows[0]
+    assert row.in_plan is False
+    assert row.current_weight == Decimal("0.0100000000")
+    assert row.direction == "hold"
+    assert row.target_quantity == 0
+    assert report.summary.off_threshold_count == 0
+    assert report.summary.max_abs_drift == Decimal("0.0100000000")
 
 
 def test_plan_only_target_without_price_keeps_direction_but_not_quantity() -> None:

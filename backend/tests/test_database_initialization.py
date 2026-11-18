@@ -14,8 +14,12 @@ from app.database.session import (
     ensure_duckdb_sequences,
     initialize_database,
 )
+from app.models.portfolio import PortfolioPlanRecord, PortfolioTargetRecord
 from app.models.strategy import BacktestRun, TrainingArtifact
 from app.models.system import JobLog
+from app.portfolio import PortfolioPlan, PortfolioTarget
+from app.repositories.portfolio import PortfolioPlanRepository
+from app.services.portfolio import PortfolioConstructionService
 
 
 def test_fresh_database_preserves_referenced_training_artifacts(tmp_path) -> None:
@@ -92,6 +96,130 @@ def test_schema_compatibility_adds_release_lineage_columns(tmp_path) -> None:
 
     assert ("factor", "factor_run", "release_id") in columns
     assert ("market", "adjustment_factor", "release_id") in columns
+    engine.dispose()
+
+
+def test_legacy_portfolio_plan_columns_upgrade_with_existing_rows(tmp_path) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'legacy-portfolio.duckdb'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA portfolio"))
+        conn.execute(text("CREATE SEQUENCE portfolio_portfolio_plan_id_seq START 2"))
+        conn.execute(text("CREATE SEQUENCE portfolio_portfolio_target_id_seq START 2"))
+        conn.execute(text("""
+            CREATE TABLE portfolio.portfolio_plan (
+                id BIGINT PRIMARY KEY DEFAULT nextval('portfolio_portfolio_plan_id_seq'),
+                name VARCHAR(100) NOT NULL, as_of_date DATE NOT NULL,
+                parameters JSON NOT NULL, total_equity DECIMAL(24,4) NOT NULL,
+                cash_before DECIMAL(24,4) NOT NULL, target_cash DECIMAL(24,4) NOT NULL,
+                cash_after DECIMAL(24,4) NOT NULL, code_version VARCHAR(100) NOT NULL,
+                idempotency_key VARCHAR(100), request_hash VARCHAR(64),
+                input_snapshot JSON, created_at TIMESTAMPTZ DEFAULT current_timestamp
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE portfolio.portfolio_target (
+                id BIGINT PRIMARY KEY DEFAULT nextval('portfolio_portfolio_target_id_seq'),
+                plan_id BIGINT NOT NULL, symbol VARCHAR(20) NOT NULL,
+                security_type VARCHAR(20) NOT NULL, industry VARCHAR(100) NOT NULL,
+                requested_weight DECIMAL(18,10) NOT NULL,
+                constrained_weight DECIMAL(18,10) NOT NULL,
+                final_weight DECIMAL(18,10) NOT NULL,
+                current_quantity INTEGER NOT NULL, target_quantity INTEGER NOT NULL,
+                order_quantity INTEGER NOT NULL, price DECIMAL(18,6) NOT NULL,
+                reasons JSON NOT NULL, created_at TIMESTAMPTZ DEFAULT current_timestamp
+            )
+        """))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX uq_portfolio_plan_idempotency_key "
+            "ON portfolio.portfolio_plan (idempotency_key)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX ix_portfolio_target_plan ON portfolio.portfolio_target (plan_id)"
+        ))
+        conn.execute(text("""
+            INSERT INTO portfolio.portfolio_plan
+            (id, name, as_of_date, parameters, total_equity, cash_before,
+             target_cash, cash_after, code_version)
+            VALUES (1, 'legacy', '2026-01-05', '{}', 1000, 1000, 500, 500, 'legacy')
+        """))
+        conn.execute(text("""
+            INSERT INTO portfolio.portfolio_target
+            (id, plan_id, symbol, security_type, industry, requested_weight,
+             constrained_weight, final_weight, current_quantity, target_quantity,
+             order_quantity, price, reasons)
+            VALUES (1, 1, '000001.SZ', 'stock', 'bank', 0.5, 0.5, 0.5,
+                    0, 100, 100, 5, '[]')
+        """))
+
+    apply_schema_compatibility(engine)
+    apply_schema_compatibility(engine)
+
+    with engine.connect() as conn:
+        columns = dict(
+            conn.execute(
+                text(
+                    "SELECT table_name || '.' || column_name, data_type "
+                    "FROM information_schema.columns "
+                    "WHERE table_schema = 'portfolio' AND "
+                    "((table_name = 'portfolio_plan' AND column_name = 'style_risk') OR "
+                    "(table_name = 'portfolio_target' AND column_name = 'score'))"
+                )
+            ).all()
+        )
+    assert columns == {
+        "portfolio_plan.style_risk": "JSON",
+        "portfolio_target.score": "DECIMAL(18,10)",
+    }
+    with Session(engine) as db:
+        old_plan = db.get(PortfolioPlanRecord, 1)
+        old_target = db.scalar(
+            select(PortfolioTargetRecord).where(PortfolioTargetRecord.plan_id == 1)
+        )
+        assert old_plan.style_risk is None
+        assert old_target.score is None
+        assert PortfolioConstructionService().get_plan(db, plan_id=1).style_risk is None
+        old_target.score = Decimal("0.1234567890")
+        saved_plan = PortfolioPlanRepository().save(
+            db,
+            name="new",
+            as_of_date=date(2026, 1, 6),
+            parameters={},
+            plan=PortfolioPlan(
+                total_equity=Decimal("2000"),
+                cash_before=Decimal("2000"),
+                target_cash=Decimal("1000"),
+                cash_after=Decimal("1000"),
+                targets=(
+                    PortfolioTarget(
+                        symbol="600000.SH",
+                        security_type="stock",
+                        industry="bank",
+                        requested_weight=Decimal("0.5"),
+                        constrained_weight=Decimal("0.5"),
+                        final_weight=Decimal("0.5"),
+                        current_quantity=0,
+                        target_quantity=200,
+                        order_quantity=200,
+                        price=Decimal("5"),
+                        score=Decimal("0.9"),
+                        reasons=("lot_rounding",),
+                    ),
+                ),
+            ),
+            code_version="current",
+            idempotency_key="legacy-upgrade-new",
+            request_hash="a" * 64,
+            input_snapshot={},
+        )
+        assert saved_plan.id == 2
+        db.commit()
+    with Session(engine) as db:
+        assert db.scalar(
+            select(PortfolioTargetRecord.score).where(PortfolioTargetRecord.plan_id == 1)
+        ) == Decimal("0.1234567890")
+        plan, targets = PortfolioPlanRepository().get_with_targets(db, plan_id=2)
+        assert plan.name == "new"
+        assert targets[0].score == Decimal("0.9")
     engine.dispose()
 
 

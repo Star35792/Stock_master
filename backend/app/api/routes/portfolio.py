@@ -7,11 +7,13 @@ from fastapi.responses import JSONResponse
 from app.api.dependencies import DatabaseSession, PositionsDatabaseSession
 from app.config.settings import settings
 from app.portfolio import PortfolioAsset, PortfolioConstraints, PortfolioRiskBudget
+from app.schemas.common import Page
 from app.schemas.portfolio import (
     PortfolioDriftErrorRead,
     PortfolioPlanCreateRequest,
     PortfolioPlanDriftRead,
     PortfolioPlanRead,
+    PortfolioPlanSummaryRead,
     PortfolioRiskReadinessRead,
 )
 from app.schemas.risk import RiskEvaluationCreateRequest, RiskEvaluationRead
@@ -41,6 +43,15 @@ service = PortfolioConstructionService()
 readiness_service = PortfolioRiskReadinessService()
 risk_evaluation_service = BoundRiskEvaluationService()
 drift_service = PortfolioDriftService()
+
+
+@router.get("", response_model=Page[PortfolioPlanSummaryRead])
+def list_portfolio_plans(
+    db: DatabaseSession,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> Page[PortfolioPlanSummaryRead]:
+    return service.list_plans(db, limit=limit, offset=offset)
 
 
 @router.post("", response_model=PortfolioPlanRead, status_code=status.HTTP_201_CREATED)

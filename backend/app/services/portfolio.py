@@ -15,13 +15,14 @@ from app.portfolio import (
     PortfolioConstraints,
 )
 from app.repositories.portfolio import PortfolioPlanRepository
+from app.schemas.common import Page
 from app.schemas.portfolio import (
     PortfolioConstraintsRequest,
     PortfolioPlanRead,
+    PortfolioPlanSummaryRead,
     PortfolioRiskBudgetRequest,
     PortfolioStyleRiskRead,
     PortfolioTargetRead,
-    StyleExposureRead,
 )
 
 
@@ -126,6 +127,11 @@ class PortfolioConstructionService:
                             key: str(value)
                             for key, value in constraints.extra_symbol_caps.items()
                         },
+                        "style_factor_map": (
+                            {key: list(value) for key, value in style_factor_map.items()}
+                            if style_factor_map is not None else None
+                        ),
+                        "benchmark_symbol": benchmark_symbol,
                         "risk_budget": (
                             {
                                 "max_industry_weight": str(
@@ -175,6 +181,17 @@ class PortfolioConstructionService:
             return None
         return self._to_read(record, targets)
 
+    def list_plans(
+        self, db: Session, *, limit: int, offset: int
+    ) -> Page[PortfolioPlanSummaryRead]:
+        records, total = self.repository.list_plans(db, limit=limit, offset=offset)
+        return Page(
+            items=[PortfolioPlanSummaryRead.model_validate(record) for record in records],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
     def _replay_existing(
         self,
         db: Session,
@@ -216,20 +233,8 @@ class PortfolioConstructionService:
         ]
         style_risk = None
         if hasattr(record, "style_risk") and record.style_risk is not None:
-            style_risk = PortfolioStyleRiskRead(
-                style_exposures=[
-                    StyleExposureRead(
-                        style_name=exp.style_name,
-                        portfolio_exposure=exp.portfolio_exposure,
-                        benchmark_exposure=exp.benchmark_exposure,
-                        active_exposure=exp.active_exposure,
-                    )
-                    for exp in record.style_risk.style_exposures
-                ],
-                tracking_error=record.style_risk.tracking_error,
-                portfolio_volatility=record.style_risk.portfolio_volatility,
-                missing_styles=list(record.style_risk.missing_styles),
-                missing_benchmark=record.style_risk.missing_benchmark,
+            style_risk = PortfolioStyleRiskRead.model_validate(
+                record.style_risk, from_attributes=True
             )
         return PortfolioPlanRead(
             plan_id=record.id,
