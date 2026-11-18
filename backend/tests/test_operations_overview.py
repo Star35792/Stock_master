@@ -167,6 +167,9 @@ class FakeOperationsOverviewRepository:
     def count_failed_jobs(self, db: object) -> int:
         return 1
 
+    def count_latest_failed_jobs(self, db: object) -> int:
+        return 1
+
     def count_running_jobs(self, db: object) -> int:
         return 1
 
@@ -192,6 +195,9 @@ class FakeOperationsOverviewRepository:
     def count_failed_factor_runs(self, db: object) -> int:
         return 1
 
+    def count_latest_failed_factor_runs(self, db: object) -> int:
+        return 1
+
     def failed_backtest_runs(self, db: object, *, limit: int) -> list[SimpleNamespace]:
         return [
             SimpleNamespace(
@@ -214,6 +220,9 @@ class FakeOperationsOverviewRepository:
         ][:limit]
 
     def count_failed_backtest_runs(self, db: object) -> int:
+        return 1
+
+    def count_latest_failed_backtest_runs(self, db: object) -> int:
         return 1
 
     def rejected_paper_orders(self, db: object, *, limit: int) -> list[SimpleNamespace]:

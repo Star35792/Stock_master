@@ -190,7 +190,7 @@ class OperationsOverviewService:
                     next_action="inspect affected dataset, symbol, trade_date, and rerun plan",
                 )
             )
-        failed_jobs = self.repository.count_failed_jobs(db)
+        failed_jobs = self.repository.count_latest_failed_jobs(db)
         if failed_jobs > 0:
             alert_items.append(
                 OperationsAlertItem(
@@ -198,8 +198,8 @@ class OperationsOverviewService:
                     severity="warning",
                     count=failed_jobs,
                     title="Failed jobs",
-                    detail="Batch and scheduler jobs reported failures or partial failures",
-                    rule="job logs with status in failed or partial",
+                    detail="The latest run of these jobs failed or partially failed",
+                    rule="latest job_name/job_type run has status failed or partial",
                     next_action="review failed rows, error message, and source metadata",
                 )
             )
@@ -216,7 +216,7 @@ class OperationsOverviewService:
                     next_action="monitor progress before deciding whether manual review is needed",
                 )
             )
-        failed_factor_runs = self.repository.count_failed_factor_runs(db)
+        failed_factor_runs = self.repository.count_latest_failed_factor_runs(db)
         if failed_factor_runs > 0:
             alert_items.append(
                 OperationsAlertItem(
@@ -224,12 +224,12 @@ class OperationsOverviewService:
                     severity="warning",
                     count=failed_factor_runs,
                     title="Failed factor runs",
-                    detail="Factor runs ended in failed or partial status",
-                    rule="factor runs with status in failed or partial",
+                    detail="The latest run of these factor versions failed or partially failed",
+                    rule="latest factor_name/factor_version run has status failed or partial",
                     next_action="review factor parameters, input window, and upstream data quality",
                 )
             )
-        failed_backtests = self.repository.count_failed_backtest_runs(
+        failed_backtests = self.repository.count_latest_failed_backtest_runs(
             research_db if research_db is not None else db
         )
         if failed_backtests > 0:
@@ -239,8 +239,8 @@ class OperationsOverviewService:
                     severity="critical",
                     count=failed_backtests,
                     title="Failed backtests",
-                    detail="Backtest runs ended in failed status",
-                    rule="backtest runs with status=failed",
+                    detail="The latest run of these named backtests failed",
+                    rule="latest name/strategy_name run has status failed",
                     next_action="inspect run detail, data_version, parameters, and error message",
                 )
             )

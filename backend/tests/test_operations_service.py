@@ -122,13 +122,22 @@ class FakeOperationsRepository:
     def count_failed_jobs(self, db):
         return self.failed_jobs_count
 
+    def count_latest_failed_jobs(self, db):
+        return self.failed_jobs_count
+
     def count_running_jobs(self, db):
         return self.running_jobs_count
 
     def count_failed_factor_runs(self, db):
         return self.failed_factor_runs_count
 
+    def count_latest_failed_factor_runs(self, db):
+        return self.failed_factor_runs_count
+
     def count_failed_backtest_runs(self, db):
+        return self.failed_backtests_count
+
+    def count_latest_failed_backtest_runs(self, db):
         return self.failed_backtests_count
 
     def count_rejected_paper_orders(self, db):

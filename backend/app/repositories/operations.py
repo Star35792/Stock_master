@@ -95,6 +95,15 @@ class OperationsOverviewRepository:
     def count_failed_jobs(self, db: Session) -> int:
         return self._count_where(db, JobLog, JobLog.status.in_(["failed", "partial"]))
 
+    def count_latest_failed_jobs(self, db: Session) -> int:
+        return self._count_latest_failed(
+            db,
+            JobLog,
+            partition_by=(JobLog.job_name, JobLog.job_type),
+            order_by=(JobLog.started_at.desc(), JobLog.id.desc()),
+            failed_statuses=("failed", "partial"),
+        )
+
     def count_running_jobs(self, db: Session) -> int:
         return self._count_where(db, JobLog, JobLog.status == "running")
 
@@ -135,6 +144,15 @@ class OperationsOverviewRepository:
             FactorRun.status.in_(["failed", "partial"]),
         )
 
+    def count_latest_failed_factor_runs(self, db: Session) -> int:
+        return self._count_latest_failed(
+            db,
+            FactorRun,
+            partition_by=(FactorRun.factor_name, FactorRun.factor_version),
+            order_by=(FactorRun.started_at.desc(), FactorRun.id.desc()),
+            failed_statuses=("failed", "partial"),
+        )
+
     def get_failed_factor_run(self, db: Session, *, run_id: int) -> FactorRun | None:
         return db.scalar(
             select(FactorRun).where(
@@ -167,6 +185,15 @@ class OperationsOverviewRepository:
 
     def count_failed_backtest_runs(self, db: Session) -> int:
         return self._count_where(db, BacktestRun, BacktestRun.status == "failed")
+
+    def count_latest_failed_backtest_runs(self, db: Session) -> int:
+        return self._count_latest_failed(
+            db,
+            BacktestRun,
+            partition_by=(BacktestRun.name, BacktestRun.strategy_name),
+            order_by=(BacktestRun.started_at.desc(), BacktestRun.id.desc()),
+            failed_statuses=("failed",),
+        )
 
     def get_failed_backtest_run(self, db: Session, *, run_id: int) -> BacktestRun | None:
         return db.scalar(
@@ -309,3 +336,27 @@ class OperationsOverviewRepository:
     @staticmethod
     def _count_where(db: Session, model: Any, condition: Any) -> int:
         return db.scalar(select(func.count()).select_from(model).where(condition)) or 0
+
+    @staticmethod
+    def _count_latest_failed(
+        db: Session,
+        model: Any,
+        *,
+        partition_by: tuple[Any, ...],
+        order_by: tuple[Any, ...],
+        failed_statuses: tuple[str, ...],
+    ) -> int:
+        ranked = select(
+            model.status.label("status"),
+            func.row_number()
+            .over(partition_by=partition_by, order_by=order_by)
+            .label("recency"),
+        ).subquery()
+        return int(
+            db.scalar(
+                select(func.count())
+                .select_from(ranked)
+                .where(ranked.c.recency == 1, ranked.c.status.in_(failed_statuses))
+            )
+            or 0
+        )
