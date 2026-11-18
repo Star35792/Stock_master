@@ -6,6 +6,7 @@ from app.api.dependencies import DatabaseSession, ResearchDatabaseSession
 from app.backtest.quantile_result import quantile_result_to_read
 from app.config.settings import settings
 from app.portfolio import PortfolioConstraints
+from app.schemas.dividend_scenario import DividendScenarioRead, DividendScenarioRequest
 from app.schemas.price_value import PriceValueRequest
 from app.schemas.price_value_backtest import PriceValueBacktestRequest, PriceValueBacktestResponse
 from app.schemas.price_value_result import PriceValueResult
@@ -26,11 +27,13 @@ from app.schemas.strategy import (
 )
 from app.services import StrategyResearchService
 from app.services.backtest import BacktestDataChangedError
+from app.services.dividend_scenario import DividendScenarioService
 from app.services.price_value_backtest import PriceValueBacktestService
 from app.services.price_value_research import PriceValueResearchService
 from app.services.price_value_screen import PriceValueScreenService
 from app.services.price_value_tracking import PriceValueForwardTrackingService
 from app.services.research_preflight import check_factor_selection
+from app.services.training_diagnostics import build_training_diagnostics_policy
 from app.services.training_factor_selector import build_training_selection_policy
 from app.services.value_investing_screen import ValueInvestingScreenService
 from app.strategies import FactorScoreSpec
@@ -43,6 +46,14 @@ price_value_backtest_service = PriceValueBacktestService()
 price_value_screen_service = PriceValueScreenService()
 price_value_tracking_service = PriceValueForwardTrackingService()
 value_investing_service = ValueInvestingScreenService()
+
+
+@router.post("/cash-dividend-scenario", response_model=DividendScenarioRead)
+def evaluate_cash_dividend_scenario(payload: DividendScenarioRequest) -> DividendScenarioRead:
+    try:
+        return DividendScenarioService().evaluate(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _to_portfolio_constraints(
@@ -409,6 +420,9 @@ def run_rolling_factor_selection_backtests(
                 build_training_selection_policy(payload.selection_policy)
                 if payload.selection_policy
                 else None
+            ),
+            diagnostics_policy=build_training_diagnostics_policy(
+                payload.training_diagnostics_policy
             ),
             quantile_backtest=payload.quantile_backtest,
         )

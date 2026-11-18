@@ -35,6 +35,10 @@
 | 估值第二独立源、TTM PE 补齐、跨源估值对账口径 | [腾讯行情接入：估值的第二独立源与 TTM PE 补齐](relations/20261111-1531-tencent-valuation-source.md) | `aiDoc/data/source-ingestion-policy.md`、`aiDoc/data/quality-validation-and-repair.md` |
 | 后端分层、代码规则 | `aiDoc/modules/backend-layer-rules.md` | 相关 `backend/app/**` 文件 |
 | 前后端能力覆盖、页面与 API 差距 | [前后端能力覆盖与差距分析](plans/20261118-1435-frontend-backend-capability-gap-analysis.md) | `frontend/src/router.ts`、`frontend/src/pages/`、`backend/app/api/router.py` |
+| Hikyuu / NTQ / TickFlow 的代码、研究方法与交互吸收 | [三个本地参考项目吸收方案](plans/20261118-1711-external-project-absorption-plan.md) | `aiDoc/plans/roadmap.md`；方案内候选台账、切片准入与来源摘要 |
+| 信号前缀行为审计、原运行核验与 A2 事件证据合同 | [信号行为审计首片](research/20261118-1746-signal-behavior-audit.md) | `aiDoc/plans/roadmap.md`；因子到信号的范围、状态与资源上限 |
+| 现金分红合成账本、既有运行单/双轴敏感性比较 | [分红情景与敏感性首片](research/20261118-2017-dividend-scenario-and-sensitivity.md) | `aiDoc/plans/roadmap.md`；合成税费/应收口径、固定合同与输入身份、缺失窗口及导出边界 |
+| 训练窗 RankIC 统计诊断、HAC/BH 与旧产物边界 | [训练窗统计诊断首片](research/20261118-2036-training-ic-statistical-diagnostics.md) | [训练窗自动选参计划](plans/20261024-1522-training-window-selection-plan.md)；逐日证据、固定日期网格、声明检验族、容量与不晋级边界 |
 | schema、表、迁移 | `aiDoc/modules/module-index.md` | `aiDoc/modules/schema-plan.md`、`backend/app/database/` 初始化与兼容桥 |
 | 数据导入、质量、修复 | `aiDoc/relations/system-map.md` | `aiDoc/data/*.md` |
 | 因子、研究、回测 | `aiDoc/modules/module-index.md` | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/roadmap.md` |

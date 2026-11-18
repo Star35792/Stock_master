@@ -450,6 +450,13 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
             "and only artifact-bound selections drive the test window"
         ),
     )
+    training_diagnostics_policy: Literal["training_ic_hac_bh_v1"] | None = Field(
+        default=None,
+        description=(
+            "Optional immutable training-window RankIC evidence with lag-1 HAC "
+            "and declared-family BH diagnostics; it never changes selection or qualification"
+        ),
+    )
     quantile_backtest: QuantileBacktestRequest | None = Field(
         default=None,
         description=(
@@ -473,6 +480,15 @@ class RollingFactorSelectionBacktestRequest(BaseModel):
                 "equal_weight_fully_invested with hold_cash_when_no_candidate "
                 "always invests 100%; choose another weighting mode to leave cash"
             )
+        if self.training_diagnostics_policy is not None:
+            if self.selection_policy != "training_ic_v1":
+                raise ValueError(
+                    "training_diagnostics_policy requires selection_policy=training_ic_v1"
+                )
+            if self.training_days > 252:
+                raise ValueError("training diagnostics support at most 252 training days")
+            if len(self.factor_specs) > 32:
+                raise ValueError("training diagnostics support at most 32 factor candidates")
         return self
 
 

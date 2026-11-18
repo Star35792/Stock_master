@@ -28,7 +28,7 @@ note: >-
 - 两者冲突时以 living docs 与代码为准，并按 `aiDoc/README.md` 的同步规则回写时间戳文档的 `note` 或补一份新 ADR。
 - 本文件不复制各文档的结论，只做状态聚合；要读结论请打开原文。
 
-## 现行有效 `status: current`（26 份）
+## 现行有效 `status: current`（28 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -57,6 +57,8 @@ note: >-
 | [`research/20261117-0116-portfolio-drift-coverage.md`](research/20261117-0116-portfolio-drift-coverage.md) | decision | 2026-11-17 | — | — |
 | [`research/20261117-0751-portfolio-plan-schema-compatibility.md`](research/20261117-0751-portfolio-plan-schema-compatibility.md) | decision | 2026-11-17 | — | — |
 | [`research/20261117-0933-portfolio-risk-budget-workflow.md`](research/20261117-0933-portfolio-risk-budget-workflow.md) | decision | 2026-11-17 | — | — |
+| [`research/20261118-2017-dividend-scenario-and-sensitivity.md`](research/20261118-2017-dividend-scenario-and-sensitivity.md) | decision | 2026-11-18 | — | 三项目吸收方案 A2 的合成现金分红账本及 B 的既有运行敏感性比较首片。 不接入真实公司行为，不改写旧运行，不授予 PIT、收益或执行资格。 |
+| [`research/20261118-2036-training-ic-statistical-diagnostics.md`](research/20261118-2036-training-ic-statistical-diagnostics.md) | decision | 2026-11-18 | — | 三项目吸收方案 C 的统计可信度首片：只为新 training_ic_v1 训练产物 当场记录逐日 RankIC 证据并计算固定 lag=1 HAC 与声明候选族 BH； 不回填旧产物，不改变选择、资格或执行。 |
 | [`strategy/20260922-1314-price-value-margin-strategy.md`](strategy/20260922-1314-price-value-margin-strategy.md) | decision | 2026-11-16 | — | 活合同文档，正文按最新版本维护（@v1/@v2 已 retired，@v3 生效），as_of 取最近一次口径核实日。 |
 
 ## 一次性快照 `status: snapshot`（9 份）
@@ -73,7 +75,7 @@ note: >-
 | [`research/20261116-2207-backtest-comparison-acceptance.md`](research/20261116-2207-backtest-comparison-acceptance.md) | evidence | 2026-11-16 | — | — |
 | [`research/20261117-0310-portfolio-plan-discovery-acceptance.md`](research/20261117-0310-portfolio-plan-discovery-acceptance.md) | evidence | 2026-11-17 | — | — |
 
-## 部分被取代 `status: partially_superseded`（22 份）
+## 部分被取代 `status: partially_superseded`（24 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -83,6 +85,7 @@ note: >-
 | [`data/20261027-0118-daily-data-factor-closure.md`](data/20261027-0118-daily-data-factor-closure.md) | evidence | 2026-10-27 | [`relations/20261111-1810-industry-point-in-time-history.md`](relations/20261111-1810-industry-point-in-time-history.md) | 数据→因子闭环链路继续有效；其中行业族按当前标签口径的部分已被时点区间交付取代。 |
 | [`plans/20261021-1708-research-output-maximization-plan.md`](plans/20261021-1708-research-output-maximization-plan.md) | plan | 2026-10-21 | [`plans/20261025-2340-data-backfill-review-brief.md`](plans/20261025-2340-data-backfill-review-brief.md) | 优先级与工作量估算为计划快照，执行事实以补齐复核简报与其后的 ADR 为准。 |
 | [`plans/20261025-2340-data-backfill-review-brief.md`](plans/20261025-2340-data-backfill-review-brief.md) | plan | 2026-10-25 | [`relations/20261111-1810-industry-point-in-time-history.md`](relations/20261111-1810-industry-point-in-time-history.md) | 方案 C 的行业时点部分已于 2026-11-11 落地；ST 历史与指数成分历史序列仍为待决选项。 |
+| [`plans/20261118-1711-external-project-absorption-plan.md`](plans/20261118-1711-external-project-absorption-plan.md) | plan | 2026-11-18 | — | Hikyuu、New Tea Quant、TickFlow 两轮本地源码扫描的吸收方案与证据快照。A1、A2、B 首片及 C 训练窗统计诊断首片已交付；当前状态见取代文档及其引用。其余候选、准入条件和来源证据继续有效，不改变事实源或策略资格。真实公司行为仍 reject，候选内部顺序不替代 roadmap 的正式近期优先级。 |
 | [`relations/20260722-1519-autonomous-agent-team.md`](relations/20260722-1519-autonomous-agent-team.md) | config | 2026-07-22 | [`../AGENTS.md`](../AGENTS.md) | 文中引用的规则真源 AGENT.MD 已降级为兼容入口，协作规则与长期小组口径以仓库根 AGENTS.md 为准；本文保留为历史小组配置。 |
 | [`relations/20260722-1721-tiered-storage-architecture.md`](relations/20260722-1721-tiered-storage-architecture.md) | decision | 2026-07-22 | [`relations/20261023-1925-position-ledger-sqlite.md`](relations/20261023-1925-position-ledger-sqlite.md)、[`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md)、[`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 分层思路仍在位；具体库划分与清理策略由后续三份决策取代。 |
 | [`relations/20261021-1045-storage-split-phase1.md`](relations/20261021-1045-storage-split-phase1.md) | decision | 2026-10-21 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 决策在位，文中的容量与行数数字是当日执行快照。 |
@@ -99,6 +102,7 @@ note: >-
 | [`research/20261116-1546-backtest-run-discovery.md`](research/20261116-1546-backtest-run-discovery.md) | decision | 2026-11-16 | — | — |
 | [`research/20261116-1734-backtest-comparison-curves.md`](research/20261116-1734-backtest-comparison-curves.md) | decision | 2026-11-16 | — | — |
 | [`research/20261117-0129-portfolio-plan-discovery.md`](research/20261117-0129-portfolio-plan-discovery.md) | decision | 2026-11-17 | — | — |
+| [`research/20261118-1746-signal-behavior-audit.md`](research/20261118-1746-signal-behavior-audit.md) | decision | 2026-11-18 | — | 三项目吸收方案 A1 的首个前后端实现：有界内存行为审计器及因子选股运行适配器。 只核验 factor_frame 到 signal 的抽样稳定性，不认证历史 PIT、收益或公司行为会计。 A1 已交付事实与范围继续有效。A2 仅有合同、B–H 全部待实施的状态被后续文档部分取代： 已新增 A2 合成工具和 B 比较首片，真实事件引擎与其余能力仍待准入。 |
 
 ## 已撤销 `status: withdrawn`（1 份）
 
@@ -106,4 +110,4 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`relations/20261013-2207-storage-diagnosis-and-plan.md`](relations/20261013-2207-storage-diagnosis-and-plan.md) | plan | 2026-10-13 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。 |
 
-合计 58 份带时间戳文档。
+合计 62 份带时间戳文档。

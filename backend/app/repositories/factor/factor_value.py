@@ -18,18 +18,24 @@ class FactorValueRepository:
         factor_version: str,
         start_date: date,
         end_date: date,
+        limit: int | None = None,
     ) -> list[FactorValue]:
-        return list(
-            db.scalars(
-                select(FactorValue)
-                .where(
-                    FactorValue.factor_name == factor_name,
-                    FactorValue.factor_version == factor_version,
-                    FactorValue.trade_date >= start_date,
-                    FactorValue.trade_date <= end_date,
-                )
-                .order_by(FactorValue.trade_date, FactorValue.symbol)
+        statement = (
+            select(FactorValue)
+            .where(
+                FactorValue.factor_name == factor_name,
+                FactorValue.factor_version == factor_version,
+                FactorValue.trade_date >= start_date,
+                FactorValue.trade_date <= end_date,
             )
+            .order_by(FactorValue.trade_date, FactorValue.symbol)
+        )
+        if limit is not None:
+            if limit < 1:
+                raise ValueError("factor read limit must be positive")
+            statement = statement.limit(limit)
+        return list(
+            db.scalars(statement)
         )
 
     def upsert_value(

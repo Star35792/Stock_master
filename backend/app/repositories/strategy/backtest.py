@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.backtest import BacktestResult
@@ -11,10 +11,39 @@ from app.models.strategy import (
     BacktestPosition,
     BacktestRun,
     BacktestTradeRecord,
+    TrainingArtifact,
 )
 
 
 class BacktestRepository:
+    def training_diagnostics_header(self, db: Session, *, run_id: int) -> dict | None:
+        """Bound artifact JSON materialization before serving training diagnostics."""
+        row = db.execute(
+            select(
+                BacktestRun.id.label("run_id"),
+                BacktestRun.training_artifact_id,
+                func.length(cast(TrainingArtifact.training_input_snapshot, String)).label(
+                    "artifact_snapshot_chars"
+                ),
+            )
+            .outerjoin(
+                TrainingArtifact,
+                TrainingArtifact.id == BacktestRun.training_artifact_id,
+            )
+            .where(BacktestRun.id == run_id)
+        ).mappings().first()
+        return dict(row) if row else None
+
+    def signal_audit_header(self, db: Session, *, run_id: int) -> dict | None:
+        """Inspect JSON size before materializing a potentially large signal contract."""
+        row = db.execute(
+            select(
+                BacktestRun.id,
+                func.length(cast(BacktestRun.parameters, String)).label("parameter_chars"),
+            ).where(BacktestRun.id == run_id)
+        ).mappings().first()
+        return dict(row) if row else None
+
     def list_equity_dates_by_run_ids(
         self, db: Session, *, run_ids: list[int]
     ) -> dict[int, tuple[date, ...]]:

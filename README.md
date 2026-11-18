@@ -17,7 +17,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 - V3 因子工厂：基础价量、财务、估值、行业、资金流、拥挤度、情绪、宏观、政策、盈利预期与复合因子。
 - V4 策略与回测：单策略研究合同、可复现回测、滚动窗口与样本外报告。
 - V5 组合、风控与持仓推演：组合草案、风险预算、paper 账户净值快照、正式风控评估、人工确认与模拟执行。
-- V6 可视化与运维：Vue3 工作台 + 运维概览/告警/失败重跑计划接口。
+- V6 可视化与运维：Vue3 工作台 + 运维概览/告警/失败定位，以及带预检、确认、幂等、后台进度和复查的人工处理动作。
 
 核心工程原则：
 
@@ -154,7 +154,7 @@ curl http://127.0.0.1:8000/health
 路由文件：`strategy_research.py`、`backtests.py`
 
 - `POST /api/v1/strategy-research/rolling-windows`
-- `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。可选 `quantile_backtest` 在每个测试窗内做分层回测。返回 `RollingBacktestResult`：各窗 `windows` + 跨窗拼接的 `combined` 组合净收益曲线（重叠窗 fail-closed 拒绝拼接、各窗仍独立可用）+ 非可交易声明）
+- `POST /api/v1/strategy-research/rolling-backtests`（可选 `selection_policy: "training_ic_v1"` 启用训练窗自动选参——逐窗按预注册 RankIC 门槛从候选池选因子/方向并写入 `training_artifact`，测试窗纯样本外执行；见 `aiDoc/plans/20261024-1522-training-window-selection-plan.md`。叠加 `training_diagnostics_policy: "training_ic_hac_bh_v1"` 时，仅为新产物当场记录逐日 RankIC、固定 lag=1 HAC 与声明候选族 BH 诊断，不改变选择或资格；见 `aiDoc/research/20261118-2036-training-ic-statistical-diagnostics.md`。可选 `quantile_backtest` 在每个测试窗内做分层回测。返回 `RollingBacktestResult`：各窗 `windows` + 跨窗拼接的 `combined` 组合净收益曲线（重叠窗 fail-closed 拒绝拼接、各窗仍独立可用）+ 非可交易声明）
 - `POST /api/v1/strategy-research/factor-selection/backtests`（支持 `rebalance_rule: daily|weekly|monthly|every_n_trading_days` + `rebalance_interval`，以及可选 `portfolio_constraints`：单标的上限/行业上限/现金留存率/证券类型预算，经 PortfolioBuilder 与 paper 链路同源。可选 `quantile_backtest`：`split_factor_name/version` + `n_layers`(2–20) + `max_assets_per_layer` 按 split 因子在决策日横截面分桶；当前仅接受 `weighting_mode=equal_weight_fully_invested`，其他模式 fail-fast，逐桶等权多头跑净收益曲线与 top–bottom 统计收益差；换层以 `explicit_zero_exit_v2` 显式退出旧成员，分层分支独立读取并双快照校验全量证券行情，结果内嵌主运行 `parameters.quantile_backtest` / `quantile_data_snapshot` 并随响应返回 `quantile`）
 - `POST /api/v1/strategy-research/factor-selection/backtests/batch`（单项成功即提交独立研究库，失败项回滚后继续；`code_version=auto` 由服务端代码摘要解析，`data_version=auto` 在运行成功后由实际消费的行情、因子、基准摘要解析。工作台默认使用 `a_share_cost_v2`，股票印花税可按成交日期分段，ETF 不套用股票税；旧 `v1` 合同保留）
 - `POST /api/v1/strategy-research/factor-selection/backtests/preflight`（与单次因子选股回测使用同一请求体，只读预演因子、调仓日、可信未复权行情、公司行为及日频引擎；返回检查时间、输入 SHA-256、`runnable_now`、`evidence_qualified` 与逐项原因。预检不创建研究运行，正式运行仍重新校验；当前不覆盖 rolling 与分层附加结果）
@@ -177,6 +177,10 @@ curl http://127.0.0.1:8000/health
 - 比较预览的表格支持 2–20 项；净值与回撤曲线一次展示基准和一项可切换的候选，按共同交易日核对完整净值并从初始资金归一化。不能绘制时会说明原因，曲线不取代服务端指标或策略合同复核。
 - 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐；新运行使用经复核的运行时基准快照，返回 `input_source=run_snapshot`；旧运行返回 `current_market_unversioned`，其结果可能随可信行情修订变化。缺失返回 422）、`POST /api/v1/backtests/runs/compare-preview`（2–20 项只读探索预览，首项为基准；逐项返回合同、指标来源、有限策略合同字段 `strategy_contract` 及相对基准的 `strategy_differences`、`delta_status`/`delta_reasons`；基础口径、指标代码版本和实际净值日期一致时返回收益、回撤、夏普差值；不能据此认定策略可比或做因果归因）、`POST /api/v1/backtests/runs/compare`（严格比较）、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
 - 回测最终持仓（组合草案预填源）：`GET /api/v1/backtests/runs/{run_id}/final-holdings`
+- 信号行为审计：`POST /api/v1/backtests/runs/{run_id}/signal-audit`，回测详情页手动触发，只读内存返回。核对代码、因子摘要与完整原信号后，抽查截断/扰动未来因子是否改变过去信号；显示抽样通过、差异、不可核验或异常。仅覆盖因子到信号，不授予历史 PIT/收益资格；旧代码或缺证据运行不可核验，报告不落库。
+- 训练窗统计诊断：`GET /api/v1/backtests/runs/{run_id}/training-diagnostics`，回测详情页按需只读新训练产物中的逐日 RankIC 证据、lag-1 HAC 双侧近似与同窗声明候选族 BH。旧产物明确 `not_recorded`，不按当前数据回填；p/q 值不排序冠军、不代表未来盈利概率，也不改变 `training_artifact_verified=false`。
+- 现金分红合成账本：`POST /api/v1/strategy-research/cash-dividend-scenario`，研究首页手动输入未复权合成价格、给定成交和固定假设税率；登记资格、除息应收与到账现金分开，清仓保留应收。仅内存研究情景，正式回测公司行为政策继续 `reject`。
+- 参数敏感性比较：`POST /api/v1/backtests/runs/sensitivity`，回测列表手动选择 2–64 个既有运行和一至两个扫描轴。只读已保存绩效，展示单轴散点、双轴缺格热力图与跨窗描述统计，失败/缺失/重复保留；合同或组成摘要不齐时仅作探索性，不补算、不排名，支持事后记录 JSON 导出。详细边界见[分红情景与敏感性首片](aiDoc/research/20261118-2017-dividend-scenario-and-sensitivity.md)。
 
 ### 组合、风控与模拟盘
 
@@ -200,6 +204,11 @@ curl http://127.0.0.1:8000/health
 - `GET /api/v1/operations/failures`
 - `GET /api/v1/operations/failures/{failure_type}/{failure_id}`
 - `GET /api/v1/operations/failures/{failure_type}/{failure_id}/rerun-plan`
+- `POST /api/v1/operations/actions/preview`
+- `POST /api/v1/operations/actions`
+- `GET /api/v1/operations/actions/{action_id}`
+
+人工处理动作当前只开放三类受控能力：最新可信日线同步、qfq 日线缺口回填、活跃因子画像重建。动作先预检，再由用户确认；`POST /actions` 使用幂等键创建 `metadata.job_log` 父任务，后台执行继续复用现有 Service、进程租约和单进程数据库任务锁。缺口回填严格执行 `raw -> market -> 复查`，来源冲突不强行覆盖；只有复查确认问题关闭时，才把关联质量问题标记为 `fixed`。本机单用户部署不引入账户权限系统，人工确认由前端显式完成。
 
 新建任务日志在 `metadata._job_lease` 中绑定本机进程 OS 租约。API 和长期调度器启动时只对“租约锁已释放”的 `running` 记录自动收敛为 `failed`，并固定标记 `completion_status=unknown`；这只证明持有进程已经退出，不表示任务没有产生部分副作用，也不会自动删除或回滚 raw、release、WAL 或研究产物。活锁、未知租约和旧版无租约记录一律保留，不按运行时长或 PID 猜测。占槽恢复只在本进程会话没有待写事务时执行，绝不提前提交调用方业务写入。
 
@@ -297,7 +306,7 @@ A：仓库当前没有 Alembic 迁移目录；完整 pytest 包含 `tests/test_s
 - **不连接实盘**：本项目只用于选股研究与持仓管理，不接入券商、不做自动化交易、不发送真实订单；真实账户只读同步、券商回报对账与受控交易均不在项目范围内。所有写操作只落在本地模拟推演账户。
 - **模拟执行采用确定性 full-fill paper 模型**：使用固定 `a_share_cost_v1` 费率与 2 bps 滑点，并检查执行日可信行情的涨跌停/停牌等约束；不模拟市场冲击、撮合队列或部分成交，也不还原逐日历史真实费率。
 - **价值初筛不构成历史时点认证**：东方财富接口不提供可证明的供应商 as-of 时点，报告固定 `pit_verified=false`，不能用于历史全市场回测收益或自动交易。
-- **滚动回测尚非完整自动研究验证**：支持专用滚动入口逐测试窗执行，并可用 `selection_policy=training_ic_v1` 在训练窗自动选择因子与方向，保存不可变训练产物并绑定运行；合同仍为 `training_artifact_verified=false`。参数敏感性与 champion/challenger 晋级尚未形成自动闭环，不能据此宣称完整策略验证或全自动 walk-forward。重叠测试窗拒绝拼接，跨窗不结转持仓，拼接曲线仅为研究统计量。
+- **滚动回测尚非完整自动研究验证**：支持专用滚动入口逐测试窗执行，并可用 `selection_policy=training_ic_v1` 在训练窗自动选择因子与方向，保存不可变训练产物并绑定运行；新产物可选记录训练窗 HAC/BH 统计诊断，但合同仍为 `training_artifact_verified=false`。自动参数扫描、训练内相关去重、嵌套验证、完整尝试历史与 champion/challenger 晋级尚未形成闭环，不能据此宣称完整策略验证或全自动 walk-forward。重叠测试窗拒绝拼接，跨窗不结转持仓，拼接曲线仅为研究统计量。
 - **公司行为跨区间在事件会计落地前会被明确拒绝**；遇到公司行为、历史 ST/状态未知或缺失可信行情/涨跌停数据时，价格价值回测会拒绝运行。
 - **温层已接入指定生产链路**：研究默认走温层读取；`curated/prices_qfq` 按开关接入 `daily_loop` 暂存构建、因子认证与 release 发布。其余 curated 数据集未因此自动接入；代码默认与 `.env.example` 的开关值不同，以运行配置为准。
 - **模拟盘回撤口径**为“自监控开始以来”，不是完整历史回撤。

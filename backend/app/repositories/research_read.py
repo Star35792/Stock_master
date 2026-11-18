@@ -212,6 +212,7 @@ class WarmResearchReadRepository:
         factor_version: str,
         start_date: date,
         end_date: date,
+        limit: int | None = None,
     ) -> list[SimpleNamespace]:
         """Return factor rows shaped like ``FactorValueRepository`` output.
 
@@ -219,13 +220,19 @@ class WarmResearchReadRepository:
         the research contract hashes a normalized slice in which row order is
         part of reproducibility.
         """
-        rows = self._con.execute(
+        sql = (
             "SELECT trade_date, symbol, value, run_id FROM factor.factor_value "
             "WHERE factor_name = ? AND factor_version = ? "
             "AND trade_date BETWEEN ? AND ? "
-            "ORDER BY trade_date, symbol",
-            [factor_name, factor_version, start_date, end_date],
-        ).fetchall()
+            "ORDER BY trade_date, symbol"
+        )
+        parameters: list[Any] = [factor_name, factor_version, start_date, end_date]
+        if limit is not None:
+            if limit < 1:
+                raise ValueError("factor read limit must be positive")
+            sql += " LIMIT ?"
+            parameters.append(limit)
+        rows = self._con.execute(sql, parameters).fetchall()
         return [
             SimpleNamespace(
                 trade_date=record[0],

@@ -5,6 +5,7 @@
 ## 稳定事实
 
 - 用户希望 vibe coding 时由 AI 主动维护产品、架构、代码规则、计划和记忆文档，不要让用户手动追文档。
+- 用户希望调试前端时同时启动后端，通过真实 FastAPI 接口联调；隔离样本与接口测试可补充反例，不能只启前端 mock 后就声称前后端验收完成。
 - 项目文档采用分层嵌套的 `AGENTS.md` 作为 AI 协作规则唯一真源（根 `AGENTS.md` 承载跨模块规则，`backend/`、`frontend/`、`scripts/`、`libs/` 各自的 `AGENTS.md` 承载模块规则，就近优先），`AGENT.MD` 仅为兼容入口、不承载规则；`aiDoc/` 仍是唯一项目文档目录，同时承载正式设计和轻量 reference。
 - 当前项目已经进入较大体量阶段，默认应通过 reference 精确读取相关文档，避免每次全量读取。
 - 日级数据→因子闭环由 `app/scheduler/daily_loop.py` 编排：行情同步完成后，按开关暂存构建 `curated/prices_qfq`，因子绑定暂存输入计算，经认证后发布并激活 market/curated release；失败不发布，任务留痕于物理 `metadata.job_log`（业务域称 system）。存储细节见 [系统关系](../relations/system-map.md)。

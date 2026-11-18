@@ -31,6 +31,7 @@ from app.services.rolling_backtest import (
     RollingBacktestResult,
     RollingBacktestWindowResult,
 )
+from app.services.training_diagnostics import TrainingDiagnosticsPolicy
 from app.services.training_factor_selector import (
     TrainingSelectionPolicy,
     TrainingSelectionResult,
@@ -125,16 +126,45 @@ class StrategyResearchService:
             factor_version: str,
             start_date: date,
             end_date: date,
+            limit: int | None = None,
         ) -> Any:
+            options = {"limit": limit} if limit is not None else {}
             return self.factor_value_repository.list_for_cross_section(
                 db,
                 factor_name=factor_name,
                 factor_version=factor_version,
                 start_date=start_date,
                 end_date=end_date,
+                **options,
             )
 
         yield read_factor_rows
+
+    def load_signal_audit_frame(
+        self,
+        db: Session,
+        *,
+        factor_specs: list[FactorScoreSpec],
+        start_date: date,
+        end_date: date,
+        max_rows: int,
+    ) -> StrategyFactorFrame:
+        """Read at most cap+1 rows in total, on both trusted research paths."""
+        if max_rows < 1:
+            raise ValueError("factor read limit must be positive")
+        remaining = max_rows
+        factor_rows = {}
+        with self._factor_read(db) as read:
+            for spec in factor_specs:
+                rows = read(
+                    factor_name=spec.factor_name, factor_version=spec.factor_version,
+                    start_date=start_date, end_date=end_date, limit=remaining + 1,
+                )
+                if len(rows) > remaining:
+                    raise ValueError("输入超过 20000 行审计上限。")
+                remaining -= len(rows)
+                factor_rows[spec] = self._normalize_factor_rows(rows)
+        return StrategyFactorFrame.from_rows(as_of_date=end_date, rows_by_factor=factor_rows)
 
     def _load_qfq_closes(
         self,
@@ -711,6 +741,7 @@ class StrategyResearchService:
         exchange_fee_rate: Decimal | None = None,
         research_db: Session | None = None,
         selection_policy: TrainingSelectionPolicy | None = None,
+        diagnostics_policy: TrainingDiagnosticsPolicy | None = None,
         quantile_backtest: "QuantileBacktestRequest | None" = None,
     ) -> "RollingBacktestResult":
         if rebalance_rule != "daily" and exchange != "SH":
@@ -730,6 +761,13 @@ class StrategyResearchService:
         normalized_specs = self._normalize_factor_specs(factor_specs)
         config_hash = (
             selection_policy.config_hash(normalized_specs) if selection_policy is not None else None
+        )
+        if diagnostics_policy is not None and selection_policy is None:
+            raise ValueError("training diagnostics require a training selection policy")
+        diagnostics_config_hash = (
+            diagnostics_policy.config_hash(normalized_specs)
+            if diagnostics_policy is not None
+            else None
         )
         results: list[RollingBacktestWindowResult] = []
         for window in windows:
@@ -770,14 +808,24 @@ class StrategyResearchService:
                     training_start_date=window.training_start_date,
                     training_end_date=window.training_end_date,
                     price_source=price_source,
+                    diagnostics_policy=diagnostics_policy,
                 )
                 selection_summary = selection_result.summary()
+                run_selection_summary = dict(selection_summary)
+                recorded_diagnostics = run_selection_summary.pop("diagnostics", None)
+                if isinstance(recorded_diagnostics, dict):
+                    run_selection_summary["diagnostics_ref"] = {
+                        "contract_version": recorded_diagnostics.get("contract_version"),
+                        "status": recorded_diagnostics.get("status"),
+                        "evidence_sha256": recorded_diagnostics.get("evidence_sha256"),
+                        "artifact_bound": True,
+                    }
                 selection = {
                     "policy": {
                         **selection_policy.to_snapshot(),
                         "config_hash": selection_result.config_hash,
                     },
-                    "result": selection_summary,
+                    "result": run_selection_summary,
                 }
                 effective_specs = self._normalize_factor_specs(selection_result.selected_specs)
                 # Different selection policies or candidate pools must not
@@ -790,6 +838,15 @@ class StrategyResearchService:
                         )
                     }
                 )
+                if diagnostics_policy is not None:
+                    artifact_window = artifact_window.model_copy(
+                        update={
+                            "window_id": (
+                                f"{artifact_window.window_id}|diag-"
+                                f"{diagnostics_policy.version}-{diagnostics_config_hash}"
+                            )
+                        }
+                    )
             symbols = {row.symbol for rows in training_rows.values() for row in rows}
             security_types = self.security_repository.get_security_types(db, symbols)
             artifact = self._get_or_create_training_artifact(
@@ -803,6 +860,15 @@ class StrategyResearchService:
                 data_version=data_version,
                 selection_summary=selection_summary,
             )
+            if selection is not None:
+                diagnostics_ref = selection["result"].get("diagnostics_ref")
+                if isinstance(diagnostics_ref, dict):
+                    diagnostics_ref.update(
+                        {
+                            "training_artifact_id": artifact.id,
+                            "artifact_hash": artifact.artifact_hash,
+                        }
+                    )
             result = self._run_single_factor_selection(
                 db,
                 name=f"{name}:{window.index}",

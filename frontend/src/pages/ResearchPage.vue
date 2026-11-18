@@ -17,6 +17,7 @@ import { createResearchWorkbench } from "../composables/researchWorkbench";
 import type { ResearchRunSummary } from "../researchWorkflowApi";
 import { useResearchStore } from "../stores/research";
 import EquityChart from "./components/EquityChart.vue";
+import DividendScenarioPanel from "./components/DividendScenarioPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -266,6 +267,7 @@ onBeforeUnmount(dispose);
         <p class="research-caveat">聚合页只复用后端既有研究事实，不认证 PIT、样本外稳定性或可交易性。进入组合草案后仍须经过风险预算、就绪核对、正式风险评估和人工确认。</p>
       </template>
     </section>
+    <DividendScenarioPanel />
   </main>
 </template>
 

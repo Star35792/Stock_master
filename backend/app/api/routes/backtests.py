@@ -10,6 +10,8 @@ from app.schemas.research_validation import (
     ResearchValidationReportRead,
     ResearchValidationReportRequest,
 )
+from app.schemas.sensitivity import SensitivityRead, SensitivityRequest
+from app.schemas.signal_audit import SignalAuditRead
 from app.schemas.strategy import (
     BacktestBenchmarkRead,
     BacktestComparisonItem,
@@ -25,12 +27,57 @@ from app.schemas.strategy import (
     BacktestRunListItemRead,
     BacktestTradeRead,
 )
+from app.schemas.training_diagnostics import TrainingDiagnosticsRead
 from app.services import BacktestQueryService
 from app.services.research_validation import ResearchValidationReportService
+from app.services.sensitivity import SensitivityService
+from app.services.signal_audit import SignalAuditBusy, SignalAuditNotFound, SignalAuditService
+from app.services.training_diagnostics_report import (
+    TrainingDiagnosticsReportService,
+    TrainingDiagnosticsRunNotFound,
+)
+from app.utils.duckdb_write_lock import DuckDbWriteLockTimeout
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 service = BacktestQueryService()
 validation_report_service = ResearchValidationReportService()
+signal_audit_service = SignalAuditService()
+sensitivity_service = SensitivityService()
+training_diagnostics_service = TrainingDiagnosticsReportService()
+
+
+@router.post("/runs/sensitivity", response_model=SensitivityRead)
+def compare_sensitivity(payload: SensitivityRequest) -> SensitivityRead:
+    try:
+        return sensitivity_service.evaluate(payload)
+    except DuckDbWriteLockTimeout as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/signal-audit", response_model=SignalAuditRead)
+def audit_backtest_signals(run_id: int, db: DatabaseSession) -> SignalAuditRead:
+    try:
+        return signal_audit_service.build_report(db, run_id=run_id)
+    except SignalAuditNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (SignalAuditBusy, DuckDbWriteLockTimeout) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/runs/{run_id}/training-diagnostics",
+    response_model=TrainingDiagnosticsRead,
+)
+def get_training_diagnostics(
+    run_id: int,
+    research_db: ResearchDatabaseSession,
+) -> TrainingDiagnosticsRead:
+    try:
+        return training_diagnostics_service.get_report(research_db, run_id=run_id)
+    except TrainingDiagnosticsRunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post(

@@ -24,11 +24,17 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Literal
 
 from app.factors import rank_ic
+from app.services.training_diagnostics import (
+    DailyRankICEvidence,
+    TrainingDiagnosticsPolicy,
+    build_training_diagnostics,
+)
 from app.strategies import FactorScoreSpec
 
 POLICY_VERSION = "training_ic_v1"
@@ -154,9 +160,10 @@ class TrainingSelectionResult:
     stats: list[FactorSelectionStats] = field(default_factory=list)
     dropped_candidates: list[dict[str, str]] = field(default_factory=list)
     price_source: dict[str, str] = field(default_factory=dict)
+    diagnostics: dict[str, object] | None = None
 
     def summary(self) -> dict[str, object]:
-        return {
+        summary = {
             "strategy_id": self.policy.strategy_id,
             "config_hash": self.config_hash,
             "training_start_date": self.training_start_date.isoformat(),
@@ -174,6 +181,9 @@ class TrainingSelectionResult:
             "dropped_candidates": list(self.dropped_candidates),
             "price_source": dict(self.price_source),
         }
+        if self.diagnostics is not None:
+            summary["diagnostics"] = self.diagnostics
+        return summary
 
 
 def _quantize(value: Decimal | None) -> Decimal | None:
@@ -192,6 +202,7 @@ def select_training_factors(
     training_start_date: object,
     training_end_date: object,
     price_source: dict[str, str] | None = None,
+    diagnostics_policy: TrainingDiagnosticsPolicy | None = None,
 ) -> TrainingSelectionResult:
     """Score every candidate on the training window and apply the policy gate.
 
@@ -219,6 +230,7 @@ def select_training_factors(
 
     stats: list[FactorSelectionStats] = []
     dropped: list[dict[str, str]] = []
+    evidence_by_identity: dict[tuple[str, str], list[DailyRankICEvidence]] = {}
     specs_by_identity: dict[tuple[str, str], FactorScoreSpec] = {}
     for spec in candidates:
         specs_by_identity[(spec.factor_name, spec.factor_version)] = spec
@@ -231,20 +243,51 @@ def select_training_factors(
                     "reason": "no_factor_values_in_training_window",
                 }
             )
+            if diagnostics_policy is not None:
+                evidence_by_identity[(spec.factor_name, spec.factor_version)] = [
+                    DailyRankICEvidence(
+                        trade_date=signal_date,
+                        rank_ic=None,
+                        common_symbol_count=0,
+                        status="no_factor_values",
+                    )
+                    for signal_date in training_open_dates[:-1]
+                    if isinstance(signal_date, date)
+                ]
             continue
         values_by_date: dict[object, dict[str, Decimal]] = {}
         for row in rows:
             values_by_date.setdefault(row.trade_date, {})[row.symbol] = row.value
 
         daily_ics: list[Decimal] = []
+        daily_evidence: list[DailyRankICEvidence] = []
         for signal_date in training_open_dates[:-1]:
             factor_values = values_by_date.get(signal_date)
             forward_returns = forward_returns_by_date.get(signal_date, {})
             if not factor_values:
+                if diagnostics_policy is not None and isinstance(signal_date, date):
+                    daily_evidence.append(
+                        DailyRankICEvidence(signal_date, None, 0, "no_factor_values")
+                    )
                 continue
+            common_count = len(set(factor_values) & set(forward_returns))
             daily_ic = rank_ic.rank_information_coefficient(factor_values, forward_returns)
             if daily_ic is not None:
                 daily_ics.append(daily_ic)
+                status = "recorded"
+            elif not forward_returns:
+                status = "missing_forward_prices"
+            elif common_count < 2:
+                status = "insufficient_pairs"
+            else:
+                status = "zero_dispersion"
+            if diagnostics_policy is not None and isinstance(signal_date, date):
+                daily_evidence.append(
+                    DailyRankICEvidence(signal_date, daily_ic, common_count, status)
+                )
+
+        if diagnostics_policy is not None:
+            evidence_by_identity[(spec.factor_name, spec.factor_version)] = daily_evidence
 
         mean_ic = _quantize(rank_ic.mean(daily_ics))
         ic_ir = _quantize(
@@ -324,6 +367,21 @@ def select_training_factors(
                 higher_is_better=bool(stat.direction_higher_is_better),
             )
         )
+    diagnostics = None
+    if diagnostics_policy is not None:
+        eligible_dates = [
+            value for value in training_open_dates[:-1] if isinstance(value, date)
+        ]
+        price_dates = [value for value in training_open_dates if isinstance(value, date)]
+        diagnostics = build_training_diagnostics(
+            policy=diagnostics_policy,
+            candidates=candidates,
+            eligible_dates=eligible_dates,
+            price_dates=price_dates,
+            evidence_by_identity=evidence_by_identity,
+            qfq_closes=qfq_closes,
+            price_source=dict(price_source or {}),
+        )
     return TrainingSelectionResult(
         policy=policy,
         config_hash=policy.config_hash(candidates),
@@ -334,6 +392,7 @@ def select_training_factors(
         stats=stats,
         dropped_candidates=dropped,
         price_source=dict(price_source or {}),
+        diagnostics=diagnostics,
     )
 
 
