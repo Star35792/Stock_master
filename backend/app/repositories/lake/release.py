@@ -26,23 +26,64 @@ class ReleaseRepository:
     ) -> Release:
         release = self.get_by_release_id(db, release_id=release_id)
         if release is None:
-            release = Release(release_id=release_id, dataset=dataset)
+            release = Release(
+                release_id=release_id,
+                dataset=dataset,
+                schema_version=schema_version,
+                min_date=min_date,
+                max_date=max_date,
+                row_count=row_count,
+                checksum=checksum,
+                parent_release_id=parent_release_id,
+                code_version=code_version,
+                quality_status=quality_status,
+                metadata_=metadata,
+            )
             db.add(release)
-        elif release.dataset != dataset or release.checksum != checksum:
-            raise ValueError(f"release_id collision: {release_id}")
-
-        release.schema_version = schema_version
-        release.min_date = min_date
-        release.max_date = max_date
-        release.row_count = row_count
-        release.checksum = checksum
-        release.parent_release_id = parent_release_id
-        release.code_version = code_version
-        release.metadata_ = metadata
-        if not release.is_active:
-            release.quality_status = quality_status
+        else:
+            if not self.matches_immutable_facts(
+                release,
+                dataset=dataset,
+                schema_version=schema_version,
+                min_date=min_date,
+                max_date=max_date,
+                row_count=row_count,
+                checksum=checksum,
+                parent_release_id=parent_release_id,
+                code_version=code_version,
+                metadata=metadata,
+            ):
+                raise ValueError(f"release_id collision or immutable fact mismatch: {release_id}")
+            if release.quality_status == "rejected":
+                raise ValueError(f"rejected release cannot be reused: {release_id}")
         db.flush()
         return release
+
+    @staticmethod
+    def matches_immutable_facts(
+        release: Release,
+        *,
+        dataset: str,
+        schema_version: str,
+        min_date: date | None,
+        max_date: date | None,
+        row_count: int,
+        checksum: str,
+        parent_release_id: str | None,
+        code_version: str,
+        metadata: dict[str, Any] | None,
+    ) -> bool:
+        return (
+            release.dataset == dataset
+            and release.schema_version == schema_version
+            and release.min_date == min_date
+            and release.max_date == max_date
+            and release.row_count == row_count
+            and release.checksum == checksum
+            and release.parent_release_id == parent_release_id
+            and release.code_version == code_version
+            and release.metadata_ == metadata
+        )
 
     def get_active(self, db: Session, *, dataset: str) -> Release | None:
         return db.scalar(
@@ -59,6 +100,8 @@ class ReleaseRepository:
         release = self.get_by_release_id(db, release_id=release_id)
         if release is None:
             raise ValueError(f"release not found: {release_id}")
+        if release.quality_status == "rejected":
+            raise ValueError(f"rejected release cannot be activated: {release_id}")
         db.execute(
             update(Release)
             .where(Release.dataset == release.dataset, Release.is_active.is_(True))

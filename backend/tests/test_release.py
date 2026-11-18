@@ -1,7 +1,9 @@
+import hashlib
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
@@ -25,6 +27,10 @@ def _result() -> SimpleNamespace:
         min_date="2026-01-05",
         max_date="2026-01-07",
     )
+
+
+def _legacy_id(dataset: str, checksum: str) -> str:
+    return hashlib.sha256(f"{dataset}|{checksum}".encode()).hexdigest()[:16]
 
 
 def test_release_idempotent() -> None:
@@ -51,10 +57,165 @@ def test_release_idempotent() -> None:
 
         assert first.release_id == second.release_id
         assert first.release_id == ReleaseService.release_id_hash(
-            "curated.prices_qfq", "a" * 64
+            dataset="curated.prices_qfq",
+            checksum="a" * 64,
+            schema_version="v1",
+            min_date=date(2026, 1, 5),
+            max_date=date(2026, 1, 7),
+            row_count=3,
+            parent_release_id="parent",
+            code_version="test",
         )
         assert len(list(db.scalars(select(Release)))) == 1
         assert first.min_date == date(2026, 1, 5)
+
+
+def test_same_content_with_changed_lineage_keeps_both_release_facts() -> None:
+    factory = _session_factory()
+    service = ReleaseService()
+    with factory() as db:
+        first = service.build_release(
+            db,
+            dataset="curated.prices_qfq",
+            curate_result=_result(),
+            checksum="a" * 64,
+            parent_release_id="parent-one",
+            code_version="one",
+            metadata={"files": ["one"]},
+        )
+        first_id = first.release_id
+        second = service.build_release(
+            db,
+            dataset="curated.prices_qfq",
+            curate_result=_result(),
+            checksum="a" * 64,
+            parent_release_id="parent-two",
+            code_version="two",
+            metadata={"files": ["one"]},
+        )
+        db.commit()
+
+        assert second.release_id != first_id
+        assert first.parent_release_id == "parent-one"
+        assert first.code_version == "one"
+        assert len(list(db.scalars(select(Release)))) == 2
+
+
+def test_existing_release_cannot_be_rewritten_or_revived_after_rejection() -> None:
+    factory = _session_factory()
+    repository = ReleaseRepository()
+    with factory() as db:
+        release = ReleaseService().build_release(
+            db,
+            dataset="curated.prices_qfq",
+            curate_result=_result(),
+            checksum="a" * 64,
+            parent_release_id="parent",
+            code_version="one",
+        )
+        db.commit()
+        with pytest.raises(ValueError, match="immutable fact mismatch"):
+            repository.create(
+                db,
+                release_id=release.release_id,
+                dataset="curated.prices_qfq",
+                schema_version="v1",
+                min_date=date(2026, 1, 5),
+                max_date=date(2026, 1, 7),
+                row_count=3,
+                checksum="a" * 64,
+                parent_release_id="different-parent",
+                code_version="one",
+                quality_status="pending",
+            )
+        release.quality_status = "rejected"
+        db.commit()
+        with pytest.raises(ValueError, match="rejected release cannot be reused"):
+            ReleaseService().build_release(
+                db,
+                dataset="curated.prices_qfq",
+                curate_result=_result(),
+                checksum="a" * 64,
+                parent_release_id="parent",
+                code_version="one",
+            )
+        with pytest.raises(ValueError, match="rejected release cannot be activated"):
+            repository.activate(db, release_id=release.release_id)
+
+
+def test_legacy_short_id_remains_referenced_when_new_identity_is_published() -> None:
+    factory = _session_factory()
+    with factory() as db:
+        legacy = Release(
+            release_id=_legacy_id("curated.prices_qfq", "a" * 64),
+            dataset="curated.prices_qfq",
+            schema_version="v1",
+            min_date=date(2026, 1, 5),
+            max_date=date(2026, 1, 7),
+            row_count=3,
+            checksum="a" * 64,
+            parent_release_id="old-parent",
+            code_version="old-code",
+            quality_status="trusted",
+            is_active=True,
+            metadata_={"files": []},
+        )
+        db.add(legacy)
+        db.commit()
+
+        new = ReleaseService().build_release(
+            db,
+            dataset="curated.prices_qfq",
+            curate_result=_result(),
+            checksum="a" * 64,
+            parent_release_id="new-parent",
+            code_version="new-code",
+            metadata={"files": []},
+        )
+        db.commit()
+
+        assert len(new.release_id) == 64
+        assert new.release_id != legacy.release_id
+        assert legacy.parent_release_id == "old-parent"
+        assert legacy.code_version == "old-code"
+        assert legacy.is_active is True
+        assert len(list(db.scalars(select(Release)))) == 2
+
+
+def test_exact_legacy_release_is_reused_after_upgrade() -> None:
+    factory = _session_factory()
+    with factory() as db:
+        legacy = Release(
+            release_id=_legacy_id("curated.prices_qfq", "a" * 64),
+            dataset="curated.prices_qfq",
+            schema_version="v1",
+            min_date=date(2026, 1, 5),
+            max_date=date(2026, 1, 7),
+            row_count=3,
+            checksum="a" * 64,
+            parent_release_id="same-parent",
+            code_version="same-code",
+            quality_status="trusted",
+            is_active=True,
+            metadata_={"files": []},
+        )
+        db.add(legacy)
+        db.commit()
+
+        rerun = ReleaseService().build_release(
+            db,
+            dataset="curated.prices_qfq",
+            curate_result=_result(),
+            checksum="a" * 64,
+            parent_release_id="same-parent",
+            code_version="same-code",
+            metadata={"files": []},
+        )
+        db.commit()
+
+        assert rerun.release_id == legacy.release_id
+        assert rerun.quality_status == "trusted"
+        assert len(list(db.scalars(select(Release)))) == 1
 
 
 def test_activate_preserves_one_active_release_per_dataset() -> None:
