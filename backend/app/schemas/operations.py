@@ -300,3 +300,41 @@ class OperationsRerunPlan(BaseModel):
     action_type: str
     reason: str
     parameters: dict[str, Any]
+
+
+OperationsActionType = Literal[
+    "daily_data_sync",
+    "daily_bar_gap_backfill",
+    "factor_profile_rebuild",
+]
+
+
+class OperationsActionPreviewRequest(BaseModel):
+    action_type: OperationsActionType
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperationsActionStartRequest(OperationsActionPreviewRequest):
+    idempotency_key: str = Field(min_length=8, max_length=120)
+
+
+class OperationsActionPreview(BaseModel):
+    action_type: OperationsActionType
+    executable: bool
+    summary: str
+    parameters: dict[str, Any]
+    warnings: list[str] = Field(default_factory=list)
+    checks: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperationsActionRead(BaseModel):
+    action_id: int
+    action_type: OperationsActionType
+    status: Literal["queued", "running", "success", "partial", "failed"]
+    phase: str
+    parameters: dict[str, Any]
+    result: dict[str, Any] | None = None
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime
+    finished_at: datetime | None = None

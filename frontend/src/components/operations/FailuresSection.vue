@@ -25,6 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [type: FailureType, item: FailureItem];
+  execute: [plan: OperationsRerunPlan];
 }>();
 
 const activeFailureType = ref<FailureType | "all">("all");
@@ -125,7 +126,7 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
     <div class="section-title">
       <ServerCog :size="20" aria-hidden="true" />
       <h2>失败中心</h2>
-      <span class="section-note">点击失败项查看详情和只读重跑建议</span>
+      <span class="section-note">点击失败项查看详情、预检并执行安全修复</span>
     </div>
 
     <div class="failure-filters" aria-label="失败类型筛选">
@@ -180,10 +181,10 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
         <p v-if="detailErrorMessage" class="inline-error">{{ detailErrorMessage }}</p>
 
         <div v-if="rerunPlan" class="rerun-card">
-          <p class="rerun-label">只读重跑建议，不会触发执行</p>
+          <p class="rerun-label">安全修复计划</p>
           <div>
             <span :class="['status', rerunPlan.supported ? 'status-success' : 'status-rejected']">
-              {{ rerunPlan.supported ? "可生成建议" : "需人工复核" }}
+              {{ rerunPlan.supported ? "可执行" : "需人工复核" }}
             </span>
             <strong>{{ rerunPlan.action_type }}</strong>
           </div>
@@ -194,8 +195,8 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
             <strong>执行前准备</strong>
             <ul>
               <li>核对参数与失败详情是否匹配。</li>
-              <li>确认该动作只会用于后续人工触发，不会在本页面直接执行。</li>
-              <li>等待后端执行入口补齐审计、幂等和权限边界。</li>
+              <li>系统会先重新预检，再以幂等后台任务执行。</li>
+              <li>执行完成后会重新检查缺口；只有问题闭环时才自动标记已修复。</li>
             </ul>
             <div v-if="getRerunParameterRows(rerunPlan).length > 0" class="rerun-parameters">
               <div v-for="row in getRerunParameterRows(rerunPlan)" :key="row.key">
@@ -203,7 +204,7 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
                 <code>{{ row.value }}</code>
               </div>
             </div>
-            <button type="button" class="disabled-action" disabled>执行入口未启用</button>
+            <button type="button" class="primary-action" @click="emit('execute', rerunPlan)">预检并执行</button>
           </div>
         </div>
 

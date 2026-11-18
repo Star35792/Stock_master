@@ -187,6 +187,33 @@ export interface OperationsRerunPlan {
   parameters: Record<string, unknown>;
 }
 
+export type OperationsActionType =
+  | "daily_data_sync"
+  | "daily_bar_gap_backfill"
+  | "factor_profile_rebuild";
+
+export interface OperationsActionPreview {
+  action_type: OperationsActionType;
+  executable: boolean;
+  summary: string;
+  parameters: Record<string, unknown>;
+  warnings: string[];
+  checks: Record<string, unknown>;
+}
+
+export interface OperationsAction {
+  action_id: number;
+  action_type: OperationsActionType;
+  status: "queued" | "running" | "success" | "partial" | "failed";
+  phase: string;
+  parameters: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
 export interface ApiPage<T> {
   items: T[];
   total: number;

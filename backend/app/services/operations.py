@@ -336,6 +336,7 @@ class OperationsOverviewService:
                 action_type="daily_bar_gap_backfill",
                 reason="missing daily bar can be backfilled for the affected symbol/date",
                 parameters={
+                    "issue_id": issue.id,
                     "symbols": [issue.symbol],
                     "start_date": issue.trade_date.isoformat(),
                     "end_date": issue.trade_date.isoformat(),

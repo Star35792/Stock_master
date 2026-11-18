@@ -25,6 +25,22 @@ class JobLogRepository:
             )
         )
 
+    def list_recent_by_name(
+        self,
+        db: Session,
+        *,
+        job_name: str,
+        limit: int = 100,
+    ) -> list[JobLog]:
+        return list(
+            db.scalars(
+                select(JobLog)
+                .where(JobLog.job_name == job_name)
+                .order_by(JobLog.started_at.desc(), JobLog.id.desc())
+                .limit(limit)
+            )
+        )
+
     def create(
         self,
         db: Session,

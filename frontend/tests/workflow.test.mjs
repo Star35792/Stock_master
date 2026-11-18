@@ -100,6 +100,52 @@ function researchWorkbench(api = {}) {
   });
 }
 
+function operationsActions(api = {}) {
+  const { createOperationsActions } = setupModule('composables/operationsActions.ts');
+  return createOperationsActions({
+    preview: api.preview ?? (async (actionType, parameters) => ({
+      action_type: actionType, executable: true, summary: 'ready', parameters,
+      warnings: [], checks: {},
+    })),
+    start: api.start ?? (async (actionType, parameters) => ({
+      action_id: 9, action_type: actionType, status: 'success', phase: 'completed',
+      parameters, result: { problem_closed: true }, error_message: null,
+      created_at: '2026-11-18T00:00:00Z', started_at: '2026-11-18T00:00:00Z',
+      finished_at: '2026-11-18T00:00:01Z',
+    })),
+    fetch: api.fetch ?? (async () => { throw new Error('unexpected poll'); }),
+  });
+}
+
+test('operations action previews rerun parameters before starting an audited task', async () => {
+  const calls = [];
+  const actions = operationsActions({
+    preview: async (actionType, parameters) => {
+      calls.push(['preview', actionType, parameters]);
+      return { action_type: actionType, executable: true, summary: '1 row', parameters,
+        warnings: [], checks: { actionable: 1 } };
+    },
+    start: async (actionType, parameters, key) => {
+      calls.push(['start', actionType, parameters, key]);
+      return { action_id: 11, action_type: actionType, status: 'success', phase: 'completed',
+        parameters, result: { problem_closed: true }, error_message: null,
+        created_at: '2026-11-18T00:00:00Z', started_at: '2026-11-18T00:00:00Z',
+        finished_at: '2026-11-18T00:00:01Z' };
+    },
+  });
+  const plan = {
+    supported: true, action_type: 'daily_bar_gap_backfill',
+    parameters: { issue_id: 7, symbols: ['600000.SH'], start_date: '2026-11-17', end_date: '2026-11-17', adjust_type: 'qfq' },
+  };
+
+  await actions.executePlan(plan);
+
+  assert.equal(calls[0][0], 'preview');
+  assert.equal(calls[1][0], 'start');
+  assert.match(calls[1][3], /^frontend-daily_bar_gap_backfill-/);
+  assert.equal(actions.currentAction.value.result.problem_closed, true);
+});
+
 test('research workbench preserves successful sections when one aggregate section fails', async () => {
   const page = researchWorkbench({
     fetchResearchWorkbench: async () => ({

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { BarChart3, LineChart } from "@lucide/vue";
 import { useRoute, useRouter } from "vue-router";
+import SensitivityPanel from "../../pages/components/SensitivityPanel.vue";
 
 import type { BacktestRunSnapshot, OperationsOverview } from "../../types";
 import { formatDate, formatDateTime, formatNumber, formatPercent, statusClass, statusLabel, strategyLabel } from "./formatters";
@@ -528,6 +529,7 @@ function runContractText(run: BacktestRunSnapshot | BacktestRunListItem, field: 
   </section>
 
   <section id="backtests" class="dashboard-section">
+    <SensitivityPanel :selected-run-ids="selectedIds()" />
     <div class="section-title">
       <LineChart :size="20" aria-hidden="true" />
       <h2>回测结果</h2>

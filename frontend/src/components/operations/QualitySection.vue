@@ -6,6 +6,11 @@ import { barWidth, countEntries, formatDate, severityClass, severityLabel, statu
 
 defineProps<{
   dataQuality: OperationsOverview["data_quality"];
+  updatingIssueId?: number | null;
+}>();
+
+const emit = defineEmits<{
+  updateStatus: [issueId: number, status: "fixed" | "ignored" | "false_positive"];
 }>();
 </script>
 
@@ -42,6 +47,7 @@ defineProps<{
               <th>类型</th>
               <th>级别</th>
               <th>日期</th>
+              <th>处理</th>
             </tr>
           </thead>
           <tbody>
@@ -51,6 +57,14 @@ defineProps<{
               <td>{{ issue.issue_type }}</td>
               <td><span :class="severityClass(issue.severity)">{{ severityLabel(issue.severity) }}</span></td>
               <td>{{ formatDate(issue.trade_date) }}</td>
+              <td class="quality-actions">
+                <template v-if="issue.status === 'open' || issue.status === 'reopened'">
+                  <button type="button" :disabled="updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'fixed')">已修复</button>
+                  <button type="button" :disabled="updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'ignored')">忽略</button>
+                  <button type="button" :disabled="updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'false_positive')">误报</button>
+                </template>
+                <span v-else>{{ statusLabel(issue.status) }}</span>
+              </td>
             </tr>
           </tbody>
         </table>

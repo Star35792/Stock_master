@@ -4,6 +4,9 @@ import type {
   OperationsFailureReport,
   OperationsOverview,
   OperationsRerunPlan,
+  OperationsAction,
+  OperationsActionPreview,
+  OperationsActionType,
   ApiPage,
   FactorDefinition,
   FactorProfile,
@@ -167,6 +170,62 @@ export async function fetchOperationsFailureRerunPlan(
   }
 
   return response.json() as Promise<OperationsRerunPlan>;
+}
+
+export async function previewOperationsAction(
+  actionType: OperationsActionType,
+  parameters: Record<string, unknown>,
+): Promise<OperationsActionPreview> {
+  return jsonApi(
+    await fetch("/api/v1/operations/actions/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ action_type: actionType, parameters }),
+    }),
+    "操作预检失败",
+  );
+}
+
+export async function startOperationsAction(
+  actionType: OperationsActionType,
+  parameters: Record<string, unknown>,
+  idempotencyKey: string,
+): Promise<OperationsAction> {
+  return jsonApi(
+    await fetch("/api/v1/operations/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        action_type: actionType,
+        parameters,
+        idempotency_key: idempotencyKey,
+      }),
+    }),
+    "操作启动失败",
+  );
+}
+
+export async function fetchOperationsAction(actionId: number): Promise<OperationsAction> {
+  return jsonApi(
+    await fetch(`/api/v1/operations/actions/${actionId}`, {
+      headers: { Accept: "application/json" },
+    }),
+    "操作状态读取失败",
+  );
+}
+
+export async function updateDataQualityIssueStatus(
+  issueId: number,
+  status: "fixed" | "ignored" | "false_positive" | "reopened",
+): Promise<void> {
+  await jsonApi(
+    await fetch(`/api/v1/data-quality/issues/${issueId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ status, resolved_by: "frontend_operator" }),
+    }),
+    "质量问题状态更新失败",
+  );
 }
 
 async function portfolioResponse(response: Response): Promise<PortfolioPlan> {
