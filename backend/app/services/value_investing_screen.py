@@ -43,6 +43,7 @@ from app.services.value_trap_trend import (
     NET_PROFIT_DECLINE_STREAK_SQL,
     REVENUE_DECLINE_STREAK_SQL,
 )
+from app.strategies.governance_veto import apply_governance_vetoes
 from app.strategies.registry import (
     VALUE_INVESTING_NAME,
     params_from_values,
@@ -699,6 +700,12 @@ class ValueInvestingScreenService:
         finally:
             connection.close()
 
+        # Governance vetoes are a human research judgement layered on top of
+        # the kernel result: the kernel still counts every quantitative pass,
+        # and the veto is recorded separately so both facts stay visible.
+        governance_as_of = datetime.now(SHANGHAI).date() if as_of is None else as_of
+        result = apply_governance_vetoes(result, as_of_date=governance_as_of)
+
         report = {
             **result,
             "strategy": name,
@@ -706,6 +713,7 @@ class ValueInvestingScreenService:
             "kernel_version": result.get("kernel_version") or result.get("strategy"),
             "target_trade_date": target.isoformat(),
             "price_as_of": target.isoformat(),
+            "governance_as_of": governance_as_of.isoformat(),
             "code_version": settings.app_code_version,
             "generated_at": datetime.now(SHANGHAI).isoformat(),
             "coverage": coverage,

@@ -270,6 +270,39 @@ def _trend_markdown(report: dict) -> list[str]:
     return lines
 
 
+def _veto_markdown(report: dict) -> list[str]:
+    """The governance-veto section: which passing names a human rejected."""
+    vetoes = report.get("governance_vetoes") or []
+    if not vetoes:
+        return []
+    lines = [
+        "",
+        "## 人工治理否决",
+        "",
+        "> 以下标的通过了全部量化闸门，但基于管理层 / 治理事件的公开证据被人工否决，"
+        "移出优先研究名单。否决是研究判断而非量化闸门，带证据可审计、可撤销。",
+        "",
+        "| 代码 | 名称 | 否决理由 | 否决日期 |",
+        "|---|---|---|---|",
+    ]
+    for row in vetoes:
+        veto = row.get("governance_veto") or {}
+        lines.append(
+            f"| {row['symbol']} | {row.get('name') or veto.get('name') or '-'} | "
+            f"{veto.get('reason') or '-'} | {veto.get('vetoed_at') or '-'} |"
+        )
+    for row in vetoes:
+        veto = row.get("governance_veto") or {}
+        heading = f"### {row['symbol']} {row.get('name') or veto.get('name') or ''}".rstrip()
+        lines += ["", heading, "", f"- **事件**：{veto.get('event') or '-'}"]
+        evidence = veto.get("evidence") or []
+        if evidence:
+            lines.append("- **证据来源**：")
+            for url in evidence:
+                lines.append(f"  - {url}")
+    return lines
+
+
 def _summary_markdown(report: dict) -> str:
     lines = [
         "# 价值投资安全边际选股报告",
@@ -278,12 +311,14 @@ def _summary_markdown(report: dict) -> str:
         f"（内核 `{report.get('kernel_version')}`）",
         f"- 锁定安全边际：`{report['required_margin']}`",
         f"- 行情交易日：{report['target_trade_date']}",
+        f"- 人工治理判断日：{report.get('governance_as_of', '-')}",
         f"- 估值分布窗口：{report['coverage']['valuation_window_start']} ~ "
         f"{report['coverage']['valuation_window_end']}",
         f"- 年报期：{'、'.join(report['coverage']['annual_periods'])}",
         f"- 股票池：{report['universe_count']}；达标：{report['qualified_count']}；"
-        f"优先研究名单：{report['shortlist_count']}；"
-        f"递延：{report['deferred_count']}",
+        f"{'治理否决：' + str(report['vetoed_count']) + '；' if report.get('vetoed_count') else ''}"
+        f"优先研究名单：{report.get('active_shortlist_count', report['shortlist_count'])}；"
+        f"递延：{report.get('active_deferred_count', report['deferred_count'])}",
         "",
         "> 本报告为只读研究输出，不产生权重、订单或收益承诺；"
         "`research_only=true / pit_verified=false / execution_eligible=false`。",
@@ -294,7 +329,7 @@ def _summary_markdown(report: dict) -> str:
         "买入成本上限 | 安全边际 | 3 年年化 ROE | 3 年营收 CAGR | 3 年净利 CAGR | 准入路径 |",
         "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
-    for row in report["shortlist"]:
+    for row in report.get("active_shortlist", report["shortlist"]):
         metrics = row["metrics"]
         valuation = row["valuation"]
         quality = metrics.get("quality") or {}
@@ -327,10 +362,12 @@ def _summary_markdown(report: dict) -> str:
             f"{_format_ratio(trend.get('revenue_cagr_3y'))} | "
             f"{_format_ratio(trend.get('net_profit_cagr_3y'))} | {path} |"
         )
-    if not report["shortlist"]:
+    if not report.get("active_shortlist", report["shortlist"]):
         lines.append(
             "| - | - | - | - | - | - | - | - | - | 本次没有达标标的 | - | - | - | - |"
         )
+
+    lines += _veto_markdown(report)
 
     lines += [
         "",
@@ -339,7 +376,7 @@ def _summary_markdown(report: dict) -> str:
         "| # | 代码 | 名称 | 行业 | 收盘价 | 历史倍数保守锚 | 买入成本上限 |",
         "|---|---|---|---|---:|---:|---:|",
     ]
-    for row in report["deferred"]:
+    for row in report.get("active_deferred", report["deferred"]):
         metrics = row["metrics"]
         valuation = row["valuation"]
         lines.append(
@@ -348,7 +385,7 @@ def _summary_markdown(report: dict) -> str:
             f"{_format_money(valuation.get('v_low'))} | "
             f"{_format_money(valuation.get('buy_cost_ceiling'))} |"
         )
-    if not report["deferred"]:
+    if not report.get("active_deferred", report["deferred"]):
         lines.append("| - | - | - | - | - | - | - |")
 
     lines += _quality_markdown(report)
@@ -408,6 +445,14 @@ def main(argv: list[str] | None = None) -> int:
                 "universe_count": report["universe_count"],
                 "qualified_count": report["qualified_count"],
                 "shortlist_count": report["shortlist_count"],
+                "active_shortlist_count": report.get(
+                    "active_shortlist_count", report["shortlist_count"]
+                ),
+                "vetoed_count": report.get("vetoed_count", 0),
+                "active_shortlist_symbols": [
+                    row["symbol"]
+                    for row in report.get("active_shortlist", report.get("shortlist", []))
+                ],
                 "qualified_symbols": report["qualified_symbols"],
                 "min_roe_3y": report.get("params", {}).get("min_roe_3y"),
                 "price_gate_only_count": report.get("price_gate_only", {}).get(
