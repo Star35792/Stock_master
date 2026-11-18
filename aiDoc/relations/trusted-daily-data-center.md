@@ -270,6 +270,7 @@ V1 稳定后已经扩展出的能力：
 
 - 主 DuckDB（`backend/data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor`、`portfolio/risk -> trade` 与控制面（物理表如 `metadata.job_log`，历史逻辑域称 `system`）。`strategy` 回测与训练产物存独立 `data/research.duckdb`，手工真实持仓账本存 SQLite `data/positions.db`；估值仍消费主库可信行情。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。
 - `backend/app/lake` 是 Parquet/DuckDB 温层工具（`curated/prices_qfq`、`fundamentals_pit`、`factor` release）。`curated/prices_qfq` 已接入 `daily_loop`：置真 `factor_reads_curated` 且 `adjust_type='qfq'` 时，先从 warm history + control hot window 构建临时数据集，因子通过绑定该临时路径的 `CuratedDailyBarReader` 计算。发布闸门通过后先切换正式目录并暂留旧树，两条 release 激活事务提交成功后才回收旧树；激活或提交失败则回滚数据库并恢复旧树，新树退回暂存供诊断。关闭开关时仍走 ORM。其余 curated 数据集仍由离线脚本驱动。
+- `lake.release` 的新 ID 对内容及不可变血缘共同取 SHA-256：数据集、checksum、schema、日期范围、行数、父 release、代码版本和元数据全部参与。相同事实幂等复用；已存在的旧短 ID 若所有不可变字段相同也复用原行，避免升级后首次重跑重复登记。相同内容若父链或代码版本不同则形成新 release，旧行不得重写。已拒绝的 release 不得靠重跑或激活翻为可信。旧短 ID 保留供历史引用，不做启动迁移。
 - 容量边界：本机只保留各职责的必要事实，不自动复制整库。`curated/prices_qfq` 的旧物化目录仅在发布切换期间临时存在，发布失败恢复旧目录，发布成功删除本次明确替换的旧目录。普通构建不按名称或年龄自动清理历史暂存、替换或备份目录；清理前必须核验活动任务、当前读路径、manifest/行数和研究审计引用。温层 `exported` 的有效父链、增量层和被研究/审计引用的 release 必须保留，不能按时间直接清空。
 - 持续写入边界：HiThink API 的回看窗口和公司行为 dump 重跑按同源业务键与内容版本幂等写入 `raw`，旧值修订仍新增版本；可信日线只有字段或选中来源变化时才更新。离线 Parquet 分区压缩经行数核验后切换，旧文件只在成功发布后回收。主库必要的新交易日与有效温层 delta 仍会随事实增长，不能用按年龄删 raw 或有效 release 伪造容量稳定。
 - `export_warm_layer.py` 逐表校验失败即停，只在所有选定表通过后原子写可消费的 release summary；失败时尝试删除本次未发布目录，重用已存在 tag 会直接拒绝，不覆盖既有事实。硬中断或删除受阻留下的无效目录需后续核对清理；旧版本清理仍需检查 active、父链及研究引用。

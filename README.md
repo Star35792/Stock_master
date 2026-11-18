@@ -163,6 +163,7 @@ curl http://127.0.0.1:8000/health
 - 全市场相对估值初筛：`GET /api/v1/strategy-research/price-value/screen/latest`、`GET /api/v1/strategy-research/price-value/screen/tracking`、`GET /api/v1/strategy-research/price-value/profit-status`
 - 内置策略定义目录：`GET /api/v1/strategy-research/definitions`（列出已注册的内置策略及其锁定参数）、`POST /api/v1/strategy-research/definitions/register-all`（幂等注册）
 - 内置价值投资选股：`POST /api/v1/strategy-research/value-investing/screen`（只读；按登记在案的锁定安全边际 30%、3 年年化 ROE 质地闸门、价值陷阱闸门（4 年年报窗口的营收/净利连跌年数、负债率 3 年变化）与成长路径（营收/净利 3 年 CAGR），跑准入 → 质量 → 价值 → 安全边际四层漏斗，输出达标池、优先研究名单、企业质地体检、价值陷阱闸门命中统计与「仅价格闸门」对照，不产生权重或订单）
+- 价值选股报告另列 `governance_as_of`、`governance_vetoes` 与 `active_shortlist`：量化达标计数保留原值；默认最新报告按生成当日的人工治理判断展示名单，显式历史 `as_of` 只纳入该日及以前已登记的判断。
   - 闸门语义：**未知即阻断、已知不合格即排除**——价值陷阱命中（连跌 ≥ 2 年或负债率上行 > 10pp）判 `excluded`，趋势窗口不足 4 期判 `blocked`。成长路径只替代 ROE 质地闸门，**绝不替代价格闸门**；**陷阱闸门优先于成长路径**（营收涨而利润跌、杠杆上升是带好标题的陷阱，不是成长故事）。**DCF 不进闸门**（对现金流与折现率假设敏感），估值锚（历史倍数保守锚，相对自身历史倍数、不是内在价值）用盈利锚与净资产锚取较小者，绝对估值由只读 FCFE 情景研究承担。
   - 显式 `current_research_catchup` 模式可补采最新完整交易日的研究观察，报告可选返回 `observation_mode`、`price_as_of`、`financial_as_of`、`analysis_at`、`observed_at`。页面分别展示行情日期、财务日期、真实分析与采集时刻，并标明“当前补采研究观察，非当晚历史名单”；财务可得截止为实际分析时刻，固定未认证历史 PIT，通用因子与历史回测保持隔离。
   - 初筛 v7 在读取时返回 `freshness`（上海三所日历核验）和 `candidate_eligible`；不改写当前报告及其哈希。只保留最新全量报告与冻结 cohort，旧任务保留摘要和快照哈希，旧报告无法精确展开。逐股 `research_diagnostics` 提供 20 日复权走势、三年利润/现金流和经营现金流 TTM、新增净利润 TTM（报表净利润，非扣非／归母）、来源、缺口及输入哈希；`research_candidate_count` 保留原走势与现金流条件池数量，不改成精选数量。
@@ -170,16 +171,19 @@ curl http://127.0.0.1:8000/health
   - `selection.rule_impact` 在同一份 v7 输入上构造“仅移除净利润 TTM 门槛”的反事实，分别统计 TTM 非正、缺失/冲突、混合原因及名单变化；它用于归因新增门槛，不把不同观察时刻的旧报告差异归因给单一规则。
   - `screen/tracking` 使用不可变 cohort sidecar 读取冻结的优先名单、达标池与原条件池，按真实形成日后的首个共同交易日收盘开始，固定观察 5/20/60 个交易日。成员等权冻结、不补入、不再平衡；可信前复权行情缺失的成员仍保留在分母并把池标为不完整。返回毛观察收益、固定比例成本后结果、相对原条件池差异、覆盖和输入哈希；补采 cohort 单独标识。该接口是动态只读前向观察，不改写原报告或哈希，不是历史回测、真实组合收益或策略认证。
   - 精选另要求供应商 PE≤20、PB≤2、上市至少 730 天、20 日平均成交额至少 5000 万元、最近三年逐年盈利、较 MA20 偏离不超过 8%，主期及已核验更新期 ROE 为正；周期行业与异常 ROE 需复核。排序和全部规则见价值策略文档。当前名单始终须通过鲜度和基础准入；这些规则只安排研究工作量，未完成绝对估值或样本外收益验证。
-- 回测运行：`GET /api/v1/backtests/runs`、`GET /api/v1/backtests/runs/{run_id}`、`.../trades`、`.../equity`、`.../positions`、`.../performance`（strategy 产物存独立 `backend/data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
-- 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐；新运行使用经复核的运行时基准快照，返回 `input_source=run_snapshot`；旧运行返回 `current_market_unversioned`，其结果可能随可信行情修订变化。缺失返回 422）、`POST /api/v1/backtests/runs/compare`、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
+- 回测运行：`GET /api/v1/backtests/runs` 支持策略、状态、起止日期及 `validation_mode`、`data_version` 精确筛选，筛选先于分页；列表与 `GET /api/v1/backtests/runs/{run_id}` 返回 `sharpe_ratio`、`performance_status`、`performance_code_version`。已保存绩效优先，否则从研究库净值只读推导，缺净值和无效净值有独立状态。`.../trades`、`.../equity`、`.../positions`、`.../performance` 读取完整产物；有净值而缺完整绩效时可显式 `POST .../performance`，服务端记录当前分析代码版本（strategy 产物存独立 `backend/data/research.duckdb`，见 `aiDoc/relations/20261024-1427-research-database-split.md`）
+- 研究工作流聚合：`GET /api/v1/research-workflow/workbench` 分别从主库、研究库和 SQLite 持仓账本聚合最近回测、组合草案、持仓账本与告警；`GET /api/v1/research-workflow/pipeline?run_id=...` 聚合单次回测摘要、净值、绩效、基准与期末持仓。各子段独立降级，接口只读且不产生订单。
+- 回测页的所选运行与首项基准写入 `/backtests?runs=10,13`；刷新、复制链接及从详情返回时重新验证并恢复比较。链接只接受 1–20 个互不重复的正整数运行编号；失效链接会显示错误，可一键清空。
+- 比较预览的表格支持 2–20 项；净值与回撤曲线一次展示基准和一项可切换的候选，按共同交易日核对完整净值并从初始资金归一化。不能绘制时会说明原因，曲线不取代服务端指标或策略合同复核。
+- 基准与对比：`GET /api/v1/backtests/runs/{run_id}/benchmark`（基准可信行情须与策略净值日期逐日对齐；新运行使用经复核的运行时基准快照，返回 `input_source=run_snapshot`；旧运行返回 `current_market_unversioned`，其结果可能随可信行情修订变化。缺失返回 422）、`POST /api/v1/backtests/runs/compare-preview`（2–20 项只读探索预览，首项为基准；逐项返回合同、指标来源、有限策略合同字段 `strategy_contract` 及相对基准的 `strategy_differences`、`delta_status`/`delta_reasons`；基础口径、指标代码版本和实际净值日期一致时返回收益、回撤、夏普差值；不能据此认定策略可比或做因果归因）、`POST /api/v1/backtests/runs/compare`（严格比较）、`POST /api/v1/backtests/runs/drift`、`POST /api/v1/backtests/runs/validation-report`
 - 回测最终持仓（组合草案预填源）：`GET /api/v1/backtests/runs/{run_id}/final-holdings`
 
 ### 组合、风控与模拟盘
 
 路由文件：`portfolio.py`、`paper_accounts.py`、`approvals.py`、`position_books.py`
 
-- 组合草案：`POST /api/v1/portfolio/plans`（需 `Idempotency-Key`）、`GET /api/v1/portfolio/plans/{plan_id}`、`GET /api/v1/portfolio/plans/{plan_id}/risk-readiness`
-- 草案偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=&threshold=`（只读建议，不生成订单；任一非零持仓缺可信价格时返回 422，不输出方向或目标数量；该领域错误保留原 `detail` 文本，并增量返回 `code=portfolio_drift_missing_trusted_prices` 与稳定排序的 `symbols`，便于调用方定位待修复行情）
+- 组合草案：`POST /api/v1/portfolio/plans`（需 `Idempotency-Key`；可选行业、三因子宽截面代理、跟踪误差与波动率预算；风格结果包含因子日期、版本、运行 ID 与截面覆盖数）、`GET /api/v1/portfolio/plans?limit=&offset=`（按创建时间及 ID 倒序的分页摘要）、`GET /api/v1/portfolio/plans/{plan_id}`（回读预算、风险结果和目标）、`GET /api/v1/portfolio/plans/{plan_id}/risk-readiness`
+- 草案偏离检测：`GET /api/v1/portfolio/plans/{plan_id}/drift?position_book_id=|paper_account_id=&threshold=`（只读建议，不生成订单；顶层提供草案名称、截至日和预算，结果覆盖草案目标和草案外非零持仓，逐行提供 `in_plan` 与 `price_as_of`；草案外持仓目标权重/数量为 0，方向仍按阈值判断；顶层 `price_as_of` 是最晚报价日。任一非零持仓缺可信价格时返回 422，不输出方向或目标数量；该领域错误保留原 `detail` 文本，并增量返回 `code=portfolio_drift_missing_trusted_prices` 与稳定排序的 `symbols`，便于调用方定位待修复行情）
 - 正式风控评估：`POST /api/v1/portfolio/plans/{plan_id}/risk-evaluations`（需 `Idempotency-Key`）
 - Paper 账户：`GET /api/v1/paper-accounts`、`GET /api/v1/paper-accounts/{account_id}/ledger-audit`、`GET /api/v1/paper-accounts/{account_id}/positions`、`GET /api/v1/paper-accounts/{account_id}/performance`
 - 净值快照：`POST /api/v1/paper-accounts/{account_id}/equity-snapshots`（需 `Idempotency-Key`）、`GET /api/v1/paper-accounts/{account_id}/equity-snapshots/{snapshot_id}`
@@ -215,9 +219,9 @@ curl http://127.0.0.1:8000/health
 
 前端路由定义在 `frontend/src/router.ts`，已挂载页面路径：
 
-`/overview`、`/market`、`/factors`、`/price-value`、`/backtests`、`/positions`、`/portfolio`、`/paper`、`/quality`、`/operations`、`/alerts`、`/failures`（`/` 重定向到 `/overview`，未匹配路径同样重定向）；回测详情独立路由 `/backtests/runs/:runId`。
+`/overview`、`/research`、`/market`、`/factors`、`/price-value`、`/backtests`、`/positions`、`/portfolio`、`/paper`、`/quality`、`/operations`、`/alerts`、`/failures`（`/` 重定向到 `/overview`，未匹配路径同样重定向）；回测详情独立路由 `/backtests/runs/:runId`。
 
-页面实现在 `frontend/src/pages/`：`WorkspaceRoutePage.vue` 按 `page` prop 渲染上述 12 个工作区路由，`BacktestRunPage.vue` 承载回测详情，业务页面组件为 `MarketPage.vue`、`FactorPage.vue`、`PriceValuePage.vue`、`PositionsPage.vue`、`PaperTradingPage.vue`，另有页面内 `components/` 与运维专用 `src/components/operations/`；API 封装在 `frontend/src/api.ts`、`factorSelectionApi.ts`、`priceValueApi.ts`、`priceValueBacktestApi.ts`、`priceValueScreenApi.ts`。
+页面实现在 `frontend/src/pages/`，各工作区使用独立懒加载页面；`ResearchPage.vue` 聚合最近回测、组合草案、人工持仓账本和运维告警，并可按 `run_id` 展开单次研究流水线，`BacktestRunPage.vue` 承载完整回测详情。页面内组件位于 `src/pages/components/`，通用运维组件位于 `src/components/operations/`；API 封装在 `frontend/src/api.ts`、`researchWorkflowApi.ts`、`factorSelectionApi.ts`、`priceValueApi.ts`、`priceValueBacktestApi.ts`、`priceValueScreenApi.ts`。
 
 ## 5. 关键配置说明
 
@@ -297,7 +301,7 @@ A：仓库当前没有 Alembic 迁移目录；完整 pytest 包含 `tests/test_s
 - **公司行为跨区间在事件会计落地前会被明确拒绝**；遇到公司行为、历史 ST/状态未知或缺失可信行情/涨跌停数据时，价格价值回测会拒绝运行。
 - **温层已接入指定生产链路**：研究默认走温层读取；`curated/prices_qfq` 按开关接入 `daily_loop` 暂存构建、因子认证与 release 发布。其余 curated 数据集未因此自动接入；代码默认与 `.env.example` 的开关值不同，以运行配置为准。
 - **模拟盘回撤口径**为“自监控开始以来”，不是完整历史回撤。
-- **风格代理因子为显式研究假设**（size=ln 市值、value=-PB、momentum/volatility/liquidity=factor_value 的横截面 z-score），基准成分股缺失因子时会主动回退为组合暴露。
+- **风格预算为显式研究代理**：默认只对当日动量、波动率、流动性因子计算绝对组合暴露（加权 z-score），不含规模、市值与估值风格；因子标准化只用同日可信股票，拟持仓也须属于该股票池。同日因子覆盖不足 99%、样本不足 100、零方差、运行血缘不合格或拟持仓缺值时拒绝草案。跟踪误差另需基准及同日 QFQ 历史价；草案不等于当前真实持仓风险。
 - **数据源不稳定**：单一数据源可能缺新 ETF、指数或特殊品种，需依赖补充源与人工修复闭环。
 - **全量测试可能受机器资源限制**，排查方式见上方 FAQ；检查入口为 `scripts/ci_check.py`。
 

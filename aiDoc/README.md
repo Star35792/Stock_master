@@ -23,6 +23,10 @@
 | 架构、数据流、存储边界 | `aiDoc/relations/system-map.md` | `aiDoc/relations/trusted-daily-data-center.md` |
 | 本机单份数据保留、冗余清理与容量验收 | [本机存储保留与清理交接](relations/20261112-1341-local-storage-retention-and-cleanup.md) | [历史存储诊断](relations/20261013-2207-storage-diagnosis-and-plan.md)、`aiDoc/relations/system-map.md` |
 | 真实持仓账本存储（SQLite 例外）、持仓分析与偏离检测 | [持仓账本 SQLite ADR](relations/20261023-1925-position-ledger-sqlite.md) | `aiDoc/plans/roadmap.md` V5.4、`aiDoc/modules/schema-plan.md` |
+| 组合偏离覆盖草案外持仓、逐仓报价日期 | [偏离覆盖决策](research/20261117-0116-portfolio-drift-coverage.md) | [持仓账本 SQLite ADR](relations/20261023-1925-position-ledger-sqlite.md)、`aiDoc/plans/roadmap.md` V5.4 |
+| 组合草案发现与持仓页选择 | [草案发现决策](research/20261117-0129-portfolio-plan-discovery.md) | [偏离覆盖决策](research/20261117-0116-portfolio-drift-coverage.md)、`aiDoc/plans/roadmap.md` V5.4 |
+| 旧主库组合草案列兼容 | [组合草案旧主库列兼容](research/20261117-0751-portfolio-plan-schema-compatibility.md) | `aiDoc/modules/schema-plan.md`、`backend/app/database/session.py` |
+| 组合风险预算、因子覆盖和持仓预填 | [组合风险预算与持仓预填](research/20261117-0933-portfolio-risk-budget-workflow.md) | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/roadmap.md` V5.4 |
 | 研究库拆分（research.duckdb）、DuckDB 跨进程并发 | [研究库拆分 ADR](relations/20261024-1427-research-database-split.md) | `aiDoc/relations/system-map.md`、`aiDoc/modules/schema-plan.md` |
 | 主库打不开、WAL 回放失败、DuckDB 存储可用性 | [不可回放 WAL 的无损恢复与预防](relations/20261106-1442-duckdb-unreplayable-wal-recovery.md) | `aiDoc/memory/README.md`、`aiDoc/modules/module-index.md` |
 | 控制面空闲空间回收、索引与序列恢复 | [控制面主库空闲空间回收与索引/序列恢复](relations/20261109-1648-control-plane-compaction-and-index-recovery.md) | `aiDoc/relations/20260722-1721-tiered-storage-architecture.md`、`aiDoc/memory/README.md` |
@@ -30,9 +34,15 @@
 | 多源对账激活、数据源注册表、独立第二源接入 | [多源对账激活与独立第二源接入](relations/20261111-1458-multi-source-reconciliation-activation.md) | `aiDoc/data/source-ingestion-policy.md`、`aiDoc/relations/trusted-daily-data-center.md` |
 | 估值第二独立源、TTM PE 补齐、跨源估值对账口径 | [腾讯行情接入：估值的第二独立源与 TTM PE 补齐](relations/20261111-1531-tencent-valuation-source.md) | `aiDoc/data/source-ingestion-policy.md`、`aiDoc/data/quality-validation-and-repair.md` |
 | 后端分层、代码规则 | `aiDoc/modules/backend-layer-rules.md` | 相关 `backend/app/**` 文件 |
+| 前后端能力覆盖、页面与 API 差距 | [前后端能力覆盖与差距分析](plans/20261118-1435-frontend-backend-capability-gap-analysis.md) | `frontend/src/router.ts`、`frontend/src/pages/`、`backend/app/api/router.py` |
 | schema、表、迁移 | `aiDoc/modules/module-index.md` | `aiDoc/modules/schema-plan.md`、`backend/app/database/` 初始化与兼容桥 |
 | 数据导入、质量、修复 | `aiDoc/relations/system-map.md` | `aiDoc/data/*.md` |
 | 因子、研究、回测 | `aiDoc/modules/module-index.md` | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/roadmap.md` |
+| 回测列表与详情夏普、研究比较预览 | [历史回测夏普与比较预览决策](research/20261116-1508-backtest-research-comparison-preview.md) | [早期展示决策](research/20261116-1440-backtest-sharpe-visibility.md)、`aiDoc/plans/roadmap.md` V4 |
+| 回测候选筛选、比较前口径检查 | [回测候选筛选决策](research/20261116-1546-backtest-run-discovery.md) | `aiDoc/plans/roadmap.md` V4 |
+| 回测基准差值、策略合同差异 | [策略合同差异决策](research/20261116-1619-backtest-strategy-contract-diff.md) | [基准差值决策](research/20261116-1606-backtest-comparison-baseline-deltas.md)、`aiDoc/plans/roadmap.md` V4 |
+| 回测选择与基准的链接恢复 | [比较链接决策](research/20261116-1716-backtest-comparison-links.md) | [策略合同差异决策](research/20261116-1619-backtest-strategy-contract-diff.md)、`aiDoc/plans/roadmap.md` V4 |
+| 回测比较的净值与回撤走势 | [同日曲线决策](research/20261116-1734-backtest-comparison-curves.md) | [基准差值决策](research/20261116-1606-backtest-comparison-baseline-deltas.md)、`aiDoc/plans/roadmap.md` V4 |
 | 外部因子池选型、策略层代码级优化 | [策略优化评审](research/20261013-2021-strategy-optimization-review.md) | `aiDoc/research/decision-factor-framework.md`、`aiDoc/plans/hard-gates-execution-plan.md` |
 | 产品定位、投资者评估、量化工具愿景 | `aiDoc/strategy/product-investment-assessment.md` | `aiDoc/strategy/quantitative-tool-vision.md` |
 | 价格与价值匹配、安全边际研究及假设历史回测 | [策略定义](strategy/20260922-1314-price-value-margin-strategy.md) | `aiDoc/research/decision-factor-framework.md` |

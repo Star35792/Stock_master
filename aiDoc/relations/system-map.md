@@ -37,6 +37,7 @@
 
 - `backend/app/lake`：本地 Parquet 数据湖和批量扫描工具；curated 数据集是因子服务可配置的生产消费源，与 DuckDB 事实层共同组成单机存储架构。
 - 数据湖离线分区压缩先写同级暂存目录、核对行数，再切换目录；`daily_loop` 在文件切换后暂留旧目录，只有两条 release 激活事务提交成功才回收，激活或提交失败则恢复旧目录并保留新暂存供诊断。顶层目录重命名在 Windows 文件句柄短暂延迟释放时进行有界重试，持续占用仍失败并恢复原目录。普通构建不按名称或年龄自动清理历史目录。
+- 控制面 `lake.release` 的新 release ID 绑定数据集、内容校验、schema、日期范围、行数、父 release、代码版本与元数据。完全相同的重跑复用原行；升级前的短 ID 若事实字段完全相同也优先复用，字段不同才产生新 ID。任何已存在 ID 的事实字段冲突直接失败，`rejected` 不复用也不激活。旧版短 ID 与原父链原样保留，不做启动迁移；active 与质量状态仍由显式激活管理。
 - Warm release 表带 `snapshot/delta` 模式：完整快照截断同表父链，增量表按业务键由新层覆盖旧层；`all_ok=false` 的失败 release 不参与 latest 解析。同 tag 发布禁止覆盖（含东财估值历史采集），发布前检查父链所有节点及 16 层上限；读侧遇父链循环或超限直接报错，不静默截断。
 - 温层大表导出先占用新的 release 目录，逐表行数校验失败即停止后续大表写入；全部通过后才原子写入成功 summary。导出失败清理本次未发布目录，避免留下整套 Parquet；硬中断或删除受阻仍可能留下无有效 summary 的目录，需后续核对清理。历史失败目录也须按引用与状态核对后单独清理。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。后端不 import 它（HiThink 取数走 `app/data_sources/hithink.py` 自有 urllib 实现），它也不参与 `scripts/ci_check.py` 的任何门命令。

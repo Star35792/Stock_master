@@ -28,7 +28,7 @@ note: >-
 - 两者冲突时以 living docs 与代码为准，并按 `aiDoc/README.md` 的同步规则回写时间戳文档的 `note` 或补一份新 ADR。
 - 本文件不复制各文档的结论，只做状态聚合；要读结论请打开原文。
 
-## 现行有效 `status: current`（19 份）
+## 现行有效 `status: current`（26 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -50,20 +50,30 @@ note: >-
 | [`research/20261028-0157-quality-value-attention-strategy.md`](research/20261028-0157-quality-value-attention-strategy.md) | decision | 2026-10-28 | — | — |
 | [`research/20261102-2152-factor-horizon-observation-gate.md`](research/20261102-2152-factor-horizon-observation-gate.md) | decision | 2026-11-02 | — | — |
 | [`research/20261103-0313-factor-profile-evidence-identity.md`](research/20261103-0313-factor-profile-evidence-identity.md) | decision | 2026-11-03 | — | — |
-| [`strategy/20260922-1314-price-value-margin-strategy.md`](strategy/20260922-1314-price-value-margin-strategy.md) | decision | 2026-11-10 | — | 活合同文档，正文按最新版本维护（@v1/@v2 已 retired，@v3 生效），as_of 取最近一次口径核实日。 |
+| [`research/20261116-1508-backtest-research-comparison-preview.md`](research/20261116-1508-backtest-research-comparison-preview.md) | decision | 2026-11-16 | — | — |
+| [`research/20261116-1606-backtest-comparison-baseline-deltas.md`](research/20261116-1606-backtest-comparison-baseline-deltas.md) | decision | 2026-11-16 | — | — |
+| [`research/20261116-1619-backtest-strategy-contract-diff.md`](research/20261116-1619-backtest-strategy-contract-diff.md) | decision | 2026-11-16 | — | — |
+| [`research/20261116-1716-backtest-comparison-links.md`](research/20261116-1716-backtest-comparison-links.md) | decision | 2026-11-16 | — | — |
+| [`research/20261117-0116-portfolio-drift-coverage.md`](research/20261117-0116-portfolio-drift-coverage.md) | decision | 2026-11-17 | — | — |
+| [`research/20261117-0751-portfolio-plan-schema-compatibility.md`](research/20261117-0751-portfolio-plan-schema-compatibility.md) | decision | 2026-11-17 | — | — |
+| [`research/20261117-0933-portfolio-risk-budget-workflow.md`](research/20261117-0933-portfolio-risk-budget-workflow.md) | decision | 2026-11-17 | — | — |
+| [`strategy/20260922-1314-price-value-margin-strategy.md`](strategy/20260922-1314-price-value-margin-strategy.md) | decision | 2026-11-16 | — | 活合同文档，正文按最新版本维护（@v1/@v2 已 retired，@v3 生效），as_of 取最近一次口径核实日。 |
 
-## 一次性快照 `status: snapshot`（6 份）
+## 一次性快照 `status: snapshot`（9 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
 | [`data/20261016-0024-low-price-oversold-screen.md`](data/20261016-0024-low-price-oversold-screen.md) | evidence | 2026-10-16 | — | — |
 | [`data/20261019-low-price-rebound-backtest.md`](data/20261019-low-price-rebound-backtest.md) | evidence | 2026-10-19 | — | — |
+| [`plans/20261118-1435-frontend-backend-capability-gap-analysis.md`](plans/20261118-1435-frontend-backend-capability-gap-analysis.md) | analysis | 2026-11-18 | — | — |
 | [`research/20261024-1706-training-window-selection-first-run.md`](research/20261024-1706-training-window-selection-first-run.md) | evidence | 2026-10-24 | — | — |
 | [`research/20261024-1822-pool-expansion-price-volume-ext.md`](research/20261024-1822-pool-expansion-price-volume-ext.md) | evidence | 2026-10-24 | — | — |
 | [`research/20261027-2003-single-factor-stability-review.md`](research/20261027-2003-single-factor-stability-review.md) | evidence | 2026-10-27 | — | 文中「历史行业时点不足」的偏差已被 2026-11-11 交付关闭，其余偏差声明仍是本次快照的一部分。 |
 | [`research/20261027-2027-exposure-budget-comparison.md`](research/20261027-2027-exposure-budget-comparison.md) | evidence | 2026-10-27 | — | — |
+| [`research/20261116-2207-backtest-comparison-acceptance.md`](research/20261116-2207-backtest-comparison-acceptance.md) | evidence | 2026-11-16 | — | — |
+| [`research/20261117-0310-portfolio-plan-discovery-acceptance.md`](research/20261117-0310-portfolio-plan-discovery-acceptance.md) | evidence | 2026-11-17 | — | — |
 
-## 部分被取代 `status: partially_superseded`（18 份）
+## 部分被取代 `status: partially_superseded`（22 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -85,6 +95,10 @@ note: >-
 | [`research/20260722-1511-quant-readiness-gap-analysis.md`](research/20260722-1511-quant-readiness-gap-analysis.md) | analysis | 2026-07-22 | — | 缺口清单大量条目已在后续 ADR 中关闭，引用前先核对当前 roadmap 现状章节。 |
 | [`research/20261013-2021-strategy-optimization-review.md`](research/20261013-2021-strategy-optimization-review.md) | analysis | 2026-10-13 | — | 评审建议为当时切片，落地情况以 roadmap 与各 ADR 为准。 |
 | [`research/20261014-1445-project-optimization-proposal-1.md`](research/20261014-1445-project-optimization-proposal-1.md) | analysis | 2026-10-14 | — | 提案为当时切片，其中存储与备份建议已被撤销或改写。 |
+| [`research/20261116-1440-backtest-sharpe-visibility.md`](research/20261116-1440-backtest-sharpe-visibility.md) | decision | 2026-11-16 | — | — |
+| [`research/20261116-1546-backtest-run-discovery.md`](research/20261116-1546-backtest-run-discovery.md) | decision | 2026-11-16 | — | — |
+| [`research/20261116-1734-backtest-comparison-curves.md`](research/20261116-1734-backtest-comparison-curves.md) | decision | 2026-11-16 | — | — |
+| [`research/20261117-0129-portfolio-plan-discovery.md`](research/20261117-0129-portfolio-plan-discovery.md) | decision | 2026-11-17 | — | — |
 
 ## 已撤销 `status: withdrawn`（1 份）
 
@@ -92,4 +106,4 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`relations/20261013-2207-storage-diagnosis-and-plan.md`](relations/20261013-2207-storage-diagnosis-and-plan.md) | plan | 2026-10-13 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。 |
 
-合计 44 份带时间戳文档。
+合计 58 份带时间戳文档。

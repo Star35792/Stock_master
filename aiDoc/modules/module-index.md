@@ -40,7 +40,7 @@
 | `trade` | 本地模拟推演执行与持仓记录（BrokerAdapter 仅隔离本地模拟回报） |
 | `services.position_book` / `services.position_metrics` / `services.position_analysis` / `services.portfolio_drift` | 真实持仓账本（独立 SQLite）记账与重放推导、共享 Decimal 持仓指标（盈亏/集中度/行业暴露）、paper 账户持仓与净值绩效只读分析、组合草案与真实/模拟持仓的偏离检测（只读建议，不生成订单） |
 | `database.research_session` / `backtest.rebalance` / `utils.duckdb_write_lock` | 独立 research.duckdb 引擎与会话（strategy 产物域，`research_db=None` 兼容贯穿）、回测调仓日选择（daily/weekly/monthly/N 交易日）、DuckDB 跨进程写锁（主库 `duckdb_write.lock` / 研究库 `research_write.lock`） |
-| `database.session` / `scripts.maintenance.recover_duckdb_wal` | 控制面 schema 兼容桥：序列默认值仅在缺失或指向错误序列时才补发 DDL，初始化末尾立即 CHECKPOINT，避免 WAL 留下不可回放的默认表达式条目（DuckDB #18259）；`recover_duckdb_wal` 用 ATTACH 绕过该回放缺陷并无损折回 WAL |
+| `database.session` / `scripts.maintenance.recover_duckdb_wal` | 控制面 schema 兼容桥：为旧组合计划/目标表幂等补齐 nullable `style_risk` / `score`；序列默认值仅在缺失或指向错误序列时才补发 DDL，初始化末尾立即 CHECKPOINT，避免 WAL 留下不可回放的默认表达式条目（DuckDB #18259）；`recover_duckdb_wal` 用 ATTACH 绕过该回放缺陷并无损折回 WAL |
 | `scripts.maintenance.compact_control_plane` | 控制面空闲空间回收：CTAS 重写主库文件，回收 DuckDB 删除行后未归还的空闲块（数据行完全不变），并恢复 CTAS 丢失的 40 个序列、唯一索引与列默认值；发布前逐表比对行数，不一致即拒绝发布 |
 
 当前公共边界：`api` 已暴露行情、数据质量、因子、回测、策略研究、运维查询，以及组合草案、只读风险前数据核对、paper 账本一致性审计、paper 账户不可变净值快照、绑定服务端事实源的正式风险评估、短时人工确认和幂等 paper 执行批次。账本审计只读取既有订单、成交、执行批次、现金和持仓事实并报告差异，不自动修复。执行入口只消费确认记录，重新验证全部哈希并固定使用本地 PaperBrokerAdapter；本项目不接入任何真实账户，也不实现受控交易适配器或实盘自动化交易。
@@ -53,11 +53,11 @@
 - `factor`：因子定义、运行、值、profile；profile 的证据资格独立于定义 PIT 状态，默认仅研究用途，核心池还要求明确的 `strategy_eligible` 资格。
 - `strategy`：内置策略定义目录 `strategy_definition`（主库，配置型定义，非运行产物）+ 回测运行、成交、净值、持仓、绩效，以及训练产物关联（后 6 张表在独立研究库）；另含外部连接器观测快照 `external_observation`（研究库，**永不被闸门读取**）。被回测引用的训练产物由外键阻止删除，不静默置空血缘。
 - `research`：目前只存在于温层 Parquet，**不在控制面**。`research.valuation_history` 是东财估值历史序列，全部行 `pit_verified=false`，`pb_mrq` 按报告期末切换、最多前视 120 天因而不可作为可交易证据。判定标准与现有表清单见 `aiDoc/modules/schema-plan.md` §17。
-- `portfolio`：组合计划和目标。
+- `portfolio`：组合计划和目标；旧主库的可选风格风险 JSON 与目标分数定点列由兼容桥补齐，旧值保留空值。
 - `risk`：旧版风控检查，以及绑定 plan/account/equity/readiness/ADV/policy 哈希的正式风险评估和逐订单规则结果。
 - `trade`：本地模拟推演账户、订单、成交、持仓，append-only 的账户净值快照与逐持仓估值组件，短时人工确认记录，以及 approval 唯一绑定的原子执行批次。
 - `positions`（独立 SQLite `backend/data/positions.db`）：手工记账的真实持仓账本（`position_book`/`position_trade`）；持仓与盈亏由流水重放推导，估值价格取 DuckDB `market` 可信层。
-- `lake`：内容寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
+- `lake`：内容与不可变血缘共同寻址的数据集 release、父版本、checksum、质量状态和每个 dataset 的 active 指针。
 - `system`（业务模块名，物理 schema 为 `metadata`）：任务日志（`job_log`）、质量问题、数据源配置；`daily_sync`、`factor_pipeline`、`factor_batch_profiler` 和 `daily_loop` 每次运行均留下 running → success/failed/partial 记录，新 running 必须绑定进程租约，孤儿 running 只按 OS 锁证据收敛。
 
 ## 同步规则

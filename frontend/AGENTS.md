@@ -13,8 +13,10 @@
 
 ## 结构事实
 
-- Vue 3 + TypeScript 单页应用；路由在 `src/router.ts`，页面在 `src/pages/`（Market、Factor、BacktestRun、Positions、PaperTrading、PriceValue、WorkspaceRoute），运维子组件在 `src/components/operations/`。
-- 后端调用集中在 `src/api.ts` 与 `src/factorSelectionApi.ts`、`src/priceValueApi.ts`、`src/priceValueBacktestApi.ts`、`src/priceValueScreenApi.ts`；接口前缀 `/api/v1`。
+- Vue 3 + TypeScript 单页应用；路由在 `src/router.ts`，每条路由 1:1 指向独立页面组件并全部懒加载：`src/pages/`（Overview、Research、Operations、Quality、Backtests、Market、Factor、BacktestRun、Positions、PaperTrading、PriceValue），组合草案页直接挂 `src/components/operations/PortfolioPlanSection.vue`；`/alerts` 重定向到 `/overview`，`/failures` 重定向到 `/operations`。
+- 运维状态（总览/告警/失败记录/失败详情与重跑计划）集中在 `src/composables/operationsDashboard.ts`：`createOperationsDashboard(deps)` 支持依赖注入（测试用），页面经 `useOperationsDashboard()` 共享单例；仅运维域页面（总览、运维、质量、回测列表）挂载时触发加载，研究主线页面不请求运维接口。`App.vue` 只保留侧边栏与 `RouterView`。
+- 复杂页面的状态逻辑抽到 `src/composables/`（`researchWorkbench.ts`、`factorWorkspace.ts`、`positionBook.ts`、`portfolioPlan.ts`），均为「工厂函数 + 依赖注入 + 视图层只做接线」的形态；测试经 `tests/workflow.test.mjs` 的 `setupModule()` 直接编译这些 composable 验证契约，SFC 自身只保留模板与接线。因子中文标签等纯函数在 `src/components/operations/factorLabels.ts`。
+- 后端调用集中在 `src/api.ts` 与 `src/researchWorkflowApi.ts`、`src/factorSelectionApi.ts`、`src/priceValueApi.ts`、`src/priceValueBacktestApi.ts`、`src/priceValueScreenApi.ts`；接口前缀 `/api/v1`。
 - `vite.config.ts` 将 `/api` 与 `/health` 代理到 `http://127.0.0.1:8000`，可用 `STOCK_MASTER_API_URL` 覆盖。
 - `dist/` 与 `node_modules/` 已在根 `.gitignore` 中，是可再生产物，不入库。
 
