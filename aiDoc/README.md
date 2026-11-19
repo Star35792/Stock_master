@@ -16,7 +16,7 @@
 
 ## Reference Map
 
-智能体整体需求与阶段验收：[DeepSeek 业务智能体整体计划与 SQLite 决定](plans/20261119-1049-agent-overall-plan-and-sqlite.md)。先对照完整需求清单；第一阶段仅会话与显式记忆，计划执行、权限和故障恢复仍待后续验收。
+智能体整体需求与阶段验收：[整体需求与 SQLite 决定](plans/20261119-1049-agent-overall-plan-and-sqlite.md)；已有[可审阅计划](plans/20261119-1405-agent-reviewable-plans.md)、[权限与执行](plans/20261119-1457-agent-permissions-and-execution.md)及[第四阶段故障恢复与证据核验](plans/20261119-1448-agent-recovery-and-evidence.md)。默认写关闭，批准不执行，核验不重放；生产业务全流程留到第五阶段。
 
 | 任务类型 | 先读 reference | 必要时再读深入文档 |
 | --- | --- | --- |

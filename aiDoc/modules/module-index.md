@@ -66,6 +66,12 @@
 
 智能体第一阶段（2026-11-19）：`database/agent_base.py` / `agent_session.py` 与 `models/agent.py` 定义独立 SQLite `agent.db`，`repositories/agent.py` 负责有界会话与记忆的读写和 CAS，`services/agent_state.py` 负责短事务，`services/agent.py` 保存/恢复对话和确认检查点。`deepseek.py` 仅模型传输，`agent_tools.py` 适配既有 service。前端 `/agent` 可恢复会话和显式管理记忆。写执行默认关闭；完整范围以[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)为准。
 
+智能体第四阶段：services/agent_read_recovery.py承接执行器的只读CAS重试钩子；services/agent_plan_recovery.py提供原确认受控核验；services/agent_recovery.py与repositories/agent_recovery.py负责有限错误分类、精确任务/产物查询和首次研究落库身份绑定。前端AgentRecoveryEvidence.vue展示失败与已有产物，核验不重放。见[阶段四决定](../plans/20261119-1448-agent-recovery-and-evidence.md)。
+
+第二阶段：`schemas/agent_planning.py` 定义意图/步骤/有限绑定/批准合同，`services/agent_planning.py` 只生成与校验计划，`AgentService.plan/decide_plan` 负责版本/哈希/CAS。`AgentPlanPanel.vue` 与 `agentWorkspace.ts` 接入补问、审阅、批准/拒绝和恢复；批准不创建任务。计划存原会话 JSON，无新增表，见[阶段2决定](../plans/20261119-1405-agent-reviewable-plans.md)。
+
+第三阶段：`schemas/agent_execution.py`定义执行检查点；`services/agent_execution.py`与`agent_execution_contract.py`负责DAG推进、规范身份、摘要、逐项确认和原任务观察，`agent_permissions.py`重检持久授权。`AgentTools`及运维共享执行入口均校验智能体任务，旧独立预览不能确认。`executions`仍存原会话JSON，无新表。阶段4恢复钩子已预留，见[阶段3决定](../plans/20261119-1457-agent-permissions-and-execution.md)。
+
 - 新增/改动 schema 域：更新 `aiDoc/modules/schema-plan.md`。
 - 新增 API：更新 `README.md` 核心 API 面。
 - 新增模块或改变职责：更新本文件和对应模块的 `AGENTS.md`（根 `AGENTS.md` 只保留跨模块规则，不再维护仓库概览清单）。

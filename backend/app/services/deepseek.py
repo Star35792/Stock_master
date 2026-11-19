@@ -20,7 +20,7 @@ class DeepSeekClient:
     def __init__(self, config: Settings = settings) -> None:
         self.config = config
 
-    def complete(self, messages: list[dict], tools: list[dict]) -> dict:
+    def complete(self, messages: list[dict], tools: list[dict], *, max_tokens: int = 1536) -> dict:
         key = self.config.deepseek_api_key
         if key is None or not key.get_secret_value().strip():
             raise AgentUnavailableError("请在 backend/.env 配置 DEEPSEEK_API_KEY 后重启后端。")
@@ -30,7 +30,7 @@ class DeepSeekClient:
                 "messages": messages,
                 "tools": tools,
                 "thinking": {"type": "disabled"},
-                "max_tokens": 1536,
+                "max_tokens": max_tokens,
                 "stream": False,
             }
         ).encode()

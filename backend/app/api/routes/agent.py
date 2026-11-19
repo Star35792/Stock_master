@@ -7,7 +7,11 @@ from app.schemas.agent import (
     AgentMemoryWrite,
     AgentSessionRead,
 )
+from app.schemas.agent_execution import AgentPlanControl
+from app.schemas.agent_planning import AgentPlanDecision
+from app.schemas.agent_recovery import AgentRecoveryRequest
 from app.services.agent import AgentConflictError, AgentNotFoundError, AgentService
+from app.services.agent_plan_recovery import AgentPlanRecoveryService
 from app.services.deepseek import AgentUnavailableError
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -74,6 +78,44 @@ def delete_agent_memory(memory_id: str, revision: int = Query(ge=1)):
 def agent_chat(payload: AgentChatRequest):
     try:
         return service.chat(payload.message, payload.session_id)
+    except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
+        raise _http_error(exc) from None
+
+
+@router.post("/plans", response_model=AgentSessionRead)
+def agent_plan(payload: AgentChatRequest):
+    try:
+        return service.plan(payload.message, payload.session_id)
+    except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
+        raise _http_error(exc) from None
+
+
+@router.post("/plans/{plan_id}/decision", response_model=AgentSessionRead)
+def agent_plan_decision(plan_id: str, payload: AgentPlanDecision):
+    try:
+        return service.decide_plan(
+            payload.session_id, plan_id, payload.version, payload.plan_hash, payload.decision
+        )
+    except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
+        raise _http_error(exc) from None
+
+
+@router.post("/plans/{plan_id}/execution", response_model=AgentSessionRead)
+def agent_plan_execution(plan_id: str, payload: AgentPlanControl):
+    try:
+        return service.executor.control(
+            payload.session_id, plan_id, payload.version, payload.plan_hash, payload.operation
+        )
+    except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
+        raise _http_error(exc) from None
+
+
+@router.post("/plans/{plan_id}/recovery", response_model=AgentSessionRead)
+def agent_plan_recovery(plan_id: str, payload: AgentRecoveryRequest):
+    try:
+        return AgentPlanRecoveryService(service).recover(
+            payload.session_id, plan_id, payload.version, payload.plan_hash, payload.step_id
+        )
     except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
         raise _http_error(exc) from None
 

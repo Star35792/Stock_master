@@ -1,10 +1,11 @@
 ---
 doc_type: plan
-status: current
+status: partially_superseded
 as_of: 2026-11-19
+superseded_by: plans/20261119-1457-agent-permissions-and-execution.md
 note: >-
-  汇总本轮用户完整目标与分阶段验收。第一阶段为 SQLite 会话与显式记忆；
-  结构化计划、统一权限、自动执行与失败恢复尚未交付，写执行默认关闭。
+  整体需求、存储决定和阶段4—5继续适用；阶段2—3“未交付”的状态由后续决定取代。
+  正文保留第一阶段落定时的事实与验证记录，当前阶段见living docs和取代文档。
 ---
 # DeepSeek 业务智能体整体需求与分阶段实施
 

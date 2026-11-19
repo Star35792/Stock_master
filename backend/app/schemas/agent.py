@@ -3,6 +3,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.agent_execution import AgentPlanExecution
+from app.schemas.agent_planning import AgentPlanRead
+
 
 class AgentChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -26,6 +29,13 @@ class AgentActionRead(BaseModel):
     preview: dict[str, Any]
     status: Literal["pending", "starting", "confirmed", "cancelled", "expired"] = "pending"
     task_id: int | None = None
+    plan_id: str | None = None
+    plan_version: int | None = None
+    plan_hash: str | None = None
+    step_id: str | None = None
+    parameters_hash: str | None = None
+    preview_hash: str | None = None
+    permission_scope: str | None = None
 
 
 class AgentSessionRead(BaseModel):
@@ -33,6 +43,8 @@ class AgentSessionRead(BaseModel):
     messages: list[dict[str, str]]
     steps: list[dict[str, Any]]
     actions: list[AgentActionRead]
+    plans: list[AgentPlanRead] = Field(default_factory=list)
+    executions: list[AgentPlanExecution] = Field(default_factory=list)
 
 
 class AgentMemoryWrite(BaseModel):

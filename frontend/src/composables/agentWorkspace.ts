@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 
 import {
+  createAgentPlan, decideAgentPlan, controlAgentPlan, recoverAgentPlanStep,
   decideAgentAction,
   fetchAgentSession,
   fetchAgentStatus,
@@ -13,6 +14,7 @@ import {
 } from "../agentApi";
 
 const defaultDeps = {
+  createAgentPlan, decideAgentPlan, controlAgentPlan, recoverAgentPlanStep,
   fetchAgentStatus, fetchAgentSession, fetchAgentTask, sendAgentMessage, decideAgentAction,
   fetchAgentSessions, fetchAgentMemories, saveAgentMemory, deleteAgentMemory,
 };
@@ -23,7 +25,10 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   const status = ref<Awaited<ReturnType<typeof fetchAgentStatus>> | null>(null);
   const tasks = ref<Record<number, AgentTask>>({});
   const input = ref("");
+  const mode = ref<"plan" | "chat">("plan");
+  const plansNeedReload = ref(false);
   const busy = ref(false);
+  const executionBusy = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const taskError = ref<string | null>(null);
@@ -37,6 +42,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   function saveSession(value: AgentSession, epoch = generation) {
     if (disposed || epoch !== generation) return;
     session.value = value;
+    plansNeedReload.value = false;
     try { sessionStorage.setItem(storageKey, value.session_id); } catch { /* memory-only mode */ }
   }
 
@@ -81,17 +87,23 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     } finally { if (!disposed && epoch === generation) loading.value = false; }
   }
 
-  async function send(message = input.value) {
+  async function send(message = input.value, requestMode = mode.value) {
     const text = message.trim();
     if (busy.value || loading.value || !text || !status.value?.configured || disposed) return;
     busy.value = true;
     error.value = null;
+    if (requestMode === "plan") plansNeedReload.value = true;
     try {
-      saveSession(await deps.sendAgentMessage(text, session.value?.session_id ?? null));
+      const submit = requestMode === "plan" ? deps.createAgentPlan : deps.sendAgentMessage;
+      saveSession(await submit(text, session.value?.session_id ?? null));
       input.value = "";
       await refreshTasks();
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : "智能体请求失败";
+      if (requestMode === "plan" && session.value) {
+        try { saveSession(await deps.fetchAgentSession(session.value.session_id)); }
+        catch { /* Keep approvals disabled until an explicit reload succeeds. */ }
+      }
     } finally { busy.value = false; }
   }
 
@@ -107,11 +119,65 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     } finally { busy.value = false; }
   }
 
+  async function decidePlan(planId: string, decision: "approve" | "reject") {
+    if (busy.value || loading.value || plansNeedReload.value || !session.value || disposed) return;
+    const plan = session.value.plans?.find(item => item.plan_id === planId);
+    if (!plan) return;
+    busy.value = true;
+    error.value = null;
+    try {
+      saveSession(await deps.decideAgentPlan(plan, session.value.session_id, decision));
+    } catch (cause) {
+      plansNeedReload.value = true;
+      error.value = cause instanceof Error ? cause.message : "计划批准失败，请重新载入后审阅";
+    } finally { busy.value = false; }
+  }
+
+  async function controlPlan(planId: string, operation: "advance" | "refresh" | "cancel") {
+    if (disposed || loading.value || !session.value || plansNeedReload.value) return;
+    if (busy.value && !(operation === "cancel" && executionBusy.value)) return;
+    const plan = session.value.plans?.find(item => item.plan_id === planId);
+    if (!plan) return;
+    const epoch = ++generation;
+    busy.value = true;
+    executionBusy.value = operation === "advance";
+    error.value = null;
+    try { saveSession(await deps.controlAgentPlan(plan, session.value.session_id, operation), epoch); }
+    catch (cause) {
+      if (epoch === generation && !disposed) {
+        plansNeedReload.value = true;
+        error.value = cause instanceof Error ? cause.message : "计划执行状态待核实，请重新载入";
+      }
+    } finally {
+      if (epoch === generation && !disposed) { busy.value = false; executionBusy.value = false; }
+    }
+  }
+
+  async function recoverPlanStep(planId: string, stepId: string) {
+    if (disposed || busy.value || loading.value || !session.value || plansNeedReload.value) return;
+    const plan = session.value.plans?.find(item => item.plan_id === planId);
+    if (!plan) return;
+    const epoch = ++generation;
+    busy.value = true;
+    executionBusy.value = true;
+    error.value = null;
+    try { saveSession(await deps.recoverAgentPlanStep(plan, session.value.session_id, stepId), epoch); }
+    catch (cause) {
+      if (epoch === generation && !disposed) {
+        plansNeedReload.value = true;
+        error.value = cause instanceof Error ? cause.message : "原任务证据暂不可用，请重新载入后核验";
+      }
+    } finally {
+      if (epoch === generation && !disposed) { busy.value = false; executionBusy.value = false; }
+    }
+  }
+
   function reset() {
     if (busy.value) return;
     generation += 1;
     loading.value = false;
     session.value = null;
+    plansNeedReload.value = false;
     error.value = null;
     input.value = "";
     tasks.value = {};
@@ -151,5 +217,5 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     finally { busy.value = false; }
   }
 
-  return { session, status, tasks, input, busy, loading, error, taskError, pendingActions, sessions, memories, restore, remember, forget, load, send, decide, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; } };
+  return { session, status, tasks, input, mode, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; } };
 }

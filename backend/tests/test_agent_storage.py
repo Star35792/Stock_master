@@ -16,6 +16,7 @@ from app.repositories.agent import AgentStateConflict
 from app.schemas.agent import AgentMemoryWrite
 from app.services.agent import AgentConflictError, AgentService
 from app.services.agent_state import AgentStateStore, AgentStorageUnavailableError
+from tests.test_agent import prepare_sync
 
 
 @pytest.fixture
@@ -99,12 +100,12 @@ def test_confirmation_intent_survives_failure_and_is_never_blindly_replayed(stor
     tools.preview.return_value = {"executable": True}
     tools.start.side_effect = RuntimeError("simulated connection loss after task creation")
     agent = make_agent(store, response=proposal_response(), tools=tools)
-    result = agent.chat("同步")
-    with pytest.raises(RuntimeError):
-        agent.decide(result.session_id, result.actions[0].action_id, "confirm")
+    result = prepare_sync(agent)
+    unknown, task_id = agent.decide(result.session_id, result.actions[0].action_id, "confirm")
+    assert task_id is None and unknown.executions[0].steps[0].status == "unknown"
     restored = make_agent(AgentStateStore(factory), tools=tools)
     assert restored.get(result.session_id).actions[0].status == "starting"
-    with pytest.raises(AgentConflictError, match="不会重复执行"):
+    with pytest.raises(AgentConflictError, match="不能重复执行"):
         restored.decide(result.session_id, result.actions[0].action_id, "confirm")
     assert tools.start.call_count == 1
 
@@ -116,7 +117,7 @@ def test_phase_one_write_gate_blocks_confirm_even_with_valid_action(storage, mon
     tools.preview.return_value = {"executable": True}
     agent = make_agent(store, response=proposal_response(), tools=tools)
     result = agent.chat("同步")
-    with pytest.raises(AgentConflictError, match="计划与权限"):
+    with pytest.raises(AgentConflictError, match="写执行仍关闭"):
         agent.decide(result.session_id, result.actions[0].action_id, "confirm")
     tools.start.assert_not_called()
 
@@ -226,7 +227,7 @@ def test_failed_confirmation_intent_is_not_executed_or_left_in_cache(storage, mo
     tools = Mock()
     tools.preview.return_value = {"executable": True}
     agent = make_agent(store, response=proposal_response(), tools=tools)
-    proposal = agent.chat("同步")
+    proposal = prepare_sync(agent)
     with monkeypatch.context() as patcher:
         patcher.setattr(
             store.repository,

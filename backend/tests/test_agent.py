@@ -98,6 +98,31 @@ def service(*responses):
     )
 
 
+def prepare_sync(agent):
+    payload = {
+        "intent": "data_maintenance",
+        "goal": "同步日线",
+        "data_sources": ["可信日线服务"],
+        "completion_condition": "原任务完成后核验数据",
+        "steps": [
+            {
+                "step_id": "collect",
+                "tool": "sync_daily_data",
+                "purpose": "同步",
+                "parameters": {},
+                "completion_condition": "任务成功并保留审计",
+            }
+        ],
+    }
+    agent.client.complete = Mock(return_value=call("submit_research_plan", payload))
+    view = agent.plan("同步日线")
+    plan = view.plans[-1]
+    agent.decide_plan(view.session_id, plan.plan_id, plan.version, plan.plan_hash, "approve")
+    return agent.executor.control(
+        view.session_id, plan.plan_id, plan.version, plan.plan_hash, "advance"
+    )
+
+
 def test_read_tool_loop_keeps_facts_and_server_owned_roles():
     agent, tools, _ = service(
         call("market_summary", {"symbol": "600000.SH"}), {"content": "收盘12.300000"}
@@ -113,7 +138,7 @@ def test_read_tool_loop_keeps_facts_and_server_owned_roles():
 
 def test_proposal_does_not_write_and_confirmation_replays_same_task():
     agent, tools, _ = service(call("sync_daily_data"))
-    view = agent.chat("同步日线")
+    view = prepare_sync(agent)
     assert not tools.starts
     action = view.actions[0]
     action.parameters["forged"] = True
@@ -127,7 +152,7 @@ def test_proposal_does_not_write_and_confirmation_replays_same_task():
 
 def test_concurrent_confirmation_starts_once():
     agent, tools, _ = service(call("sync_daily_data"))
-    view = agent.chat("同步")
+    view = prepare_sync(agent)
 
     def confirm():
         try:
@@ -166,7 +191,8 @@ def test_existing_pending_or_running_action_blocks_second_write(monkeypatch):
     view = agent.chat("同步")
     agent.chat("再同步", view.session_id)
     assert len(tools.previews) == 1
-    agent.decide(view.session_id, view.actions[0].action_id, "confirm")
+    with pytest.raises(AgentConflictError, match="计划授权"):
+        agent.decide(view.session_id, view.actions[0].action_id, "confirm")
     agent.chat("再同步", view.session_id)
     assert len(tools.previews) == 1
 
@@ -291,13 +317,23 @@ def test_backtest_worker_consumes_actual_persisted_result_contract(monkeypatch):
 
     monkeypatch.setattr(tools_module, "SessionLocal", session)
     tools = AgentTools()
+    monkeypatch.setattr(tools, "_validate_execution_grant", lambda _job: None)
     monkeypatch.setattr(tools, "context", context)
+    job.metadata_["confirmation_id"] = "worker-confirmation-000001"
+    job.metadata_["_agent_action"] = tools.action_identity(
+        "run_factor_backtest", job.metadata_["parameters"], job.metadata_["confirmation_id"]
+    ).model_dump(mode="json")
+    monkeypatch.setattr(
+        tools_module,
+        "AgentRecoveryRepository",
+        lambda: SimpleNamespace(backtests=lambda *a: []),
+    )
     tools.jobs = SimpleNamespace(get=lambda *_: job, finish=Mock())
     runner = Mock(return_value=PersistedBacktestResult(run_id=42, result=None))
     monkeypatch.setattr(
         tools_module,
         "StrategyResearchService",
-        lambda: SimpleNamespace(run_factor_selection=runner),
+        lambda **kwargs: SimpleNamespace(run_factor_selection=runner),
     )
     monkeypatch.setattr(
         tools_module, "check_factor_selection", lambda *a, **k: {"runnable_now": True}

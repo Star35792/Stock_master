@@ -18,6 +18,7 @@ from app.repositories.factor.recovery import FactorRecoveryRepository
 from app.repositories.strategy.price_value_screen import PriceValueScreenRepository
 from app.repositories.system import DataQualityIssueRepository, JobLogRepository
 from app.scheduler.database_job_lock import database_job_lock
+from app.schemas.agent_recovery import AgentActionIdentity
 from app.schemas.operations import (
     OperationsActionPreview,
     OperationsActionRead,
@@ -33,6 +34,7 @@ from app.services.job_lease import merge_job_lease_metadata
 from app.services.job_logging import logged_job
 from app.services.price_value_input_prep import PriceValueInputPrepService
 from app.services.price_value_screen import PriceValueScreenService
+from app.utils.agent_identity import parameters_hash
 from app.utils.duckdb_write_lock import duckdb_write_lock
 
 logger = logging.getLogger(__name__)
@@ -214,17 +216,34 @@ class OperationsActionService:
         db: Session,
         *,
         request: OperationsActionStartRequest,
+        agent_identity: dict | None = None,
     ) -> OperationsActionRead:
         # Single API worker, plus the shared OS writer guard for maintenance jobs.
         with _start_lock, duckdb_write_lock(self.write_lock_path):
-            return self._start_locked(db, request=request)
+            return self._start_locked(db, request=request, agent_identity=agent_identity)
 
     def _start_locked(
         self,
         db: Session,
         *,
         request: OperationsActionStartRequest,
+        agent_identity: dict | None = None,
     ) -> OperationsActionRead:
+        if agent_identity is not None:
+            identity = AgentActionIdentity.model_validate(agent_identity)
+            expected_action = {
+                "sync_daily_data": "daily_data_sync",
+                "repair_daily_gaps": "daily_bar_gap_backfill",
+                "rebuild_factor_profiles": "factor_profile_rebuild",
+            }.get(identity.tool)
+            if (
+                request.idempotency_key != f"agent:{identity.confirmation_id}"
+                or request.action_type != expected_action
+                or identity.code_version != settings.app_code_version
+                or identity.parameters_hash != parameters_hash(identity.tool, request.parameters)
+            ):
+                raise OperationsActionConflictError("智能体确认与运维动作身份不一致。")
+            agent_identity = identity.model_dump(mode="json")
         normalized = self._normalize_parameters(request.action_type, request.parameters)
         request_hash = self._request_hash(request.action_type, normalized)
         existing = self.job_repository.get_operator_request(
@@ -236,6 +255,11 @@ class OperationsActionService:
                 raise OperationsActionConflictError(
                     "idempotency_key was already used for a different action request"
                 )
+            if (
+                agent_identity is not None
+                and (existing.metadata_ or {}).get("_agent_action") != agent_identity
+            ):
+                raise OperationsActionConflictError("原任务的智能体确认身份不一致，不能重放。")
             return self.to_read(existing)
         preview = self.preview(
             db,
@@ -254,6 +278,7 @@ class OperationsActionService:
                 "request_hash": request_hash,
                 "phase": "queued",
                 "preview": preview.model_dump(mode="json"),
+                **({"_agent_action": agent_identity} if agent_identity is not None else {}),
             },
             repository=self.job_repository,
         )
@@ -301,6 +326,10 @@ class OperationsActionService:
             job = self.job_repository.get(db, action_id)
             if job is None or job.job_name != ACTION_JOB_NAME or job.status != "running":
                 return
+            if str((job.metadata_ or {}).get("idempotency_key", "")).startswith("agent:"):
+                from app.services.agent_tools import AgentTools
+
+                AgentTools._validate_execution_grant(job)
             self._set_phase(db, job, "running")
             metadata = job.metadata_ or {}
             action_type = metadata["action_type"]

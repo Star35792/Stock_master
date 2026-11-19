@@ -15,10 +15,18 @@ from app.database.positions_session import PositionsSessionLocal
 from app.database.research_session import ResearchSessionLocal
 from app.database.session import SessionLocal
 from app.portfolio import PortfolioAsset, PortfolioConstraints
+from app.repositories.agent_recovery import (
+    AGENT_EVIDENCE_KEY,
+    AgentBacktestRepository,
+    AgentRecoveryRepository,
+)
 from app.repositories.system import JobLogRepository
 from app.scheduler.database_job_lock import database_job_lock
+from app.schemas.agent_recovery import AgentActionIdentity
 from app.schemas.operations import OperationsActionStartRequest
 from app.schemas.strategy import FactorSelectionBacktestRequest
+from app.services.agent_recovery import AgentEvidenceRecovery
+from app.services.backtest import DailyBacktestService
 from app.services.backtest_query import BacktestQueryService
 from app.services.data_quality import DataQualityQueryService
 from app.services.factor import FactorQueryService
@@ -33,6 +41,7 @@ from app.services.research_preflight import check_factor_selection
 from app.services.research_workflow import ResearchWorkflowService
 from app.services.strategy_research import StrategyResearchService
 from app.strategies import FactorScoreSpec
+from app.utils.agent_identity import parameters_hash
 from app.utils.duckdb_write_lock import duckdb_write_lock
 
 
@@ -302,7 +311,31 @@ class AgentTools:
             }
 
     def start(self, name, args, preview, action_id):
+        from app.services.agent_permissions import validate_grant
+
+        grant = preview.get("_agent_grant")
+        validate_grant(grant, name, args, action_id)
+        args = TOOLS[name].arguments.model_validate(args).model_dump(mode="json")
+        identity = self.action_identity(name, args, action_id)
         with database_job_lock, SessionLocal() as db:
+            previous = AgentRecoveryRepository().jobs(db, action_id)
+            if len(previous) > 1:
+                raise ValueError("原确认存在重复任务，不能重新创建。")
+            if previous:
+                metadata = previous[0].metadata_ or {}
+                normalized = (
+                    self.operations._normalize_parameters(MAINTENANCE[name], args)
+                    if name in MAINTENANCE
+                    else args
+                )
+                if (
+                    not AgentEvidenceRecovery.identity_matches(
+                        metadata.get(AGENT_EVIDENCE_KEY), identity
+                    )
+                    or metadata.get("parameters") != normalized
+                ):
+                    raise ValueError("原任务身份冲突，不能重新创建。")
+                return previous[0].id
             if name in MAINTENANCE:
                 action = self.operations.start(
                     db,
@@ -311,11 +344,29 @@ class AgentTools:
                         parameters=args,
                         idempotency_key=f"agent:{action_id}",
                     ),
+                    agent_identity=identity.model_dump(mode="json"),
                 )
+                # A failure here leaves a known starting intent and no automatic replay.
+                with duckdb_write_lock("data/duckdb_write.lock", timeout_seconds=3):
+                    job = self.jobs.get(db, action.action_id)
+                    job.metadata_ = {
+                        **(job.metadata_ or {}),
+                        "agent_authorization": grant,
+                        "parameters_hash": parameters_hash(name, args),
+                        "code_version": settings.app_code_version,
+                    }
+                    db.commit()
                 return action.action_id
-            for existing in self.jobs.list_recent_by_name(db, job_name="agent_action"):
-                if (existing.metadata_ or {}).get("confirmation_id") == action_id:
-                    return existing.id
+            if name == "run_factor_backtest":
+                with duckdb_write_lock("data/research_write.lock", timeout_seconds=3):
+                    with ResearchSessionLocal() as research:
+                        if AgentRecoveryRepository().backtests(research, action_id):
+                            raise ValueError("原确认已有研究产物，需核验原任务，不能重新创建。")
+            elif name == "create_portfolio_from_backtest":
+                if AgentRecoveryRepository().portfolios(db, action_id):
+                    raise ValueError("原确认已有组合草案，需核验原任务，不能重新创建。")
+            else:
+                raise ValueError("工具不在允许的写动作清单中。")
             job = self.jobs.create(
                 db,
                 job_name="agent_action",
@@ -329,12 +380,43 @@ class AgentTools:
                         "confirmation_id": action_id,
                         "phase": "queued",
                         "code_version": settings.app_code_version,
+                        "parameters_hash": identity.parameters_hash,
+                        AGENT_EVIDENCE_KEY: identity.model_dump(mode="json"),
+                        "agent_authorization": grant,
                     },
                     repository=self.jobs,
                 ),
             )
             db.commit()
             return job.id
+
+    @staticmethod
+    def action_identity(name, args, action_id, code_version=None):
+        return AgentActionIdentity(
+            confirmation_id=action_id,
+            tool=name,
+            parameters_hash=parameters_hash(name, args),
+            code_version=code_version or settings.app_code_version,
+        )
+
+    def recover_action(self, name, args, action_id, *, code_version, task_id=None):
+        args = TOOLS[name].arguments.model_validate(args).model_dump(mode="json")
+        identity = self.action_identity(name, args, action_id, code_version)
+        normalized = (
+            self.operations._normalize_parameters(MAINTENANCE[name], args)
+            if name in MAINTENANCE
+            else args
+        )
+        with duckdb_write_lock("data/research_write.lock", timeout_seconds=3):
+            with SessionLocal() as db, ResearchSessionLocal() as research:
+                return AgentEvidenceRecovery().inspect(
+                    db,
+                    research,
+                    identity=identity,
+                    parameters=args,
+                    normalized_parameters=normalized,
+                    task_id=task_id,
+                )
 
     def task(self, task_id):
         with SessionLocal() as db:
@@ -354,12 +436,108 @@ class AgentTools:
                 "error_message": job.error_message,
             }
 
+    def task_for_action(self, task_id, confirmation_id, tool, parameters):
+        from app.services.agent_execution_contract import parameters_hash
+
+        with SessionLocal() as db:
+            job = self.jobs.get(db, task_id)
+            if job is None:
+                raise ValueError("任务不存在。")
+            metadata = job.metadata_ or {}
+            if job.job_name == "operator_action" and tool in MAINTENANCE:
+                matches = (
+                    metadata.get("idempotency_key") == f"agent:{confirmation_id}"
+                    and metadata.get("action_type") == MAINTENANCE[tool]
+                    and metadata.get("parameters")
+                    == self.operations._normalize_parameters(MAINTENANCE[tool], parameters)
+                )
+            else:
+                matches = (
+                    job.job_name == "agent_action"
+                    and metadata.get("tool") == tool
+                    and metadata.get("confirmation_id") == confirmation_id
+                    and parameters_hash(tool, metadata.get("parameters", {}))
+                    == parameters_hash(tool, parameters)
+                )
+            if not matches or metadata.get("parameters_hash") != parameters_hash(tool, parameters):
+                raise ValueError("任务确认、工具或参数身份不匹配。")
+            if metadata.get("completion_status") == "unknown":
+                return {"task_id": task_id, "status": "unknown", "result": None}
+            identity = AgentActionIdentity.model_validate(metadata.get(AGENT_EVIDENCE_KEY))
+        report = self.recover_action(
+            tool, parameters, confirmation_id, code_version=identity.code_version, task_id=task_id
+        )
+        return {
+            "task_id": task_id,
+            "status": "success" if report.status == "verified" else report.status,
+            "result": report.outputs if report.status == "verified" else None,
+            "recovery": report.model_dump(mode="json"),
+        }
+
+    @staticmethod
+    def _validate_execution_grant(job):
+        from app.services.agent_execution_contract import parameters_hash
+        from app.services.agent_permissions import validate_grant
+
+        metadata = job.metadata_ or {}
+        grant = metadata.get("agent_authorization") or {}
+        if job.job_name == "operator_action":
+            name = next(
+                (
+                    name
+                    for name, action in MAINTENANCE.items()
+                    if action == metadata.get("action_type")
+                ),
+                None,
+            )
+            # Approved original tool parameters are stored in the server session.
+            from app.services.agent_state import AgentStateStore
+
+            saved = AgentStateStore().load(grant.get("session_id")) or {}
+            action = next(
+                (
+                    v["view"]
+                    for v in saved.get("actions", {}).values()
+                    if v["view"].get("task_id") == job.id
+                ),
+                {},
+            )
+            args, confirmation_id = action.get("parameters", {}), action.get("action_id")
+            if (
+                metadata.get("idempotency_key") != f"agent:{confirmation_id}"
+                or name is None
+                or metadata.get("parameters")
+                != OperationsActionService()._normalize_parameters(MAINTENANCE[name], args)
+            ):
+                raise ValueError("维护任务参数超出授权范围。")
+        else:
+            name, args = metadata.get("tool"), metadata.get("parameters", {})
+            confirmation_id = metadata.get("confirmation_id")
+        if metadata.get("parameters_hash") != parameters_hash(name, args):
+            raise ValueError("任务参数哈希不匹配。")
+        validate_grant(grant, name, args, confirmation_id, task_id=job.id)
+
     def execute(self, task_id):
         with SessionLocal() as db:
             job = self.jobs.get(db, task_id)
             if job is None:
                 return
             operator = job.job_name == "operator_action"
+        try:
+            self._validate_execution_grant(job)
+        except Exception:
+            with database_job_lock, SessionLocal() as db:
+                current = self.jobs.get(db, task_id)
+                if current is not None and current.status == "running":
+                    self.jobs.finish(
+                        db,
+                        job_log=current,
+                        status="failed",
+                        error_message="计划授权、代码或期限已失效，未启动业务执行。",
+                        metadata={"phase": "authorization_blocked"},
+                    )
+                    db.commit()
+            return
         if operator:
             self.operations.execute(task_id)
             return
@@ -370,9 +548,20 @@ class AgentTools:
                     return
                 metadata = job.metadata_
                 name, args = metadata["tool"], metadata["parameters"]
+                identity = self.action_identity(name, args, metadata["confirmation_id"])
+                if not AgentEvidenceRecovery.identity_matches(
+                    metadata.get(AGENT_EVIDENCE_KEY), identity
+                ):
+                    raise ValueError("执行身份缺失或代码/参数变化，请核验原任务。")
                 if name == "run_factor_backtest":
+                    if AgentRecoveryRepository().backtests(research, identity.confirmation_id):
+                        raise ValueError("原确认已有研究产物，不能重复执行。")
                     payload = self.backtest_payload(args)
-                    service = StrategyResearchService()
+                    service = StrategyResearchService(
+                        backtest_service=DailyBacktestService(
+                            backtest_repository=AgentBacktestRepository(identity)
+                        )
+                    )
                     checks = check_factor_selection(
                         db,
                         payload=payload,
@@ -430,6 +619,7 @@ class AgentTools:
                             "as_of_date": report.as_of_date.isoformat(),
                             "cash": str(report.total_equity),
                             "current_quantity": 0,
+                            AGENT_EVIDENCE_KEY: identity.model_dump(mode="json"),
                         },
                     )
                     result = plan.model_dump(mode="json")

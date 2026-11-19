@@ -4,7 +4,9 @@
 
 ## 1. 设计原则
 
-2026-11-19 新增独立 SQLite `data/agent.db`（`AGENT_DB_PATH`），初始化入口 `app/database/agent_session.py::initialize_agent_database`，独立 `AgentBase`，不注册到 DuckDB metadata。两表：`agent_session(id, revision, state JSON, updated_at)` 与 `agent_memory(id, kind, content, source_session_id, revision, updated_at)`。修订号更新采用条件 UPDATE RETURNING；使用 WAL/FULL、短事务与5秒 busy timeout。会话最多64个、快照256KiB，显式记忆最多32条、每条400字符，详细用途/恢复边界见[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)。现有三库和温层数据不迁移；计划与统一权限还未交付。
+2026-11-19 新增独立 SQLite `data/agent.db`（`AGENT_DB_PATH`），初始化入口 `app/database/agent_session.py::initialize_agent_database`，独立 `AgentBase`，不注册到 DuckDB metadata。两表：`agent_session(id, revision, state JSON, updated_at)` 与 `agent_memory(id, kind, content, source_session_id, revision, updated_at)`。修订号更新采用条件 UPDATE RETURNING；使用 WAL/FULL、短事务与5秒 busy timeout。会话最多64个、快照256KiB，显式记忆最多32条、每条400字符。第二阶段在原 state JSON 增加有界 `plans` 列表（最多4版/8步），保存输入来源、依赖/绑定、内容哈希、代码版本、有效期与批准状态；旧快照缺字段时读空列表，不做schema迁移。批准仅保存状态；第三阶段在同一JSON新增executions字典，每计划唯一实例、最多4份/各8步，含CAS调用检查点、一次性提案、原任务ID及标量摘要，不新增表。统一权限与执行见[阶段3决定](../plans/20261119-1457-agent-permissions-and-execution.md)，恢复/跨库核验仍留后续。见[整体需求](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)和[阶段2决定](../plans/20261119-1405-agent-reviewable-plans.md)。
+
+第四阶段不新增表或ORM列：session.state.executions.steps保存有界read_checkpoint及summary.recovery；metadata.job_log.metadata._agent_action、strategy.backtest_run.parameters._agent_action、portfolio.portfolio_plan.input_snapshot._agent_action绑定agent_action_v1确认ID/工具/参数哈希/原代码版本。研究身份在首次flush前写入，同一研究事务持久化；旧产物不补造确认血缘。详见[恢复证据合同](../plans/20261119-1448-agent-recovery-and-evidence.md)。
 
 2026-11-19 索引一致性维护不新增 schema、字段或键语义：定向恢复既有 `uq_job_log_id` 与 `ix_compact_market_security_symbol`，用临时唯一 guard 保护分事务重建，全列 SHA256/行数、索引定义和重开后的全部键点查保持一致，新增唯一必要任务审计。诊断入口 `scripts/maintenance/repair_index_consistency.py` 默认只读，不在启动初始化中自动重建索引。证据见[运维恢复决策](../plans/20261119-1014-operations-recovery-and-index-consistency.md)。
 

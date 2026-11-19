@@ -6,6 +6,9 @@ export interface AgentAction {
   preview: Record<string, unknown>;
   status: "pending" | "starting" | "confirmed" | "cancelled" | "expired";
   task_id: number | null;
+  plan_id: string | null;
+  step_id: string | null;
+  permission_scope: string | null;
 }
 
 export interface AgentSession {
@@ -13,6 +16,44 @@ export interface AgentSession {
   messages: Array<{ role: string; content: string }>;
   steps: Array<{ tool: string; title: string; result: unknown }>;
   actions: AgentAction[];
+  plans: AgentPlan[];
+  executions: AgentExecution[];
+}
+
+export interface AgentExecution {
+  plan_id: string;
+  version: number;
+  plan_hash: string;
+  status: "ready" | "running" | "awaiting_confirmation" | "waiting_task" | "completed" | "blocked" | "cancelled";
+  reason: string;
+  goal_verified: false;
+  dispatches: number;
+  advances: number;
+  deadline: number;
+  steps: Array<{ step_id: string; status: string; task_id: number | null; action_id: string | null; summary: Record<string, unknown>; reason: string; attempts: number; read_checkpoint?: Record<string, unknown> | null }>;
+}
+
+export interface AgentPlan {
+  plan_id: string;
+  version: number;
+  plan_hash: string;
+  code_version: string;
+  created_at: number;
+  expires_at: number;
+  status: "needs_input" | "draft" | "approved" | "rejected" | "superseded" | "expired";
+  intent: "data_maintenance" | "stock_research" | "position_analysis" | "portfolio_planning" | "consultation";
+  goal: string;
+  assumptions: string[];
+  data_sources: string[];
+  completion_condition: string;
+  clarification_questions: string[];
+  missing_inputs: string[];
+  steps: Array<{
+    step_id: string; tool: string; purpose: string; parameters: Record<string, unknown>;
+    input_evidence: Record<string, string>; depends_on: string[];
+    bindings: Array<{ parameter: string; source_step: string; output: string }>;
+    completion_condition: string;
+  }>;
 }
 
 export interface AgentStatus {
@@ -20,6 +61,8 @@ export interface AgentStatus {
   write_enabled: boolean;
   model: string;
   tools: Array<{ name: string; title: string; requires_confirmation: boolean }>;
+  planning_available: boolean;
+  plan_execution_enabled: boolean;
 }
 
 export interface AgentTask {
@@ -56,6 +99,10 @@ async function request<T>(path: string, body?: unknown, method?: string): Promis
 export const fetchAgentStatus = () => request<AgentStatus>("/status");
 export const fetchAgentSession = (id: string) => request<AgentSession>(`/sessions/${encodeURIComponent(id)}`);
 export const sendAgentMessage = (message: string, session_id: string | null) => request<AgentSession>("/chat", { message, session_id });
+export const createAgentPlan = (message: string, session_id: string | null) => request<AgentSession>("/plans", { message, session_id });
+export const decideAgentPlan = (plan: AgentPlan, session_id: string, decision: "approve" | "reject") => request<AgentSession>(`/plans/${encodeURIComponent(plan.plan_id)}/decision`, { session_id, version: plan.version, plan_hash: plan.plan_hash, decision });
+export const controlAgentPlan = (plan: AgentPlan, session_id: string, operation: "advance" | "refresh" | "cancel") => request<AgentSession>(`/plans/${encodeURIComponent(plan.plan_id)}/execution`, { session_id, version: plan.version, plan_hash: plan.plan_hash, operation });
+export const recoverAgentPlanStep = (plan: AgentPlan, session_id: string, step_id: string) => request<AgentSession>(`/plans/${encodeURIComponent(plan.plan_id)}/recovery`, { session_id, version: plan.version, plan_hash: plan.plan_hash, step_id });
 export const decideAgentAction = (actionId: string, session_id: string, decision: "confirm" | "cancel") => request<AgentSession>(`/actions/${encodeURIComponent(actionId)}/decision`, { session_id, decision });
 export const fetchAgentTask = (id: number) => request<AgentTask>(`/tasks/${id}`);
 export const fetchAgentSessions = () => request<AgentSessionSummary[]>("/sessions");

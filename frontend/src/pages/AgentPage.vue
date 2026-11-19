@@ -3,9 +3,10 @@ import { Bot, RefreshCw, Send, Sparkles } from "@lucide/vue";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
 import { createAgentWorkspace } from "../composables/agentWorkspace";
+import AgentPlanPanel from "../components/AgentPlanPanel.vue";
 import type { AgentMemory } from "../agentApi";
 
-const { session, status, tasks, input, busy, loading, error, taskError, sessions, memories, restore, remember, forget, load, send, decide, reset, refreshTasks, dispose } = createAgentWorkspace();
+const { session, status, tasks, input, mode, plansNeedReload, busy, executionBusy, loading, error, taskError, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose } = createAgentWorkspace();
 const memoryText = ref("");
 const memoryKind = ref<"preference" | "constraint" | "lesson">("preference");
 const editingMemory = ref<AgentMemory | null>(null);
@@ -37,19 +38,19 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
     <div class="agent-connection" role="status">
       <span class="agent-dot" :class="{ ready: status?.configured }" />
       <strong>{{ loading ? "连接中" : status?.configured ? `${status.model} · 已配置` : "DeepSeek 尚未配置" }}</strong>
-      <span>对话与工具结果摘要会发送给 DeepSeek；采集、修复和研究写操作需逐项确认。</span>
+      <span>需求与有界对话会发送给 DeepSeek；计划批准与业务执行分开。</span>
       <button :disabled="loading || busy" class="agent-icon" aria-label="重新连接智能体" @click="load"><RefreshCw :size="16" /></button>
     </div>
     <p v-if="!loading && status && !status.configured" class="agent-error">请在后端配置 DEEPSEEK_API_KEY 并重启服务；此页面不会读取或展示密钥。</p>
     <p v-if="error" role="alert" class="agent-error">{{ error }}</p>
-    <p v-if="status && !status.write_enabled" class="agent-muted">当前阶段：SQLite 会话与记忆。写执行待计划和权限阶段验收，当前支持查询与操作预览。</p>
+    <p class="agent-muted">当前阶段：故障恢复与证据核验。先批准计划，再按范围执行；只读瞬时失败有限重试。写步骤仍需逐项确认，默认关闭；结果未知时核验原任务，不重复执行。</p>
     <label v-if="sessions.length" class="agent-history">恢复历史会话 <select :disabled="busy || loading" :value="session?.session_id ?? ''" @change="restore(($event.target as HTMLSelectElement).value)"><option value="" disabled>选择已保存对话</option><option v-for="item in sessions" :key="item.session_id" :value="item.session_id">{{ item.title }}</option></select></label>
 
     <div class="agent-grid">
       <section class="agent-conversation" aria-label="研究对话">
         <div v-if="!session?.messages.length" class="agent-welcome">
           <div class="agent-bot"><Bot :size="30" /></div><h2>你希望完成什么研究？</h2>
-          <p>我会查询现有事实，解释阻断原因，并把可执行步骤变成供你核对的提案。</p>
+          <p>先明确目标和缺失参数，再展示供你审阅的计划。需要现有事实时可切换“查询与解释”。</p>
           <button v-for="example in examples" :key="example" :disabled="busy || !status?.configured" @click="input = example">{{ example }} <span>↗</span></button>
         </div>
         <div v-else class="agent-messages" aria-live="polite">
@@ -59,13 +60,16 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
         </div>
         <p v-if="busy" role="status" class="agent-working">正在处理，请稍候……</p>
         <form class="agent-composer" @submit.prevent="send()">
+          <div class="agent-mode"><label for="agent-mode">处理方式</label><select id="agent-mode" v-model="mode" :disabled="busy || loading"><option value="plan">先规划</option><option value="chat">查询与解释</option></select></div>
           <label for="agent-input">研究需求</label>
           <textarea id="agent-input" v-model="input" :disabled="busy" maxlength="4000" rows="3" placeholder="例如：检查日线缺口，给出可修复范围；先展示方案再执行。" @keydown.ctrl.enter.prevent="send()" />
-          <div><span>Ctrl + Enter 发送 · 金融结果以原服务与工具记录为准</span><button :disabled="busy || !status?.configured || !input.trim()"><Send :size="16" />发送</button></div>
+          <div><span>{{ mode === 'plan' ? '补充参数会生成新版本，并替代旧计划' : '查询结果以原服务与工具记录为准' }}</span><button :disabled="busy || loading || !status?.configured || !input.trim()"><Send :size="16" />{{ mode === 'plan' ? '生成计划' : '发送查询' }}</button></div>
         </form>
       </section>
 
       <aside class="agent-evidence" aria-label="操作与证据">
+        <p v-if="plansNeedReload && !busy" role="alert" class="agent-error">计划状态尚未核实，批准已停用。请点击重新连接，再审阅当前版本。</p>
+        <AgentPlanPanel :plans="session?.plans ?? []" :executions="session?.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" />
         <section class="agent-panel">
           <h2>长期记忆 <span>{{ memories.length }}/32</span></h2>
           <p class="agent-muted">仅保存你明确提交的偏好、约束和经验，存储于本地 SQLite。请勿填写密钥；记忆不作为行情事实或执行授权。</p>
@@ -86,9 +90,9 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
             <h3>{{ action.title }}<span :class="['agent-tag', action.status]">{{ labels[action.status] }}</span></h3>
             <p>{{ action.preview.summary }}</p>
             <details :open="action.status === 'pending'"><summary>参数与影响</summary><pre>{{ pretty(action.parameters) }}</pre><pre>{{ pretty(action.preview) }}</pre></details>
-            <p v-if="action.status === 'pending'" class="agent-muted">{{ status?.write_enabled ? '提案有效期10分钟；确认后会创建后台任务。' : '本阶段仅支持预览，执行尚未开放。' }}</p>
-            <div v-if="action.status === 'pending'" class="agent-action-buttons"><button :disabled="busy || !status?.write_enabled" @click="decide(action.action_id, 'confirm')">确认执行</button><button class="agent-secondary" :disabled="busy" @click="decide(action.action_id, 'cancel')">取消</button></div>
-            <div v-if="action.task_id" class="agent-task"><strong>任务 #{{ action.task_id }} · {{ labels[tasks[action.task_id]?.status ?? 'queued'] }}</strong><p>{{ tasks[action.task_id]?.error_message }}</p><details v-if="tasks[action.task_id]?.result"><summary>任务结果</summary><pre>{{ pretty(tasks[action.task_id]?.result) }}</pre></details><button class="agent-secondary" :disabled="busy" @click="send(`查询任务 ${action.task_id} 的状态与结果；若已完成，请复查并给出下一步建议。`)">复查并继续</button></div>
+            <p v-if="action.status === 'pending'" class="agent-muted">{{ !action.plan_id ? '独立预览没有计划授权，请在批准计划内重新预检。' : status?.write_enabled ? '逐项授权有效期最多10分钟；确认会重检来源与影响，再创建后台任务。' : '默认写执行关闭；可以审阅预检，确认此步骤尚未开放。' }}</p>
+            <div v-if="action.status === 'pending'" class="agent-action-buttons"><button :disabled="busy || !status?.write_enabled || !action.plan_id" @click="decide(action.action_id, 'confirm')">确认此步骤</button><button class="agent-secondary" :disabled="busy" @click="decide(action.action_id, 'cancel')">取消</button></div>
+            <div v-if="action.task_id" class="agent-task"><strong>任务 #{{ action.task_id }} · {{ labels[tasks[action.task_id]?.status ?? 'queued'] }}</strong><p>{{ tasks[action.task_id]?.error_message }}</p><details v-if="tasks[action.task_id]?.result"><summary>任务结果</summary><pre>{{ pretty(tasks[action.task_id]?.result) }}</pre></details><button class="agent-secondary" :disabled="busy" @click="send(`查询任务 ${action.task_id} 的状态与结果；若已完成，请复查并给出下一步建议。`, 'chat')">复查并继续</button></div>
           </article>
           <p v-if="taskError" role="alert" class="agent-error">{{ taskError }}</p>
         </section>
@@ -100,6 +104,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 </template>
 
 <style scoped>
+.agent-composer .agent-mode { justify-content: flex-start; margin-bottom: 12px; }.agent-mode label { margin: 0; }.agent-mode select { font: inherit; font-size: 12px; padding: 7px; border: 1px solid #dfe5ef; border-radius: 6px; color: #52617a; background: white; }
 .agent-history { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; font-size: 13px; color: #63718a; }.agent-history select { max-width: 70%; padding: 8px; border: 1px solid #dfe5ef; border-radius: 6px; }.agent-memory-form { display: grid; gap: 8px; }.agent-memory-form textarea, .agent-memory-form select { font: inherit; font-size: 12px; border: 1px solid #dfe5ef; border-radius: 6px; padding: 8px; width: 100%; }.agent-memory p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }.agent-memory { border-top: 1px solid #edf0f5; margin-top: 12px; padding-top: 4px; }
 .agent-page { max-width: 1600px; margin: 0 auto; padding: 30px; color: #1d293d; }
 .agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 22px; }

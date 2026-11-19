@@ -34,7 +34,7 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`plans/20261024-1522-training-window-selection-plan.md`](plans/20261024-1522-training-window-selection-plan.md) | plan | 2026-10-24 | — | — |
 | [`plans/20261119-1014-operations-recovery-and-index-consistency.md`](plans/20261119-1014-operations-recovery-and-index-consistency.md) | decision | 2026-11-19 | — | — |
-| [`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | plan | 2026-11-19 | — | 汇总本轮用户完整目标与分阶段验收。第一阶段为 SQLite 会话与显式记忆； 结构化计划、统一权限、自动执行与失败恢复尚未交付，写执行默认关闭。 |
+| [`plans/20261119-1448-agent-recovery-and-evidence.md`](plans/20261119-1448-agent-recovery-and-evidence.md) | decision | 2026-11-19 | — | 智能体第四阶段：有限只读重试、精确确认身份查询、原产物绑定及受控恢复。 已整合第二/第三阶段稳定源；默认写关闭，生产全流程仍留到第五阶段。 |
 | [`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md) | decision | 2026-10-24 | — | 决策不变；文中「6 张表」现为 7 张，研究库另含 strategy.external_observation。 |
 | [`relations/20261111-0300-intraday-snapshot-guard.md`](relations/20261111-0300-intraday-snapshot-guard.md) | decision | 2026-11-11 | — | — |
 | [`relations/20261111-1458-multi-source-reconciliation-activation.md`](relations/20261111-1458-multi-source-reconciliation-activation.md) | decision | 2026-11-11 | — | — |
@@ -76,7 +76,7 @@ note: >-
 | [`research/20261116-2207-backtest-comparison-acceptance.md`](research/20261116-2207-backtest-comparison-acceptance.md) | evidence | 2026-11-16 | — | — |
 | [`research/20261117-0310-portfolio-plan-discovery-acceptance.md`](research/20261117-0310-portfolio-plan-discovery-acceptance.md) | evidence | 2026-11-17 | — | — |
 
-## 部分被取代 `status: partially_superseded`（25 份）
+## 部分被取代 `status: partially_superseded`（28 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -87,6 +87,9 @@ note: >-
 | [`plans/20261021-1708-research-output-maximization-plan.md`](plans/20261021-1708-research-output-maximization-plan.md) | plan | 2026-10-21 | [`plans/20261025-2340-data-backfill-review-brief.md`](plans/20261025-2340-data-backfill-review-brief.md) | 优先级与工作量估算为计划快照，执行事实以补齐复核简报与其后的 ADR 为准。 |
 | [`plans/20261025-2340-data-backfill-review-brief.md`](plans/20261025-2340-data-backfill-review-brief.md) | plan | 2026-10-25 | [`relations/20261111-1810-industry-point-in-time-history.md`](relations/20261111-1810-industry-point-in-time-history.md) | 方案 C 的行业时点部分已于 2026-11-11 落地；ST 历史与指数成分历史序列仍为待决选项。 |
 | [`plans/20261118-1711-external-project-absorption-plan.md`](plans/20261118-1711-external-project-absorption-plan.md) | plan | 2026-11-18 | — | Hikyuu、New Tea Quant、TickFlow 两轮本地源码扫描的吸收方案与证据快照。A1、A2、B 首片及 C 训练窗统计诊断首片已交付；当前状态见取代文档及其引用。其余候选、准入条件和来源证据继续有效，不改变事实源或策略资格。真实公司行为仍 reject，候选内部顺序不替代 roadmap 的正式近期优先级。 |
+| [`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | plan | 2026-11-19 | — | 整体需求、存储决定和阶段4—5继续适用；阶段2—3“未交付”的状态由后续决定取代。 正文保留第一阶段落定时的事实与验证记录，当前阶段见living docs和取代文档。 |
+| [`plans/20261119-1405-agent-reviewable-plans.md`](plans/20261119-1405-agent-reviewable-plans.md) | decision | 2026-11-19 | — | 冻结计划、输入来源和审批合同继续适用；执行尚未交付的阶段描述由第三阶段取代。 正文保留第二阶段落定时的事实与验证，恢复与跨库核验继续留在第四阶段。 |
+| [`plans/20261119-1457-agent-permissions-and-execution.md`](plans/20261119-1457-agent-permissions-and-execution.md) | decision | 2026-11-19 | — | 第三阶段权限与执行合同继续适用；恢复待交付状态已由第四阶段决定取代。 正文保留第三阶段落定时的实施边界与验证记录；默认写关闭，未知写结果不重放。 |
 | [`relations/20260722-1519-autonomous-agent-team.md`](relations/20260722-1519-autonomous-agent-team.md) | config | 2026-07-22 | [`../AGENTS.md`](../AGENTS.md) | 文中引用的规则真源 AGENT.MD 已降级为兼容入口，协作规则与长期小组口径以仓库根 AGENTS.md 为准；本文保留为历史小组配置。 |
 | [`relations/20260722-1721-tiered-storage-architecture.md`](relations/20260722-1721-tiered-storage-architecture.md) | decision | 2026-07-22 | [`relations/20261023-1925-position-ledger-sqlite.md`](relations/20261023-1925-position-ledger-sqlite.md)、[`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md)、[`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md)、[`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | 分层思路仍在位；具体库划分与清理策略由后续决策扩展或取代，新增独立智能体 SQLite 状态库。 |
 | [`relations/20261021-1045-storage-split-phase1.md`](relations/20261021-1045-storage-split-phase1.md) | decision | 2026-10-21 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 决策在位，文中的容量与行数数字是当日执行快照。 |
@@ -112,4 +115,4 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`relations/20261013-2207-storage-diagnosis-and-plan.md`](relations/20261013-2207-storage-diagnosis-and-plan.md) | plan | 2026-10-13 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。 |
 
-合计 64 份带时间戳文档。
+合计 67 份带时间戳文档。
