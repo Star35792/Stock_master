@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
 const routes: RouteRecordRaw[] = [
+  { path: "/agent", name: "agent", component: () => import("./pages/AgentPage.vue") },
   { path: "/", redirect: "/overview" },
   { path: "/overview", name: "overview", component: () => import("./pages/OverviewPage.vue") },
   { path: "/research", name: "research", component: () => import("./pages/ResearchPage.vue") },

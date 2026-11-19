@@ -181,7 +181,7 @@ class PortfolioPlanRead(BaseModel):
     as_of_date: date
     status: Literal["draft"] = "draft"
     execution_allowed: Literal[False] = False
-    input_source: Literal["operator_provided"] = "operator_provided"
+    input_source: Literal["operator_provided", "agent_backtest_prefill"] = "operator_provided"
     total_equity: Decimal
     cash_before: Decimal
     target_cash: Decimal

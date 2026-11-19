@@ -6,8 +6,9 @@ superseded_by:
   - relations/20261023-1925-position-ledger-sqlite.md
   - relations/20261024-1427-research-database-split.md
   - relations/20261112-1341-local-storage-retention-and-cleanup.md
+  - plans/20261119-1049-agent-overall-plan-and-sqlite.md
 note: >-
-  分层思路仍在位；具体库划分与清理策略由后续三份决策取代。
+  分层思路仍在位；具体库划分与清理策略由后续决策扩展或取代，新增独立智能体 SQLite 状态库。
 ---
 # 分层存储架构
 

@@ -362,7 +362,7 @@ export interface PortfolioPlan {
   as_of_date: string;
   status: "draft";
   execution_allowed: false;
-  input_source: "operator_provided";
+  input_source: "operator_provided" | "agent_backtest_prefill";
   total_equity: string;
   cash_before: string;
   target_cash: string;

@@ -3,7 +3,7 @@ from functools import cached_property
 from hashlib import sha256
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,10 +24,17 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_code_version: str = Field(default_factory=source_code_version)
 
+    deepseek_api_key: SecretStr | None = Field(default=None, repr=False)
+    deepseek_model: str = "deepseek-flash"
+    deepseek_timeout_seconds: int = Field(default=45, ge=5, le=120)
+    agent_max_steps: int = Field(default=6, ge=1, le=10)
+    agent_db_path: str = "data/agent.db"
+    agent_write_enabled: bool = False
+
     metadata_db_path: str = "data/stock_master.duckdb"
 
-    # Real-position ledger lives in its own lightweight SQLite file. All other
-    # domains (raw/market/factor/.../trade) stay in the single DuckDB database;
+    # Position ledger and agent control state have separate SQLite files.
+    # Market/portfolio facts stay in the main DuckDB; research uses its own DuckDB;
     # see aiDoc/relations for the storage boundary decision.
     positions_db_path: str = "data/positions.db"
 

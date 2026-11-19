@@ -18,6 +18,7 @@ Stock Master 是一个面向 A 股、ETF 及后续量化研究场景的**个人�
 - V4 策略与回测：单策略研究合同、可复现回测、滚动窗口与样本外报告。
 - V5 组合、风控与持仓推演：组合草案、风险预算、paper 账户净值快照、正式风控评估、人工确认与模拟执行。
 - V6 可视化与运维：Vue3 工作台 + 运维概览/告警/失败定位，以及带预检、确认、幂等、后台进度和复查的人工处理动作。
+- 业务智能体按[整体需求与 SQLite 计划](aiDoc/plans/20261119-1049-agent-overall-plan-and-sqlite.md)分阶段建设：当前为 DeepSeek 查询/预览原型、SQLite 会话恢复和用户显式记忆；计划审批、统一权限、完整故障恢复与全流程执行待后续验收，写执行默认关闭。
 
 核心工程原则：
 
@@ -62,6 +63,8 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 
 服务地址为 `http://127.0.0.1:8000`，健康检查为 `GET /health`，接口文档为 `/docs`。
 入口 `backend/app/main.py` 启动时初始化主 DuckDB、研究 DuckDB 和 SQLite 持仓账本，并启动行情同步、估值输入准备和初筛三个后台 worker。数据源凭据与开关由 `backend/.env` 控制。
+
+同时初始化独立 SQLite `agent.db`。在 `backend/.env` 配置 `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`（默认 `deepseek-flash`）；模型密钥仅由后端使用。`AGENT_DB_PATH` 默认 `data/agent.db`，`AGENT_WRITE_ENABLED=false` 为当前阶段默认值。智能体对话与有界工具摘要会发送给 DeepSeek；本地显式记忆会作为用户偏好背景加入请求，不作为金融事实或操作授权。
 
 ### 前端工作台
 
@@ -195,6 +198,15 @@ curl http://127.0.0.1:8000/health
 - 人工确认：`POST /api/v1/risk-evaluations/{risk_check_id}/confirmations`、`GET /api/v1/paper-execution-approvals/{approval_id}`、`POST /api/v1/paper-execution-approvals/{approval_id}/revoke`
 - 模拟执行：`POST /api/v1/paper-execution-approvals/{approval_id}/executions`、`GET /api/v1/paper-executions/{execution_id}`
 
+### 智能体第一阶段
+
+- 前端 `/agent`：查询与操作预览、历史会话恢复、用户明确保存/修改/删除偏好、约束和经验。
+- `GET /api/v1/agent/status`：配置状态与当前写门，不返回密钥。
+- `POST /api/v1/agent/chat`、`GET /api/v1/agent/sessions`、`GET /api/v1/agent/sessions/{session_id}`：对话与持久会话。
+- `GET /api/v1/agent/memories`、`POST /api/v1/agent/memories`、`DELETE /api/v1/agent/memories/{id}?revision=N`：显式记忆管理。修改携带原 ID/revision，删除也检查版本。
+- `POST /api/v1/agent/actions/{id}/decision`：服务器绑定的提案确认/取消；当前默认拒绝执行，不能用自然语言替代授权。
+- `GET /api/v1/agent/tasks/{id}`：读取业务任务状态；业务审计仍在原 DuckDB。未知创建状态保持阻断，不自动重复执行。
+
 ### 运维工作台
 
 路由文件：`operations.py`
@@ -244,6 +256,10 @@ curl http://127.0.0.1:8000/health
 | `METADATA_DB_PATH` | 主 DuckDB 路径，派生 `database_url`（`duckdb:///...`） | `data/stock_master.duckdb` |
 | `RESEARCH_DB_PATH` | 独立研究 DuckDB 路径 | `data/research.duckdb` |
 | `POSITIONS_DB_PATH` | 手工持仓账本 SQLite 路径 | `data/positions.db` |
+| `AGENT_DB_PATH` | 智能体状态与显式记忆 SQLite 路径 | `data/agent.db` |
+| `DEEPSEEK_API_KEY` | 后端模型密钥（不返回前端） | 空 |
+| `DEEPSEEK_MODEL` | 模型名称 | `deepseek-flash` |
+| `AGENT_WRITE_ENABLED` | 智能体业务写执行开关，计划/权限阶段验收前保持关闭 | `false` |
 | `RESEARCH_READ_SOURCE` | 研究输入读取路径（`warm` / `control`） | `warm` |
 | `AKSHARE_TIMEOUT_SECONDS` | AkShare 超时 | `30` |
 | `HITHINK_FINANCE_API_KEY` | 同花顺金融数据服务密钥（缺失时自动同步记录警告并跳过） | 空 |
@@ -323,7 +339,7 @@ AGENTS.md           # AI 协作规则唯一真源（分层嵌套：根 + 各模�
 AGENT.MD            # 兼容入口，只指向 AGENTS.md
 backend/
 ├── app/            # FastAPI 应用代码（api / schemas / services / repositories / models / database / config / scheduler / data_sources / lake / market / factors / indicators / strategies / backtest / portfolio / risk / trade / utils）
-├── data/           # 三库与温层的实际位置：stock_master.duckdb、research.duckdb、positions.db、warm/、raw_landing/、hithink_dumps/
+├── data/           # 四库与温层：stock_master.duckdb、research.duckdb、positions.db、agent.db、warm/、raw_landing/、hithink_dumps/
 ├── scripts/        # 导入、因子、维护、修复、调度与研究脚本入口
 ├── sql/            # SQL 资源
 ├── tests/          # 后端测试（pytest `testpaths`）

@@ -33,7 +33,7 @@ note: >-
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
 | [`plans/20261024-1522-training-window-selection-plan.md`](plans/20261024-1522-training-window-selection-plan.md) | plan | 2026-10-24 | — | — |
-| [`relations/20261023-1925-position-ledger-sqlite.md`](relations/20261023-1925-position-ledger-sqlite.md) | decision | 2026-10-23 | — | — |
+| [`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | plan | 2026-11-19 | — | 汇总本轮用户完整目标与分阶段验收。第一阶段为 SQLite 会话与显式记忆； 结构化计划、统一权限、自动执行与失败恢复尚未交付，写执行默认关闭。 |
 | [`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md) | decision | 2026-10-24 | — | 决策不变；文中「6 张表」现为 7 张，研究库另含 strategy.external_observation。 |
 | [`relations/20261111-0300-intraday-snapshot-guard.md`](relations/20261111-0300-intraday-snapshot-guard.md) | decision | 2026-11-11 | — | — |
 | [`relations/20261111-1458-multi-source-reconciliation-activation.md`](relations/20261111-1458-multi-source-reconciliation-activation.md) | decision | 2026-11-11 | — | — |
@@ -75,7 +75,7 @@ note: >-
 | [`research/20261116-2207-backtest-comparison-acceptance.md`](research/20261116-2207-backtest-comparison-acceptance.md) | evidence | 2026-11-16 | — | — |
 | [`research/20261117-0310-portfolio-plan-discovery-acceptance.md`](research/20261117-0310-portfolio-plan-discovery-acceptance.md) | evidence | 2026-11-17 | — | — |
 
-## 部分被取代 `status: partially_superseded`（24 份）
+## 部分被取代 `status: partially_superseded`（25 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -87,10 +87,11 @@ note: >-
 | [`plans/20261025-2340-data-backfill-review-brief.md`](plans/20261025-2340-data-backfill-review-brief.md) | plan | 2026-10-25 | [`relations/20261111-1810-industry-point-in-time-history.md`](relations/20261111-1810-industry-point-in-time-history.md) | 方案 C 的行业时点部分已于 2026-11-11 落地；ST 历史与指数成分历史序列仍为待决选项。 |
 | [`plans/20261118-1711-external-project-absorption-plan.md`](plans/20261118-1711-external-project-absorption-plan.md) | plan | 2026-11-18 | — | Hikyuu、New Tea Quant、TickFlow 两轮本地源码扫描的吸收方案与证据快照。A1、A2、B 首片及 C 训练窗统计诊断首片已交付；当前状态见取代文档及其引用。其余候选、准入条件和来源证据继续有效，不改变事实源或策略资格。真实公司行为仍 reject，候选内部顺序不替代 roadmap 的正式近期优先级。 |
 | [`relations/20260722-1519-autonomous-agent-team.md`](relations/20260722-1519-autonomous-agent-team.md) | config | 2026-07-22 | [`../AGENTS.md`](../AGENTS.md) | 文中引用的规则真源 AGENT.MD 已降级为兼容入口，协作规则与长期小组口径以仓库根 AGENTS.md 为准；本文保留为历史小组配置。 |
-| [`relations/20260722-1721-tiered-storage-architecture.md`](relations/20260722-1721-tiered-storage-architecture.md) | decision | 2026-07-22 | [`relations/20261023-1925-position-ledger-sqlite.md`](relations/20261023-1925-position-ledger-sqlite.md)、[`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md)、[`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 分层思路仍在位；具体库划分与清理策略由后续三份决策取代。 |
+| [`relations/20260722-1721-tiered-storage-architecture.md`](relations/20260722-1721-tiered-storage-architecture.md) | decision | 2026-07-22 | [`relations/20261023-1925-position-ledger-sqlite.md`](relations/20261023-1925-position-ledger-sqlite.md)、[`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md)、[`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md)、[`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | 分层思路仍在位；具体库划分与清理策略由后续决策扩展或取代，新增独立智能体 SQLite 状态库。 |
 | [`relations/20261021-1045-storage-split-phase1.md`](relations/20261021-1045-storage-split-phase1.md) | decision | 2026-10-21 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 决策在位，文中的容量与行数数字是当日执行快照。 |
 | [`relations/20261021-1150-storage-split-phase2-warm-layer.md`](relations/20261021-1150-storage-split-phase2-warm-layer.md) | decision | 2026-10-21 | [`relations/20261109-1648-control-plane-compaction-and-index-recovery.md`](relations/20261109-1648-control-plane-compaction-and-index-recovery.md)、[`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 决策在位，文中的容量与行数数字是当日执行快照。 |
 | [`relations/20261021-1424-storage-split-phase3-warm-layer-extension.md`](relations/20261021-1424-storage-split-phase3-warm-layer-extension.md) | decision | 2026-10-21 | [`relations/20261109-1648-control-plane-compaction-and-index-recovery.md`](relations/20261109-1648-control-plane-compaction-and-index-recovery.md) | 决策在位，文中的容量与行数数字是当日执行快照。 |
+| [`relations/20261023-1925-position-ledger-sqlite.md`](relations/20261023-1925-position-ledger-sqlite.md) | decision | 2026-10-23 | [`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md)、[`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | 持仓账本使用独立 SQLite 的决定继续有效；其余域均在单 DuckDB、SQLite 为唯一例外的全局表述， 已由研究分库和后续智能体 SQLite 状态库决定扩展。 |
 | [`relations/20261106-1442-duckdb-unreplayable-wal-recovery.md`](relations/20261106-1442-duckdb-unreplayable-wal-recovery.md) | decision | 2026-11-06 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | ATTACH 无损恢复手法仍在用；WAL 处置与备份口径以本地存储保留与清理决策为准。 |
 | [`relations/20261109-1648-control-plane-compaction-and-index-recovery.md`](relations/20261109-1648-control-plane-compaction-and-index-recovery.md) | decision | 2026-11-09 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | CTAS 压缩与序列/索引恢复流程仍在位；文中测试基线与空间数字是当日快照。 |
 | [`relations/20261111-1415-a-stock-data-integration-assessment.md`](relations/20261111-1415-a-stock-data-integration-assessment.md) | analysis | 2026-11-11 | [`relations/20261111-1458-multi-source-reconciliation-activation.md`](relations/20261111-1458-multi-source-reconciliation-activation.md)、[`relations/20261111-1531-tencent-valuation-source.md`](relations/20261111-1531-tencent-valuation-source.md)、[`relations/20261111-1810-industry-point-in-time-history.md`](relations/20261111-1810-industry-point-in-time-history.md) | 评估结论中的 P0/P1 已由同日两份决策落地，P3 行业时点历史已由 20261111-1810 交付；其余分期建议仍未执行。 |
@@ -110,4 +111,4 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`relations/20261013-2207-storage-diagnosis-and-plan.md`](relations/20261013-2207-storage-diagnosis-and-plan.md) | plan | 2026-10-13 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。 |
 
-合计 62 份带时间戳文档。
+合计 63 份带时间戳文档。

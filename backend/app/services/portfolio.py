@@ -240,6 +240,7 @@ class PortfolioConstructionService:
             plan_id=record.id,
             name=record.name,
             as_of_date=record.as_of_date,
+            input_source=input_snapshot.get("input_source", "operator_provided"),
             total_equity=record.total_equity,
             cash_before=record.cash_before,
             target_cash=record.target_cash,

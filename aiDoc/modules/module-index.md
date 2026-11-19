@@ -62,6 +62,8 @@
 
 ## 同步规则
 
+智能体第一阶段（2026-11-19）：`database/agent_base.py` / `agent_session.py` 与 `models/agent.py` 定义独立 SQLite `agent.db`，`repositories/agent.py` 负责有界会话与记忆的读写和 CAS，`services/agent_state.py` 负责短事务，`services/agent.py` 保存/恢复对话和确认检查点。`deepseek.py` 仅模型传输，`agent_tools.py` 适配既有 service。前端 `/agent` 可恢复会话和显式管理记忆。写执行默认关闭；完整范围以[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)为准。
+
 - 新增/改动 schema 域：更新 `aiDoc/modules/schema-plan.md`。
 - 新增 API：更新 `README.md` 核心 API 面。
 - 新增模块或改变职责：更新本文件和对应模块的 `AGENTS.md`（根 `AGENTS.md` 只保留跨模块规则，不再维护仓库概览清单）。

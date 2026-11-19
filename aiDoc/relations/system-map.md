@@ -15,7 +15,9 @@
 
 ## 事实源边界
 
-- 主 DuckDB（`backend/data/stock_master.duckdb`）保存市场、因子、组合、风控、模拟推演与控制面事实；独立研究 DuckDB 保存策略产物，SQLite 保存手工持仓账本，本地 Parquet 保存温层历史及 curated 数据集。三库与 `warm/` 物理上都在 `backend/data/`：`settings` 里的 `data/...` 默认值是相对当前工作目录解析的，因此任务必须从 `backend/` 启动；从仓库根运行会另建一套 `data/` 与另一把同名写锁文件，两把锁互不相识。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
+- 2026-11-19 用户决定新增第四个库：SQLite `backend/data/agent.db`，仅保存智能体会话、计划检查点和用户显式记忆，独立 `AgentBase`。只保留有界工具摘要和来源 ID；业务任务状态和研究结果仍以原库为准。SQLite 与业务 DuckDB 无跨库原子事务；未知创建结果必须核查原任务，当前第一阶段保持阻断而不重放。整体范围和后续阶段见[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)。
+
+- 主 DuckDB（`backend/data/stock_master.duckdb`）保存市场、因子、组合、风控、模拟推演与业务控制面事实；独立研究 DuckDB 保存策略产物，两个 SQLite 分别保存手工持仓账本和智能体状态，本地 Parquet 保存温层历史及 curated 数据集。四库与 `warm/` 物理上都在 `backend/data/`：`settings` 里的 `data/...` 默认值是相对当前工作目录解析的，因此任务必须从 `backend/` 启动；从仓库根运行会另建一套 `data/` 与另一把同名写锁文件，两把锁互不相识。回测与因子研究的**读**路径可以直接读温层 Parquet（`research_read_source=warm`），**写路径始终只走 ORM**；温层连接不 ATTACH 控制面文件（`attach_control=False`），公司行为与交易日历仍从 ORM 读。
 - 本地单份保留指各项必要事实只有一份权威数据，不再默认生成整库备份。`curated/prices_qfq` 发布只在切换期间暂存旧目录，成功后删除；失败构建和旧暂存定期清理。`warm/exported` 的有效父链、增量层、active 与审计引用仍是事实组成部分，清理时必须按引用关系而非目录年龄判定。
 - 历史补齐用的 `_rebuild_curated_qfq_supplement.py` 同样在行数校验后通过共用切换逻辑发布，成功后不保留 `prices_qfq.prev-*` 副本。
 - `price_value_screens/` 只保留最新全量研究报告和对应的冻结 cohort；旧 `price_value_screen` 任务日志保留日期、状态、数量与 `snapshot_hash` 等摘要，并移除已清理文件的路径引用。报告与 cohort 的当前引用先落库，再清理旧文件。用户已接受旧全量报告无法精确回看的取舍。

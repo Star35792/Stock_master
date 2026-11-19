@@ -12,7 +12,7 @@
 
 - Stock Master 是 Python 3.13 + FastAPI 的单机单用户个人量化平台，**只做选股研究与持仓管理**：不连接券商，不做实盘自动化交易，不发送任何真实订单。产出止于研究结论、选股名单、组合持仓方案、风险预算与持仓推演，由人工在外部终端自行下单。
 - `trade` 域只表示本地模拟推演账户，不是通向真实账户的跳板；不引入真实账户只读适配器、外部订单幂等状态机、券商回报对账或 kill switch。
-- 存储事实源（三个库都在 `backend/data/` 下）：主库 `backend/data/stock_master.duckdb` 承载控制面、事务事实与温层 release 链；研究库 `backend/data/research.duckdb` 承载 strategy 回测产物；人工记录的真实持仓账本 `backend/data/positions.db` 用 SQLite（经评估保留的唯一例外）；大体量列式历史落本地 Parquet 温层。除此之外不引入 PostgreSQL、MinIO 或 Redis。
+- 存储事实源（四个库都在 `backend/data/` 下）：主库 `backend/data/stock_master.duckdb` 承载业务控制面、事务事实与温层 release 链；研究库 `backend/data/research.duckdb` 承载 strategy 回测产物；人工记录的真实持仓账本 `backend/data/positions.db` 与智能体状态库 `backend/data/agent.db` 使用 SQLite。智能体状态库只保存会话、计划、确认检查点和用户明确保存的长期记忆；业务任务结果以原任务审计和研究产物为准，只保留有界摘要与来源 ID，不复制整份行情历史、持仓流水或研究产物作为另一事实源。大体量列式历史落本地 Parquet 温层。除此之外不引入 PostgreSQL、MinIO 或 Redis。
 - 后端应用、数据维护和研究脚本必须以 `backend/` 为工作目录。库路径、`data_lake_root` 与 `.env` 按当前工作目录解析；从仓库根运行后端代码会静默另建一份空库、另一把写锁并跳过 `backend/.env`。仓库级 `scripts/ci_check.py` 会自行设置各步骤的工作目录，可从仓库根调用；前端命令按 `frontend/AGENTS.md` 执行。
 - 阶段状态与近期优先级以 `aiDoc/plans/roadmap.md` 为准。保持可信数据中心规则，不把项目实现为依赖单一 AKShare、Tushare 或网页接口的数据脚本。
 
@@ -34,7 +34,7 @@
 
 ### 存储容量与单份数据
 
-- 本机每项必要事实只保留一份权威数据：不得自动创建全库备份、长期 `.backup-*` 副本或无限增长的临时产物。主库、研究库、持仓账本与有效温层 release 链各有职责，不互为备份。
+- 本机每项必要事实只保留一份权威数据：不得自动创建全库备份、长期 `.backup-*` 副本或无限增长的临时产物。主库、研究库、持仓账本、智能体状态库与有效温层 release 链各有职责，不互为备份。
 - 调试、测试、采集、修复、导出前优先只读查询、内存处理与摘要输出。确需落盘时先明确唯一用途、受控目录、大小或数量上界、事实源/引用与清理时机；同来源、同业务键、同内容的重复采集须幂等，真实变化的原始版本仍须留痕。
 - 每次任务收尾盘点本轮新增和变大的数据、测试与临时文件：成功和失败路径都要清理自身生成且无引用的可再生产物，并保留必要的审计摘要、哈希与错误记录。不能证明可删的来源证据、WAL、有效温层 release、研究引用不适用自动清理规则。
 - 清理前核对 active 指针、温层父链 snapshot/delta 语义、研究/审计引用和必要 raw 血缘，并验证行数、manifest 或校验值；不得仅凭文件名、时间或体积删除。执行环境拒绝删除时报告阻断，不用改名、脚本包装或其他工具绕过。
@@ -89,7 +89,7 @@
 - 文档分两层：无时间戳的 living docs（`roadmap.md`、`system-map.md`、`module-index.md`、`schema-plan.md`、`data/daily-bar-contract.md`、`memory/README.md` 等）承载**当前状态**，随代码回写；`yyyyMMdd-HHmm-` 前缀文档承载**决策与证据的历史层**，落定后不再回改正文事实。
 - 每份时间戳文档头部必须有 YAML frontmatter：`doc_type`（`decision`/`plan`/`evidence`/`analysis`/`config`/`index`）、`status`（`current`/`snapshot`/`partially_superseded`/`withdrawn`）、`as_of`（口径最后核实日），以及按需 `superseded_by`、`note`。`superseded_by` 的路径**相对 `aiDoc/`**，`../` 开头表示仓库根方向。引用前先查状态，不用整篇重写来标注陈旧。
 - [文档状态索引](aiDoc/20261115-1649-doc-status-index.md) 由 `uv run --project backend python scripts/doc_status_index.py` 从各文档 frontmatter 生成，不手工编辑；新增时间戳文档、改 `status`/`as_of`/`superseded_by`/`note` 或移动文件后必须重新运行，并用 `--check` 确认无漂移。`backend/tests/test_doc_status_index.py` 会挡住缺 frontmatter、悬空取代引用和索引未再生成三种违约。状态真源是各文档自己的 frontmatter，索引只做聚合。
-- 长期记忆与业务记忆放在 `aiDoc/memory/`。项目级 AI 规则变化时先改本文件，再按需更新模块 `AGENTS.md` 与适配层。
+- 开发协作的长期事实与业务经验放在 `aiDoc/memory/`；产品内由用户明确保存的智能体记忆放在 `backend/data/agent.db`，两者不互作事实源。项目级 AI 规则变化时先改本文件，再按需更新模块 `AGENTS.md` 与适配层。
 
 ## 历史模板与外部参考隔离
 

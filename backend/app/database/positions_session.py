@@ -1,7 +1,7 @@
 """SQLite engine/session for the real-position ledger.
 
-The position book is the only domain stored outside the single DuckDB
-database: it is a manually kept personal ledger, so a lightweight local
+The position book uses a dedicated SQLite database, separate from agent state
+and the two DuckDB stores. It is a manually kept personal ledger, so a lightweight local
 SQLite file keeps it separable from the market-data pipeline. Market
 prices for valuation still come from the DuckDB ``market`` trusted layer.
 """

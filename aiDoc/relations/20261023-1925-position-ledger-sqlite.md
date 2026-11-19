@@ -1,7 +1,13 @@
 ---
 doc_type: decision
-status: current
+status: partially_superseded
 as_of: 2026-10-23
+superseded_by:
+  - relations/20261024-1427-research-database-split.md
+  - plans/20261119-1049-agent-overall-plan-and-sqlite.md
+note: >-
+  持仓账本使用独立 SQLite 的决定继续有效；其余域均在单 DuckDB、SQLite 为唯一例外的全局表述，
+  已由研究分库和后续智能体 SQLite 状态库决定扩展。
 ---
 # ADR：真实持仓账本采用独立 SQLite 存储
 

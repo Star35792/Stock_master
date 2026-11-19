@@ -8,8 +8,8 @@ Stock Master 是 Python 3.13 + FastAPI + SQLAlchemy 2.x + DuckDB 的个人量化
 - `backend/app/schemas/`：请求/响应 Pydantic 合同（含费用模型版本白名单等约束）。
 - `backend/app/services/`：业务流程编排，含 `job_lease.py` 的任务 OS 租约与孤儿收敛。
 - `backend/app/repositories/`：数据库读写与查询，upsert 走 `ON CONFLICT DO UPDATE`。
-- `backend/app/models/`：SQLAlchemy ORM（50 个 `__tablename__`，分布在三个库）。
-- `backend/app/database/`：三库 engine/session 与初始化兼容桥（`initialize_database` / `apply_schema_compatibility` / `checkpoint_duckdb`）。
+- `backend/app/models/`：SQLAlchemy ORM，分布在业务主库、研究库、持仓账本与智能体状态四个库。
+- `backend/app/database/`：四库 engine/session 与初始化兼容桥（`initialize_database` / `apply_schema_compatibility` / `checkpoint_duckdb`，以及独立智能体 SQLite 初始化）。
 - `backend/app/config/`：`settings.py`（pydantic-settings，读 `backend/.env`）与 `data_contracts.py`（合同版本常量，如复权因子可信来源）。
 - `backend/app/scheduler/`：随 API 进程启动的 3 个后台 worker（自动同步、估值输入准备、估值初筛）与 APScheduler 工厂；多数 cron 工厂无仓内调用方，须显式用 `backend/scripts/scheduler/` 运行。
 - `backend/app/data_sources/`：12 个数据源适配器模块 + `base.py`，只产 `raw`，不直接写 `market`。HiThink 走本目录自有 urllib 实现，不 import `libs/hithink_sdk`。
@@ -27,7 +27,7 @@ Stock Master 是 Python 3.13 + FastAPI + SQLAlchemy 2.x + DuckDB 的个人量化
 
 ## 存储与初始化
 
-三库与温层都在 `backend/data/`：主库 `stock_master.duckdb`（控制面 + 事务事实 + 温层 release 链，41 表）、研究库 `research.duckdb`（strategy 回测产物，7 表）、持仓账本 `positions.db`（SQLite，2 表），大体量列式历史在 `warm/` Parquet。职责边界见 [系统关系](system-map.md)。各库初始化入口位于 `backend/app/database/`，由 `app/main.py` 的 lifespan 依次调用；当前没有 Alembic 迁移目录，完整版本化迁移与回退体系仍是缺口。
+四库与温层都在 `backend/data/`：主库 `stock_master.duckdb`（业务控制面 + 事务事实 + 温层 release 链）、研究库 `research.duckdb`（strategy 回测产物）、持仓账本 `positions.db`（SQLite）与智能体状态 `agent.db`（SQLite，会话/显式记忆两表），大体量列式历史在 `warm/` Parquet。职责边界见 [系统关系](system-map.md)。各库初始化入口位于 `backend/app/database/`，由 `app/main.py` 的 lifespan 依次调用；当前没有 Alembic 迁移目录，完整版本化迁移与回退体系仍是缺口。
 
 数据路径按当前工作目录解析，因此写锁文件也在 `backend/data/`：从仓库根运行研究脚本会落到 `data/research_write.lock.guard`，与 `backend/data/` 的同名锁不是同一把锁。任务统一从 `backend/` 目录启动。
 

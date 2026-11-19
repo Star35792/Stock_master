@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Activity,
+  Bot,
   BarChart3,
   BriefcaseBusiness,
   ClipboardList,
@@ -19,6 +20,7 @@ const navGroups = [
   {
     label: "研究主线",
     items: [
+      { id: "agent", label: "智能体", icon: Bot },
       { id: "research", label: "研究首页", icon: LayoutDashboard },
       { id: "factors", label: "因子", icon: BarChart3 },
       { id: "price-value", label: "估值研究", icon: Scale },

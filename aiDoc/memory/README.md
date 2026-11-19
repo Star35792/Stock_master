@@ -4,6 +4,8 @@
 
 ## 稳定事实
 
+- 2026-11-19 用户要求按整体需求分阶段建设 DeepSeek 业务智能体，明确选择独立 SQLite `data/agent.db` 保存产品会话、计划检查点与用户显式记忆。开发协作的项目记忆仍放本目录；两者不互作事实源。整体需求清单与后续阶段见 `aiDoc/plans/20261119-1049-agent-overall-plan-and-sqlite.md`；第一阶段不代表已交付规划、权限或全流程执行。
+
 - 用户希望 vibe coding 时由 AI 主动维护产品、架构、代码规则、计划和记忆文档，不要让用户手动追文档。
 - 用户希望调试前端时同时启动后端，通过真实 FastAPI 接口联调；隔离样本与接口测试可补充反例，不能只启前端 mock 后就声称前后端验收完成。
 - 项目文档采用分层嵌套的 `AGENTS.md` 作为 AI 协作规则唯一真源（根 `AGENTS.md` 承载跨模块规则，`backend/`、`frontend/`、`scripts/`、`libs/` 各自的 `AGENTS.md` 承载模块规则，就近优先），`AGENT.MD` 仅为兼容入口、不承载规则；`aiDoc/` 仍是唯一项目文档目录，同时承载正式设计和轻量 reference。
@@ -45,7 +47,7 @@
 - 因子方向不能靠直觉设定：本轮实测 7 个价量因子里 `momentum_20`/`momentum_60`/`liquidity_20` 的 RankIC 显著为负（IR 在 -0.26~-0.33），默认预设给它们「越高越好」导致回测亏损。任何因子进策略前先查 `factor.factor_profile` 的 RankIC 符号。
 - 日频换仓的 20 股等权组合会把毛收益吃光：本轮 `ic_aligned` 回测毛收益约 +4.6%，换手率 71、佣金 4.5 万（占初始资金 4.5%），净收益只剩 +0.08%。**2026-10-24 已在平台复现缓解**：同一因子组合改 `every_n_trading_days` 20 日调仓后净 +12.36%（佣金降至 6.2 千，夏普 1.42）；叠加与 paper 同源的组合约束后净 +11.72%、回撤更浅（-11.1%）、夏普 1.43。rolling（40/40/40，2 窗）频率效应跨窗一致：20 日调仓 2/2 窗为正（均值 +6.16%），daily 仅 1/2（均值 +1.10%）。结论与限制见 `aiDoc/research/20261024-1205-rebalance-frequency-net-return.md`（含幸存者/红利剔除偏差、训练窗不选参，不可表述为可信策略收益）。`v1-qfq` 温层仅 120 个开市日，扩 rolling 窗数需回填更长历史或切 `v2-qfq-2y`（483 日）。
 - **duckdb-engine 的 `:memory:` 是按线程隔离的 SingletonThreadPool**：conftest 里建的内存 DuckDB schema/表只存在于创建它的线程；TestClient 会在 anyio 工作线程处理请求，请求内发真实 DuckDB SQL 会拿到全新的空库并报 `Catalog Error: schema does not exist`。既有 API 测试全靠 monkeypatch 路由 service 才没踩到；新增要在请求线程里真查 DuckDB 的 API 测试时，同样 monkeypatch 仓储或显式使用线程绑定方案（2026-10-23 持仓账本 API 测试踩坑）。
-- 真实持仓账本（`positions` 域）自 2026-10-23 起存独立 SQLite `data/positions.db`：这是用户明确的存储决策、唯一 DuckDB 例外（ADR：`aiDoc/relations/20261023-1925-position-ledger-sqlite.md`）。SQLite 金额列用整数 quants（0.0001 元）满足定点规则；账本服务 `add_trade` 需要同时拿 SQLite 会话（写流水）和 DuckDB 会话（查证券主数据），双库参数不要混用。
+- 真实持仓账本（`positions` 域）自 2026-10-23 起存独立 SQLite `data/positions.db`：这是用户明确的存储决策（ADR：`aiDoc/relations/20261023-1925-position-ledger-sqlite.md`），2026-11-19 新增的智能体状态库也是 SQLite，但用途独立。SQLite 账本金额列用整数 quants（0.0001 元）满足定点规则；账本服务 `add_trade` 需要同时拿 SQLite 会话（写流水）和 DuckDB 会话（查证券主数据），双库参数不要混用。
 - **温层因子回填三件套**（2026-10-24 踩坑）：跨年因子回填必须带 `--exclude-corporate-actions`（且建议 `--require-complete-coverage`），否则因子 universe 含窗口内有公司行为的证券，回测 CA reject 闸门整次拒绝；同一段历史换窗口重跑时 CA 剔除集会变，必须换新 `--factor-version`（如 `v2-qfq-2y-noca`）导出独立 partial release，禁止复用旧版本号（同 name+version 双 release 会被 glob union 读成重复观测）。
 - **rolling 失败运行的孤儿产物**（2026-10-24）：`run_rolling_factor_selection` 的 artifact/backtest_run 由服务内部提交，脚本级异常只回滚脚本自己的 commit——中途失败的 rolling 会在 research.duckdb 留下已提交 artifact 与 failed run。同 window_id 重跑会撞 artifact hash 守卫，需在研究写锁下手动 DELETE 孤儿（先删 run 子表与 run，再删 artifact）。
 - **research_write.lock 强杀后残留**（2026-10-24）：后台任务被强杀后锁文件仍在且记录死 PID；删锁文件前先 `tasklist` 确认该 PID 不存在（注意别误杀无关进程，如 `.workbuddy` 的 http.server）。

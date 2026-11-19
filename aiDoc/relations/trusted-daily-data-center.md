@@ -266,6 +266,8 @@ V1 稳定后已经扩展出的能力：
 
 ## 10. 存储与工具边界
 
+- 智能体是既有业务 service 上方的受限编排入口，工具、模型输出和用户记忆均不成为 `market` 可信来源。2026-11-19 新增独立 SQLite `data/agent.db` 保存有界会话/确认状态/显式记忆，业务事实与任务审计仍留在原库。第一阶段默认关闭写执行；后续采集和修复也必须复用原 raw→market、预检、审计和复查，不提供直接改 SQL 或关闭无关质量问题的权限。参见[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)。
+
 存储已从 PostgreSQL 单库切换到 DuckDB 分层湖（clean cut，不搬运历史分析数据）。当前实际形态：
 
 - 主 DuckDB（`backend/data/stock_master.duckdb`）经 SQLAlchemy ORM 承载 `raw -> market -> factor`、`portfolio/risk -> trade` 与控制面（物理表如 `metadata.job_log`，历史逻辑域称 `system`）。`strategy` 回测与训练产物存独立 `data/research.duckdb`，手工真实持仓账本存 SQLite `data/positions.db`；估值仍消费主库可信行情。`daily_loop` 编排器实际读写的是这一路径。可信性仍由数据契约、质量校验和血缘语义定义，不因换库而放宽。

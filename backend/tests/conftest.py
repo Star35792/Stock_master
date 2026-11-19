@@ -19,6 +19,7 @@ os.environ["METADATA_DB_PATH"] = str(_test_db_root / "session.duckdb")
 # The real-position ledger engine is created at import time too; point it at the
 # same temp root so tests never touch data/positions.db.
 os.environ["POSITIONS_DB_PATH"] = str(_test_db_root / "positions.db")
+os.environ["AGENT_DB_PATH"] = str(_test_db_root / "agent.db")
 # Research artifacts live in their own DuckDB file in production; tests point
 # it beside the temp root but the dependency override below maps it onto the
 # same in-memory database so single-session test fixtures keep working.

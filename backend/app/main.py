@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.api import api_router
 from app.api.routes import health_router
 from app.config.settings import settings
+from app.database.agent_session import initialize_agent_database
 from app.database.positions_session import initialize_positions_database
 from app.database.research_session import initialize_research_database
 from app.database.session import SessionLocal, initialize_database
@@ -17,6 +18,7 @@ from app.services.job_lease import recover_abandoned_jobs
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
+    initialize_agent_database()
     initialize_positions_database()
     initialize_research_database()
     recover_abandoned_jobs(SessionLocal)

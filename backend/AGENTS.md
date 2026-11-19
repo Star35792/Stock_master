@@ -15,6 +15,7 @@
 - `app/` 的主要入口：`api`、`schemas`、`services`、`repositories`、`models`、`database`、`config`、`scheduler`、`data_sources`、`lake`、`market`、`factors`、`indicators`、`strategies`、`backtest`、`portfolio`、`risk`、`trade`、`utils`。实际文件与数量按代码核查，不以本规则中的快照代替。
 - `app/api/router.py` 统一挂 `/api/v1`；路由与端点以当前代码为准。
 - 存储路径与事实源边界见根 `AGENTS.md`；跨年历史在 `data/warm` Parquet 温层。
+- 智能体状态使用独立 SQLite `data/agent.db`，独立 `AgentBase` 与 `initialize_agent_database`；当前只验收会话和用户显式记忆，写执行默认关闭，后续阶段见整体实施计划。
 - schema 由 `app/database/session.py::initialize_database` 维护（`create_all` → `ensure_duckdb_sequences` → `apply_schema_compatibility` → `checkpoint_duckdb`）；仓库内已无 Alembic 引用。
 - 写互斥：主库 `data/duckdb_write.lock`、研究库 `data/research_write.lock`、任务租约 `data/.job_leases/process-slot-NN.lock`（`app/services/job_lease.py`）。
 - 事件回测引擎位于 `app/backtest/`；当前版本以代码和研究结果中的版本字段为准。

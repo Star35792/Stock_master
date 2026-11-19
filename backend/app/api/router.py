@@ -19,8 +19,10 @@ from app.api.routes import (
     strategy_research_router,
     trading_calendar_router,
 )
+from app.api.routes.agent import router as agent_router
 
 api_router = APIRouter(prefix="/api/v1")
+api_router.include_router(agent_router)
 api_router.include_router(securities_router)
 api_router.include_router(approvals_router)
 api_router.include_router(daily_bars_router)
