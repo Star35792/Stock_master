@@ -2,9 +2,10 @@
 import { computed } from "vue";
 import type { AgentPlan, AgentExecution } from "../agentApi";
 import AgentRecoveryEvidence from "./AgentRecoveryEvidence.vue";
+import AgentResultEvidence from "./AgentResultEvidence.vue";
 
 const props = defineProps<{ plans: AgentPlan[]; executions: AgentExecution[]; busy: boolean; executionBusy: boolean; toolTitles: Record<string, string> }>();
-const emit = defineEmits<{ decision: [planId: string, decision: "approve" | "reject"]; control: [planId: string, operation: "advance" | "refresh" | "cancel"]; inspect: [planId: string, stepId: string] }>();
+const emit = defineEmits<{ decision: [planId: string, decision: "approve" | "reject"]; control: [planId: string, operation: "advance" | "refresh" | "cancel"]; inspect: [planId: string, stepId: string]; explain: [version: number] }>();
 const plansNewestFirst = computed(() => [...props.plans].reverse());
 const labels: Record<string, string> = { needs_input: "待补充参数", draft: "待审阅", approved: "计划已批准", rejected: "已拒绝", superseded: "已被新需求替代", expired: "已过期或代码已变化" };
 const intents: Record<string, string> = { data_maintenance: "数据维护", stock_research: "选股研究", position_analysis: "持仓分析", portfolio_planning: "组合规划", consultation: "解释咨询" };
@@ -59,10 +60,12 @@ const executionLabels: Record<string, string> = { ready: "待继续", running: "
             <p v-if="step.task_id">原任务 #{{ step.task_id }} · <RouterLink to="/operations">查看任务详情 ↗</RouterLink></p>
             <p v-if="step.reason">{{ step.reason }}</p>
             <AgentRecoveryEvidence :step="step" :busy="busy" @inspect="emit('inspect', plan.plan_id, $event)" />
+            <AgentResultEvidence :summary="step.summary" />
             <details v-if="Object.keys(step.summary).length"><summary>结果摘要与来源</summary><pre>{{ pretty(step.summary) }}</pre></details>
           </li>
         </ul>
         <p class="muted">取消只停止后续步骤，已开始的任务可能继续；未知结果不会自动重放。</p>
+        <button class="secondary" :disabled="busy" @click="emit('explain', plan.version)">解释已保存结果与限制</button>
       </div>
       <div class="buttons">
         <button v-if="plan.status === 'approved' && (!executionFor(plan.plan_id) || ['ready', 'waiting_task'].includes(executionFor(plan.plan_id)!.status))" :disabled="busy" @click="emit('control', plan.plan_id, 'advance')">运行 / 继续计划</button>

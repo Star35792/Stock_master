@@ -28,13 +28,14 @@ note: >-
 - 两者冲突时以 living docs 与代码为准，并按 `aiDoc/README.md` 的同步规则回写时间戳文档的 `note` 或补一份新 ADR。
 - 本文件不复制各文档的结论，只做状态聚合；要读结论请打开原文。
 
-## 现行有效 `status: current`（29 份）
+## 现行有效 `status: current`（30 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
 | [`plans/20261024-1522-training-window-selection-plan.md`](plans/20261024-1522-training-window-selection-plan.md) | plan | 2026-10-24 | — | — |
 | [`plans/20261119-1014-operations-recovery-and-index-consistency.md`](plans/20261119-1014-operations-recovery-and-index-consistency.md) | decision | 2026-11-19 | — | — |
 | [`plans/20261119-1448-agent-recovery-and-evidence.md`](plans/20261119-1448-agent-recovery-and-evidence.md) | decision | 2026-11-19 | — | 智能体第四阶段：有限只读重试、精确确认身份查询、原产物绑定及受控恢复。 已整合第二/第三阶段稳定源；默认写关闭，生产全流程仍留到第五阶段。 |
+| [`plans/20261120-0748-agent-result-evidence-and-full-flow.md`](plans/20261120-0748-agent-result-evidence-and-full-flow.md) | decision | 2026-11-20 | — | 智能体第五阶段：写后复查实际产物、事实/缺失/推断三分离、执行观察注入解释上下文， 以及前端结果证据面板与原页面详情入口。默认写关闭；真实模型与浏览器全流程验收留待最后执行。 |
 | [`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md) | decision | 2026-10-24 | — | 决策不变；文中「6 张表」现为 7 张，研究库另含 strategy.external_observation。 |
 | [`relations/20261111-0300-intraday-snapshot-guard.md`](relations/20261111-0300-intraday-snapshot-guard.md) | decision | 2026-11-11 | — | — |
 | [`relations/20261111-1458-multi-source-reconciliation-activation.md`](relations/20261111-1458-multi-source-reconciliation-activation.md) | decision | 2026-11-11 | — | — |
@@ -115,4 +116,4 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`relations/20261013-2207-storage-diagnosis-and-plan.md`](relations/20261013-2207-storage-diagnosis-and-plan.md) | plan | 2026-10-13 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。 |
 
-合计 67 份带时间戳文档。
+合计 68 份带时间戳文档。

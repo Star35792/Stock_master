@@ -69,7 +69,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 
       <aside class="agent-evidence" aria-label="操作与证据">
         <p v-if="plansNeedReload && !busy" role="alert" class="agent-error">计划状态尚未核实，批准已停用。请点击重新连接，再审阅当前版本。</p>
-        <AgentPlanPanel :plans="session?.plans ?? []" :executions="session?.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" />
+        <AgentPlanPanel :plans="session?.plans ?? []" :executions="session?.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" @explain="send(`请解释第${$event}版计划的已保存执行结果，引用真实ID、日期和原服务指标，分别说明事实、缺失与推断及限制；不要生成新写预览。`, 'chat')" />
         <section class="agent-panel">
           <h2>长期记忆 <span>{{ memories.length }}/32</span></h2>
           <p class="agent-muted">仅保存你明确提交的偏好、约束和经验，存储于本地 SQLite。请勿填写密钥；记忆不作为行情事实或执行授权。</p>

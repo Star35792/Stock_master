@@ -72,6 +72,8 @@
 
 第三阶段：`schemas/agent_execution.py`定义执行检查点；`services/agent_execution.py`与`agent_execution_contract.py`负责DAG推进、规范身份、摘要、逐项确认和原任务观察，`agent_permissions.py`重检持久授权。`AgentTools`及运维共享执行入口均校验智能体任务，旧独立预览不能确认。`executions`仍存原会话JSON，无新表。阶段4恢复钩子已预留，见[阶段3决定](../plans/20261119-1457-agent-permissions-and-execution.md)。
 
+第五阶段：`services/agent_result_evidence.py`按结果形状抽取有界标量事实与限制（`result_evidence`）并生成执行观察上下文（`execution_context`）；`agent_tools.task_for_action`在身份核验后读原服务结果写入`observation`，`agent_execution_contract.result_summary`并入`evidence`，非success回测判blocked。前端`agentEvidence.ts`与`AgentResultEvidence.vue`展示事实/缺失/推断与原页面详情入口，`goal_verified`恒为false。无新库新表，见[阶段5决定](../plans/20261120-0748-agent-result-evidence-and-full-flow.md)。
+
 - 新增/改动 schema 域：更新 `aiDoc/modules/schema-plan.md`。
 - 新增 API：更新 `README.md` 核心 API 面。
 - 新增模块或改变职责：更新本文件和对应模块的 `AGENTS.md`（根 `AGENTS.md` 只保留跨模块规则，不再维护仓库概览清单）。

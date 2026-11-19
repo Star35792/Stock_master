@@ -467,10 +467,36 @@ class AgentTools:
         report = self.recover_action(
             tool, parameters, confirmation_id, code_version=identity.code_version, task_id=task_id
         )
+        result = dict(report.outputs) if report.status == "verified" else None
+        if result is not None:
+            # Identity is established first. A failed read must retain that original evidence.
+            try:
+                if tool == "run_factor_backtest":
+                    observed = self.read("backtest_result", {"run_id": report.artifact_id})
+                elif tool == "create_portfolio_from_backtest":
+                    with self.context() as (db, _, _positions):
+                        observed = PortfolioConstructionService().get_plan(
+                            db, plan_id=report.artifact_id
+                        )
+                    if observed is None:
+                        raise ValueError("原组合不可读")
+                    observed = observed.model_dump(mode="json")
+                    observed["source_run_id"] = parameters["run_id"]
+                    result["plan_id"] = report.artifact_id
+                else:
+                    observed = self.task(task_id)
+                from app.services.agent_execution_contract import result_summary
+
+                result["observation"] = result_summary(observed)
+            except Exception:
+                result["observation"] = {
+                    "unavailable": True,
+                    "note": "原任务身份已核验，业务结果读取暂不可用；请到原页面复查。",
+                }
         return {
             "task_id": task_id,
             "status": "success" if report.status == "verified" else report.status,
-            "result": report.outputs if report.status == "verified" else None,
+            "result": result,
             "recovery": report.model_dump(mode="json"),
         }
 

@@ -210,6 +210,9 @@ class AgentExecutionService:
         raw = json_ready(raw)
         state.summary = result_summary(raw)
         if isinstance(raw, dict):
+            if isinstance(raw.get("run"), dict) and raw["run"].get("status") != "success":
+                state.status, state.reason = "blocked", "原回测尚未完整成功，不能作为成功研究结果。"
+                return
             status = raw.get("status")
             if raw.get("error") or raw.get("blocked") or raw.get("truncated"):
                 state.status, state.reason = "blocked", "原服务报告错误、阻断或不完整结果。"
@@ -256,6 +259,8 @@ class AgentExecutionService:
                     else:
                         current.status, current.reason = "unknown", "任务缺少已核实的回测run_id。"
                 current.summary.update(result_summary(raw["result"]))
+                if isinstance(raw["result"].get("observation"), dict):
+                    current.summary["observation"] = raw["result"]["observation"]
             else:
                 current.status = status if status in {"partial", "failed"} else "unknown"
                 current.reason = "任务未完整成功，下游保持阻断。"

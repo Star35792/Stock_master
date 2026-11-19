@@ -92,10 +92,14 @@ def preview_hash(preview):
 
 def result_summary(value):
     """Bounded scalar facts and counts; details stay in the original business store."""
+    from app.services.agent_result_evidence import result_evidence
     from app.services.agent_tools import json_ready
 
     value = json_ready(value)
     result = {"note": "步骤调用结果摘要，业务目标与证据资格仍待核验。"}
+    evidence = result_evidence(value)
+    if evidence is not None:
+        result["evidence"] = evidence
     if isinstance(value, dict):
         for key in (
             "symbol",
@@ -104,6 +108,7 @@ def result_summary(value):
             "run_id",
             "task_id",
             "book_id",
+            "plan_id",
             "status",
             "phase",
             "research_only",
