@@ -20,7 +20,10 @@ from app.database.session import get_db, initialize_database
 from app.models.market import DailyBar, Security, TradingCalendar
 from app.models.strategy import BacktestRun
 from app.repositories.strategy import BacktestRepository
+from app.schemas.agent_execution import AgentStepExecution
+from app.services.agent_execution import AgentExecutionService
 from app.services.backtest import DailyBacktestService
+from app.services.research_workflow import ResearchWorkflowService
 from app.services.strategy_research import StrategyResearchService
 from app.utils.duckdb_write_lock import DuckDbWriteLockTimeout, duckdb_write_lock
 from tests.test_price_value_backtest_service import backtest_payload
@@ -343,3 +346,27 @@ def test_default_research_initialization_obeys_shared_lock(tmp_path, monkeypatch
             )) == 1
     finally:
         engine.dispose()
+
+
+def test_agent_can_read_real_backtest_without_optional_benchmark(split_api):
+    client, market, research = split_api
+    response = client.post(
+        '/api/v1/strategy-research/price-value/backtests',
+        json=backtest_payload().model_dump(mode='json'),
+    )
+    assert response.status_code == 200, response.text
+    run_id = response.json()['run_id']
+    with Session(market) as db, Session(research) as artifacts:
+        pipeline = ResearchWorkflowService().pipeline(db, research_db=artifacts, run_id=run_id)
+        assert pipeline['run']['status'] == 'success'
+        assert pipeline['benchmark'] is None and pipeline['benchmark_error'] is None
+        state = AgentStepExecution(step_id='inspect')
+        AgentExecutionService._read_state(state, pipeline, None)
+        assert state.status == 'success'
+        run = artifacts.get(BacktestRun, run_id)
+        run.parameters = {**run.parameters, 'benchmark': '999999.SH'}
+        artifacts.commit()
+        pipeline = ResearchWorkflowService().pipeline(db, research_db=artifacts, run_id=run_id)
+        assert pipeline['benchmark_error']
+        AgentExecutionService._read_state(state, pipeline, None)
+        assert state.status == 'blocked'

@@ -13,7 +13,10 @@ from app.services.research_workflow import ResearchWorkflowService
 
 class _FakeRun:
     def model_dump(self, mode: str = "python") -> dict:
-        return {"id": 1, "name": "smoke", "status": "success"}
+        return {
+            "id": 1, "name": "smoke", "status": "success",
+            "parameters": {"benchmark": "000300.SH"},
+        }
 
 
 class _FakeItem:

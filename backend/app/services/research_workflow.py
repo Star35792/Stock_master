@@ -152,13 +152,14 @@ class ResearchWorkflowService:
             result["performance_error"] = str(exc)
 
         # 基准对比（仅在回测配置了基准时才可能有值）。
-        try:
-            benchmark = self.backtest_query.get_benchmark_comparison(
-                db, run_id=run_id, research_db=research_db
-            )
-            result["benchmark"] = benchmark.model_dump(mode="json")
-        except Exception as exc:  # noqa: BLE001
-            result["benchmark_error"] = str(exc)
+        if result["run"].get("parameters", {}).get("benchmark"):
+            try:
+                benchmark = self.backtest_query.get_benchmark_comparison(
+                    db, run_id=run_id, research_db=research_db
+                )
+                result["benchmark"] = benchmark.model_dump(mode="json")
+            except Exception as exc:  # noqa: BLE001
+                result["benchmark_error"] = str(exc)
 
         # 期末持仓（组合草案预填源）。
         try:
