@@ -1,6 +1,7 @@
 [project]
 name = "stock-master"
 version = "0.1.0"
+license = "AGPL-3.0-only"
 description = "A long-term maintainable quantitative trading platform for A-shares and ETFs."
 readme = {text = "Stock Master is a local, single-user research and portfolio-management platform for A-shares and ETFs. It supports trusted data workflows, factor research, backtesting, portfolio planning, risk evaluation, and paper-only position simulation; it neither connects to brokers nor submits real orders.", content-type = "text/markdown"}
 requires-python = ">=3.13,<3.14"

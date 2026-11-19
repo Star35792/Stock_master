@@ -1,5 +1,7 @@
 # Stock Master
 
+[代码仓库](https://github.com/Star35792/Stock_master) · [AGPL-3.0-only](LICENSE)
+
 > 本文提供单机开发环境的安装、启动和检查入口。命令从仓库根目录执行；后端运行目录固定为 `backend/`，使 `.env` 与相对数据路径保持一致。
 
 ## 1. 项目用途
@@ -335,6 +337,24 @@ A：仓库当前没有 Alembic 迁移目录；完整 pytest 包含 `tests/test_s
 - **全量测试可能受机器资源限制**，排查方式见上方 FAQ；检查入口为 `scripts/ci_check.py`。
 
 ---
+
+## 8. 开源许可证与第三方权利
+
+Copyright (C) 2026 Stock Master contributors.
+
+Stock Master 的原创代码采用 **GNU Affero General Public License v3.0 only**（SPDX：`AGPL-3.0-only`），完整条款见根目录 [LICENSE](LICENSE)。仅适用第 3 版，不附加“或任何后续版本”授权。
+
+- 分发本项目或其衍生版本时，须遵守 AGPLv3 对相同许可、对应源码、版权与许可声明的要求。
+- 修改本项目后通过网络向用户提供交互服务时，须按第 13 条向这些用户显著提供免费获取该修改版本对应源码的途径。
+- 允许商业使用和收费分发；本许可证不承诺收益，也不提供担保。以上为说明，具体权利义务以许可证正文为准。
+
+第三方代码、依赖和数据保留各自的权利与许可，不因根目录的 AGPL 声明被重新授权：
+
+- `libs/hithink_sdk/` 是上游 SDK 副本，其 [pyproject.toml](libs/hithink_sdk/pyproject.toml) 标注为 `Proprietary`，**不在本项目 AGPL 授权范围内**；使用和再分发须取得上游相应授权。该 SDK 不被后端导入，也不包含在后端 wheel 的 `app` 包中。
+- 第三方依赖遵循各自许可证，分发时须保留其要求的版权、许可及 NOTICE。包括前端使用的 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)，其 [Apache-2.0 许可证](https://github.com/tradingview/lightweight-charts/blob/master/LICENSE)与 [NOTICE](https://github.com/tradingview/lightweight-charts/blob/master/NOTICE) 继续适用。
+- 行情、财报、第三方研究资料和外部数据服务的访问或再分发权由各自权利人及服务条款决定，软件许可证不授予这些数据或服务的权利。
+
+项目唯一 Git 远程为 [GitHub / Star35792 / Stock_master](https://github.com/Star35792/Stock_master)。
 
 ## 附：目录结构（当前仓库真实结构）
 

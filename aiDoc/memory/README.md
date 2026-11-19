@@ -4,6 +4,8 @@
 
 ## 稳定事实
 
+- 2026-11-19 用户要求停止跟踪 Gitee，项目唯一 Git 远程改为 `origin=https://github.com/Star35792/Stock_master.git`，主线为 `main`；要求选择约束较强的开源许可证，原创代码采用 `AGPL-3.0-only`，见根目录 `LICENSE` 与 `README.md` 的许可证说明。`libs/hithink_sdk/` 保持上游 `Proprietary` 声明，不纳入原创代码的 AGPL 授权。
+
 - 2026-11-19 用户要求按整体需求分阶段建设 DeepSeek 业务智能体，明确选择独立 SQLite `data/agent.db` 保存产品会话、计划检查点与用户显式记忆。开发协作的项目记忆仍放本目录；两者不互作事实源。整体需求清单与后续阶段见 `aiDoc/plans/20261119-1049-agent-overall-plan-and-sqlite.md`；第一阶段不代表已交付规划、权限或全流程执行。
 
 - 用户希望 vibe coding 时由 AI 主动维护产品、架构、代码规则、计划和记忆文档，不要让用户手动追文档。
