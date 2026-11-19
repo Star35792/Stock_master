@@ -6,6 +6,8 @@
 
 2026-11-19 新增独立 SQLite `data/agent.db`（`AGENT_DB_PATH`），初始化入口 `app/database/agent_session.py::initialize_agent_database`，独立 `AgentBase`，不注册到 DuckDB metadata。两表：`agent_session(id, revision, state JSON, updated_at)` 与 `agent_memory(id, kind, content, source_session_id, revision, updated_at)`。修订号更新采用条件 UPDATE RETURNING；使用 WAL/FULL、短事务与5秒 busy timeout。会话最多64个、快照256KiB，显式记忆最多32条、每条400字符，详细用途/恢复边界见[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)。现有三库和温层数据不迁移；计划与统一权限还未交付。
 
+2026-11-19 索引一致性维护不新增 schema、字段或键语义：定向恢复既有 `uq_job_log_id` 与 `ix_compact_market_security_symbol`，用临时唯一 guard 保护分事务重建，全列 SHA256/行数、索引定义和重开后的全部键点查保持一致，新增唯一必要任务审计。诊断入口 `scripts/maintenance/repair_index_consistency.py` 默认只读，不在启动初始化中自动重建索引。证据见[运维恢复决策](../plans/20261119-1014-operations-recovery-and-index-consistency.md)。
+
 运维修复（2026-10-28）：`scripts/maintenance/restore_financial_unique_indexes.py` 仅恢复ORM已声明的 `fundamental.financial_statement.uq_financial_statement_key` 与 `fundamental.financial_indicator.uq_financial_indicator_key`，以修复旧库缺唯一索引导致的财务upsert失败；不新增表/字段或改变唯一键语义。应用释放数据库后，脚本持共享写锁、检查重复和空键、事务创建并后验核对，保存独立JSON审计；有重复/空键即拒绝，不自动删行或去重。全库其他缺失约束只审计不扩展修复。
 
 1. **分层存储**：原始数据、可信数据、系统审计分 schema 存放。

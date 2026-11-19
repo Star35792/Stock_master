@@ -108,6 +108,8 @@ bun run dev
 
 - Bash 兼容入口 `bash scripts/ci-check.sh` 转发到同一脚本，也接受 `--scope` 和 `--list`。
 
+测试结束后，可从仓库根用 `uv run --project backend python scripts/cleanup_test_artifacts.py --run-dir ci` 预览临时目录的文件数、大小与清单摘要；由用户手动加 `--apply` 清理。可列多个精确目录名，但只允许 `backend/.pytest_tmp/` 的直接子目录，拒绝链接、目录穿越及超限内容，不涉及业务数据。
+
 ## 4. 使用示例
 
 > 下列接口路径均来自 `backend/app/api/routes/` 的真实路由文件；主机地址、端口与完整请求体字段请按部署环境补齐后再作为示例使用。
@@ -220,7 +222,9 @@ curl http://127.0.0.1:8000/health
 - `POST /api/v1/operations/actions`
 - `GET /api/v1/operations/actions/{action_id}`
 
-人工处理动作当前只开放三类受控能力：最新可信日线同步、qfq 日线缺口回填、活跃因子画像重建。动作先预检，再由用户确认；`POST /actions` 使用幂等键创建 `metadata.job_log` 父任务，后台执行继续复用现有 Service、进程租约和单进程数据库任务锁。缺口回填严格执行 `raw -> market -> 复查`，来源冲突不强行覆盖；只有复查确认问题关闭时，才把关联质量问题标记为 `fixed`。本机单用户部署不引入账户权限系统，人工确认由前端显式完成。
+人工处理开放六类动作：`daily_data_sync`（未复权可信日线同步）、`daily_bar_gap_backfill`（qfq 缺口回填）、`factor_profile_rebuild`（已有值的画像诊断）、`factor_values_rebuild`（按原运行重算单因子）、`alternative_data_sync`（现有情绪/资金来源补采）、`price_value_input_prepare`（最新完成日的当前研究输入补采及报告复查）。先预检再人工确认，幂等请求按全历史复用，进程锁与 OS 写锁防止重复执行；刷新或启动响应丢失后沿原任务/幂等键恢复。
+
+`factor_values_rebuild.parameters` 只接受 `original_run_id`，目标日期、证券、复权和版本均从原记录恢复；缺上下文、退役/未知版本、缺输入或超限时阻断。执行新建 run，记录当前代码、实际价格摘要及 active QFQ 发布；旧失败保留，不提升因子资格。失败中心同时展示完成但零观察的因子；空/部分产出与画像空项保持未解决。`alternative_data_sync.parameters.sources` 只允许 `hithink` / `eastmoney`；`price_value_input_prepare` 自动固定最新日期，只支持 `current_research_catchup`，保留真实观察时间及 `pit_verified=false`。仅缺口复查关闭时自动标记关联质量问题 `fixed`。前复权发布异常不会被包装为普通同步即可解决。详细边界见[运维恢复决策](aiDoc/plans/20261119-1014-operations-recovery-and-index-consistency.md)。
 
 新建任务日志在 `metadata._job_lease` 中绑定本机进程 OS 租约。API 和长期调度器启动时只对“租约锁已释放”的 `running` 记录自动收敛为 `failed`，并固定标记 `completion_status=unknown`；这只证明持有进程已经退出，不表示任务没有产生部分副作用，也不会自动删除或回滚 raw、release、WAL 或研究产物。活锁、未知租约和旧版无租约记录一律保留，不按运行时长或 PID 猜测。占槽恢复只在本进程会话没有待写事务时执行，绝不提前提交调用方业务写入。
 

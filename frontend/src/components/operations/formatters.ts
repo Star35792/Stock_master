@@ -20,6 +20,7 @@ export function statusClass(status: string) {
 
 const statusLabels: Record<string, string> = {
   pending: "待处理",
+  queued: "等待执行",
   running: "运行中",
   success: "成功",
   partial: "部分完成",

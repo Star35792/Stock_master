@@ -66,6 +66,7 @@ def test_alert_counts_ignore_superseded_failures_but_keep_history() -> None:
                 FactorRun(
                     definition_id=1, factor_name="momentum", factor_version="v1",
                     code_version="test", status="success", started_at=_started(2),
+                    rows_written=10,
                 ),
                 FactorRun(
                     definition_id=2, factor_name="value", factor_version="v1",

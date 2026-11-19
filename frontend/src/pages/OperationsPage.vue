@@ -27,8 +27,8 @@ const {
 const actions = useOperationsActions();
 
 async function executePlan(plan: Parameters<typeof actions.executePlan>[0]) {
-  if (!window.confirm(`确认预检并执行 ${plan.action_type}？`)) return;
-  await actions.executePlan(plan);
+  if (source.value === "demo" || source.value === "loading") return;
+  await actions.executePlan(plan, (checked) => window.confirm(`确认执行：${checked.summary}\n${checked.warnings.join("\n")}`));
 }
 
 onMounted(() => {
@@ -48,7 +48,7 @@ onMounted(() => {
     @refresh="loadDashboard"
   />
 
-  <OperationsActionPanel @completed="loadDashboard" />
+  <OperationsActionPanel :enabled="source === 'api' || source === 'partial'" @completed="loadDashboard" />
 
   <FailuresSection
     v-if="displayFailures !== null"
@@ -58,6 +58,7 @@ onMounted(() => {
     :rerun-plan="displayRerunPlan"
     :sections="failureSections"
     :selected-failure="selectedFailure"
+    :actions-disabled="source === 'demo' || source === 'loading' || actions.isRunning.value || actions.isStarting.value || actions.isRestoring.value"
     @select="selectFailure"
     @execute="executePlan"
   />

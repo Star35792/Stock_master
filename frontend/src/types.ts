@@ -190,7 +190,10 @@ export interface OperationsRerunPlan {
 export type OperationsActionType =
   | "daily_data_sync"
   | "daily_bar_gap_backfill"
-  | "factor_profile_rebuild";
+  | "factor_profile_rebuild"
+  | "factor_values_rebuild"
+  | "alternative_data_sync"
+  | "price_value_input_prepare";
 
 export interface OperationsActionPreview {
   action_type: OperationsActionType;

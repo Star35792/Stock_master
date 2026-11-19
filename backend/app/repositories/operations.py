@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.factor import FactorRun
@@ -131,7 +131,7 @@ class OperationsOverviewRepository:
         return list(
             db.scalars(
                 select(FactorRun)
-                .where(FactorRun.status.in_(["failed", "partial"]))
+                .where(self._factor_gap_condition())
                 .order_by(FactorRun.started_at.desc(), FactorRun.id.desc())
                 .limit(limit)
             )
@@ -141,23 +141,47 @@ class OperationsOverviewRepository:
         return self._count_where(
             db,
             FactorRun,
-            FactorRun.status.in_(["failed", "partial"]),
+            self._factor_gap_condition(),
         )
 
     def count_latest_failed_factor_runs(self, db: Session) -> int:
-        return self._count_latest_failed(
-            db,
-            FactorRun,
-            partition_by=(FactorRun.factor_name, FactorRun.factor_version),
-            order_by=(FactorRun.started_at.desc(), FactorRun.id.desc()),
-            failed_statuses=("failed", "partial"),
+        ranked = select(
+            FactorRun.status,
+            FactorRun.rows_written,
+            func.row_number()
+            .over(
+                partition_by=(FactorRun.factor_name, FactorRun.factor_version),
+                order_by=(FactorRun.started_at.desc(), FactorRun.id.desc()),
+            )
+            .label("recency"),
+        ).subquery()
+        return (
+            db.scalar(
+                select(func.count())
+                .select_from(ranked)
+                .where(
+                    ranked.c.recency == 1,
+                    or_(
+                        ranked.c.status.in_(("failed", "partial")),
+                        and_(ranked.c.status == "success", ranked.c.rows_written == 0),
+                    ),
+                )
+            )
+            or 0
+        )
+
+    @staticmethod
+    def _factor_gap_condition():
+        return or_(
+            FactorRun.status.in_(("failed", "partial")),
+            and_(FactorRun.status == "success", FactorRun.rows_written == 0),
         )
 
     def get_failed_factor_run(self, db: Session, *, run_id: int) -> FactorRun | None:
         return db.scalar(
             select(FactorRun).where(
                 FactorRun.id == run_id,
-                FactorRun.status.in_(["failed", "partial"]),
+                self._factor_gap_condition(),
             )
         )
 
@@ -257,9 +281,7 @@ class OperationsOverviewRepository:
                 risk_order_rejection_reasons=(
                     risk_order.rejection_reasons if risk_order is not None else []
                 ),
-                risk_order_rule_results=(
-                    risk_order.rule_results if risk_order is not None else []
-                ),
+                risk_order_rule_results=(risk_order.rule_results if risk_order is not None else []),
                 created_at=order.created_at,
             )
             for order, check, risk_order in rows
@@ -309,9 +331,7 @@ class OperationsOverviewRepository:
             risk_order_rejection_reasons=(
                 risk_order.rejection_reasons if risk_order is not None else []
             ),
-            risk_order_rule_results=(
-                risk_order.rule_results if risk_order is not None else []
-            ),
+            risk_order_rule_results=(risk_order.rule_results if risk_order is not None else []),
             created_at=order.created_at,
         )
 
@@ -348,9 +368,7 @@ class OperationsOverviewRepository:
     ) -> int:
         ranked = select(
             model.status.label("status"),
-            func.row_number()
-            .over(partition_by=partition_by, order_by=order_by)
-            .label("recency"),
+            func.row_number().over(partition_by=partition_by, order_by=order_by).label("recency"),
         ).subquery()
         return int(
             db.scalar(

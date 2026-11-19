@@ -16,13 +16,20 @@ class JobLogRepository:
     def get(self, db: Session, job_id: int) -> JobLog | None:
         return db.get(JobLog, job_id)
 
+    def get_operator_request(self, db: Session, *, idempotency_key: str) -> JobLog | None:
+        return db.scalar(
+            select(JobLog)
+            .where(
+                JobLog.job_name == "operator_action",
+                JobLog.metadata_["idempotency_key"].as_string() == idempotency_key,
+            )
+            .order_by(JobLog.id)
+            .limit(1)
+        )
+
     def list_running(self, db: Session) -> list[JobLog]:
         return list(
-            db.scalars(
-                select(JobLog)
-                .where(JobLog.status == "running")
-                .order_by(JobLog.id)
-            )
+            db.scalars(select(JobLog).where(JobLog.status == "running").order_by(JobLog.id))
         )
 
     def list_recent_by_name(

@@ -3,17 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from hashlib import sha256
-from json import dumps
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from app.data_sources.eastmoney import EastmoneyDataSource
-from app.models.raw import RawVendorSnapshot
 from app.repositories.raw import RawDailyBarImportRepository
 from app.services.alternative_data_supply import EmptyDatasetError, check_dataset_supply
-from app.services.hithink_alternative_collection import _upsert_alternative_rows
+from app.services.hithink_alternative_collection import (
+    _capture_snapshot,
+    _fail_capture_batch,
+    _upsert_alternative_rows,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,8 @@ class EastmoneyFlowCollectionResult:
     #: 归一化后没有任何行的 dataset。端点返回空集时**必须**出现在这里，
     #: 否则断供会伪装成一次成功采集。
     empty_datasets: tuple[str, ...] = ()
+    new_raw_snapshots: int = 0
+    reused_raw_snapshots: int = 0
 
 
 class EastmoneyFlowCollectionService:
@@ -43,81 +47,67 @@ class EastmoneyFlowCollectionService:
         limit: int = 100,
         market: str = "all",
     ) -> EastmoneyFlowCollectionResult:
-        payloads = {
-            "eastmoney_main_fund_rank": self.data_source.fetch_main_fund_rank(
-                limit=limit, market=market
-            ),
-            "eastmoney_industry_fund_flow": self.data_source.fetch_sector_fund_flow(
-                kind="industry", limit=limit
-            ),
-            "eastmoney_concept_fund_flow": self.data_source.fetch_sector_fund_flow(
-                kind="concept", limit=limit
-            ),
-        }
-        snapshot_date = date.today()
+        snapshot_date = datetime.now(ZoneInfo("Asia/Shanghai")).date()
         batch_no = f"eastmoney_flow_{datetime.now(UTC):%Y%m%d%H%M%S}_{uuid4().hex[:8]}"
         batch = self.repository.create_batch(
-            db,
-            batch_no=batch_no,
-            source_name=self.data_source.name,
-            source_type=self.data_source.source_type,
-            dataset="capital_flow",
+            db, batch_no=batch_no, source_name=self.data_source.name,
+            source_type=self.data_source.source_type, dataset="capital_flow",
             request_params={
-                "limit": limit,
-                "market": market,
-                "snapshot_date": snapshot_date.isoformat(),
+                "limit": limit, "market": market, "snapshot_date": snapshot_date.isoformat(),
             },
         )
-        normalized_rows = 0
+        db.commit()
+        fetchers = (
+            ("eastmoney_main_fund_rank", lambda: self.data_source.fetch_main_fund_rank(
+                limit=limit, market=market,
+            )),
+            ("eastmoney_industry_fund_flow", lambda: self.data_source.fetch_sector_fund_flow(
+                kind="industry", limit=limit,
+            )),
+            ("eastmoney_concept_fund_flow", lambda: self.data_source.fetch_sector_fund_flow(
+                kind="concept", limit=limit,
+            )),
+        )
+        payloads: list[tuple[str, list[dict]]] = []
+        raw_count = new_raw_count = normalized_rows = 0
         empty_datasets: list[str] = []
+        current_dataset = "fetch"
         try:
-            for dataset, items in payloads.items():
-                payload = {
-                    "timestamp": int(datetime.now(UTC).timestamp() * 1000),
-                    "item": items,
-                }
-                db.add(
-                    RawVendorSnapshot(
-                        batch_id=batch.id,
-                        source_name=self.data_source.name,
-                        dataset=dataset,
-                        snapshot_date=snapshot_date,
-                        raw_payload=payload,
-                        row_hash=sha256(
-                            dumps(payload, sort_keys=True, default=str).encode()
-                        ).hexdigest(),
-                    )
+            for dataset, fetch in fetchers:
+                current_dataset = dataset
+                items = fetch()
+                new_raw_count += _capture_snapshot(
+                    db, batch, self.data_source.name, dataset, snapshot_date, {"item": items},
                 )
+                raw_count += 1
+                payloads.append((dataset, items))
+            for dataset, items in payloads:
+                current_dataset = dataset
                 rows = _normalize_rows(dataset, items, snapshot_date, self.data_source.name)
                 try:
                     check_dataset_supply(dataset, len(rows))
                 except EmptyDatasetError:
-                    # 端点活着但返回空集：留痕、记账、但不把整个批次判成成功。
                     empty_datasets.append(dataset)
                     continue
                 normalized_rows += _upsert_alternative_rows(db, rows)
             self.repository.finish_batch(
-                db,
-                batch,
-                status="partial" if empty_datasets else "success",
-                row_count=len(payloads),
-                accepted_count=len(payloads) - len(empty_datasets),
-                rejected_count=len(empty_datasets),
+                db, batch, status="partial" if empty_datasets else "success",
+                row_count=raw_count, accepted_count=new_raw_count, rejected_count=0,
                 error_message=(
                     f"empty datasets: {', '.join(sorted(empty_datasets))}"
-                    if empty_datasets
-                    else None
+                    if empty_datasets else None
                 ),
             )
             db.commit()
-        except Exception:
-            db.rollback()
+        except Exception as exc:
+            _fail_capture_batch(
+                db, self.repository, batch, raw_count, new_raw_count, current_dataset, exc,
+            )
             raise
         return EastmoneyFlowCollectionResult(
-            batch_no=batch_no,
-            raw_snapshots=len(payloads),
-            normalized_rows=normalized_rows,
-            empty_datasets=tuple(sorted(empty_datasets)),
+            batch_no=batch_no, raw_snapshots=raw_count, normalized_rows=normalized_rows,
+            empty_datasets=tuple(sorted(empty_datasets)), new_raw_snapshots=new_raw_count,
+            reused_raw_snapshots=raw_count - new_raw_count,
         )
 
 

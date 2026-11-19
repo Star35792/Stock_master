@@ -7,6 +7,7 @@ import { barWidth, countEntries, formatDate, severityClass, severityLabel, statu
 defineProps<{
   dataQuality: OperationsOverview["data_quality"];
   updatingIssueId?: number | null;
+  actionsDisabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -59,9 +60,9 @@ const emit = defineEmits<{
               <td>{{ formatDate(issue.trade_date) }}</td>
               <td class="quality-actions">
                 <template v-if="issue.status === 'open' || issue.status === 'reopened'">
-                  <button type="button" :disabled="updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'fixed')">已修复</button>
-                  <button type="button" :disabled="updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'ignored')">忽略</button>
-                  <button type="button" :disabled="updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'false_positive')">误报</button>
+                  <button type="button" :disabled="actionsDisabled || updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'fixed')">已修复</button>
+                  <button type="button" :disabled="actionsDisabled || updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'ignored')">忽略</button>
+                  <button type="button" :disabled="actionsDisabled || updatingIssueId === issue.id" @click="emit('updateStatus', issue.id, 'false_positive')">误报</button>
                 </template>
                 <span v-else>{{ statusLabel(issue.status) }}</span>
               </td>

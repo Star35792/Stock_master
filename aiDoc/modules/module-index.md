@@ -5,6 +5,8 @@
 | 模块 | 当前职责 |
 | --- | --- |
 | `api` | HTTP 语义、参数校验、响应模型 |
+| `services.factor_recovery` / `repositories.factor.recovery` | 从原记录恢复有界单因子计算，预检输入与覆盖，新 run 留真实代码和价格摘要并复查；未知版本拒绝，旧失败保留 |
+| `scripts.maintenance.repair_index_consistency` | 默认只读比较索引点查与全表键；精确指定已证实异常索引后持锁维护，唯一 guard、前后全列哈希及 checkpoint 重开验证，写审计，不复制业务库 |
 | `services` | 导入、构建、因子、批量因子截面诊断（含证据资格汇总）、回测、组合、风控、模拟盘等业务流程 |
 | `factors` | 因子分类常量与因子定义目录预注册（registry） |
 | `repositories` | SQLAlchemy 查询、upsert、分页、持久化 |

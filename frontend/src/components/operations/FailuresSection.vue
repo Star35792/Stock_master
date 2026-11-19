@@ -21,6 +21,8 @@ const props = defineProps<{
   rerunPlan: OperationsRerunPlan | null;
   isDetailLoading: boolean;
   detailErrorMessage: string | null;
+  actionsDisabled?: boolean;
+  executionRoute?: string;
 }>();
 
 const emit = defineEmits<{
@@ -79,7 +81,7 @@ function getFailureSubtitle(type: FailureType, item: FailureItem) {
   }
   if (type === "factor_run") {
     const run = item as FactorRunFailure;
-    return `${run.factor_version} / ${formatDate(run.input_start_date)}-${formatDate(run.input_end_date)}`;
+    return `${run.factor_version} / ${formatDate(run.input_start_date)}-${formatDate(run.input_end_date)}${run.rows_written === 0 ? " / 0 行，缺少观察值" : ""}`;
   }
   if (type === "backtest_run") {
     const run = item as BacktestRunFailure;
@@ -125,7 +127,7 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
   <section id="failures" class="dashboard-section">
     <div class="section-title">
       <ServerCog :size="20" aria-hidden="true" />
-      <h2>失败中心</h2>
+      <h2>失败与无观察记录</h2>
       <span class="section-note">点击失败项查看详情、预检并执行安全修复</span>
     </div>
 
@@ -196,7 +198,7 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
             <ul>
               <li>核对参数与失败详情是否匹配。</li>
               <li>系统会先重新预检，再以幂等后台任务执行。</li>
-              <li>执行完成后会重新检查缺口；只有问题闭环时才自动标记已修复。</li>
+              <li>执行完成后复查实际数据与输出；部分完成或零行仍需继续处理。</li>
             </ul>
             <div v-if="getRerunParameterRows(rerunPlan).length > 0" class="rerun-parameters">
               <div v-for="row in getRerunParameterRows(rerunPlan)" :key="row.key">
@@ -204,7 +206,8 @@ function getRerunParameterRows(plan: OperationsRerunPlan) {
                 <code>{{ row.value }}</code>
               </div>
             </div>
-            <button type="button" class="primary-action" @click="emit('execute', rerunPlan)">预检并执行</button>
+            <RouterLink v-if="executionRoute" :to="executionRoute" class="primary-action">进入运维页处理</RouterLink>
+            <button v-else type="button" class="primary-action" :disabled="actionsDisabled" @click="emit('execute', rerunPlan)">预检并执行</button>
           </div>
         </div>
 

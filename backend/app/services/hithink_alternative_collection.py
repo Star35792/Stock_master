@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.data_sources import HithinkFinanceDataSource
 from app.models.market import AlternativeDataSnapshot, IndexConstituentSnapshot
-from app.models.raw import RawVendorSnapshot
+from app.models.raw import ImportBatch, RawVendorSnapshot
 from app.repositories.raw import RawDailyBarImportRepository
+from app.repositories.raw.vendor_snapshot import RawVendorSnapshotRepository
 from app.services.alternative_data_supply import EmptyDatasetError, check_dataset_supply
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -27,6 +28,8 @@ class AlternativeCollectionResult:
     #: 归一化后没有任何行的 dataset。端点返回空集时**必须**出现在这里，
     #: 否则断供会伪装成一次成功采集。
     empty_datasets: tuple[str, ...] = ()
+    new_raw_snapshots: int = 0
+    reused_raw_snapshots: int = 0
 
 
 class HithinkAlternativeCollectionService:
@@ -54,99 +57,102 @@ class HithinkAlternativeCollectionService:
             dataset="alternative_data",
             request_params={"index_symbols": index_symbols or []},
         )
-        dragon_tiger = self.data_source.fetch_dragon_tiger_list()
-        # 游资榜是**独立的一张榜**：端点用 ``board_type`` 选择返回哪张榜，
-        # ``board_type="all"`` 的响应里 ``hot_money_items`` 恒为空数组。
-        # 早先把这个数据集判成「端点该子集无内容」是误判——参数没传对而已。
-        dragon_tiger_hot_money = self.data_source.fetch_dragon_tiger_list(board_type="hot_money")
-        payloads = {
-            "limit_up_pool": self.data_source.fetch_limit_up_pool(),
-            # 炸板池：``failed_limit_up`` 数据集的来源。早先记成「未找到端点」
-            # 是错的——端点一直在（/api/a-share/special-data/limit-break-pool），
-            # 只是此前没有对着端点清单核对过。
-            "failed_limit_up": self.data_source.fetch_limit_break_pool(),
-            "limit_down_pool": self.data_source.fetch_limit_down_pool(),
-            # 涨停统计是**聚合口径**（没有逐股 item），落成一条 ``market`` 汇总行：
-            # 封板率 / 涨停数 / 炸板数 / 触及涨停数都在 attributes 里。
-            # 它也是池类端点里唯一**回显 trade_date** 的，回填历史最省事。
-            "limit_up_statistics": self.data_source.fetch_limit_up_statistics(),
-            "limit_up_ladder": self.data_source.fetch_limit_up_ladder(),
-            "anomaly": self.data_source.fetch_anomaly_list(),
-            "hot_stock": self.data_source.fetch_hot_stock_list(),
-            "skyrocket": self.data_source.fetch_skyrocket_list(),
-            "dragon_tiger": dragon_tiger,
-            "dragon_tiger_hot_money": {
-                "timestamp": dragon_tiger_hot_money.get("timestamp"),
-                "trade_date": dragon_tiger_hot_money.get("trade_date"),
-                "item": _flatten_hot_money(dragon_tiger_hot_money.get("hot_money_items") or []),
-            },
-            **{
-                f"index_catalog_{tag}": {
-                    "timestamp": int(datetime.now(_SHANGHAI).timestamp() * 1000),
-                    "item": self.data_source.fetch_ths_indices(tag=tag),
-                }
-                for tag in ("industry", "cn_concept", "region", "tszs")
-            },
-        }
-        raw_count = 0
-        normalized_count = 0
-        constituent_count = 0
+        db.commit()
+        fetchers = (
+            ("limit_up_pool", self.data_source.fetch_limit_up_pool),
+            ("failed_limit_up", self.data_source.fetch_limit_break_pool),
+            ("limit_down_pool", self.data_source.fetch_limit_down_pool),
+            ("limit_up_statistics", self.data_source.fetch_limit_up_statistics),
+            ("limit_up_ladder", self.data_source.fetch_limit_up_ladder),
+            ("anomaly", self.data_source.fetch_anomaly_list),
+            ("hot_stock", self.data_source.fetch_hot_stock_list),
+            ("skyrocket", self.data_source.fetch_skyrocket_list),
+            ("dragon_tiger", self.data_source.fetch_dragon_tiger_list),
+            ("dragon_tiger_hot_money", lambda: self.data_source.fetch_dragon_tiger_list(
+                board_type="hot_money",
+            )),
+        )
+        payloads: list[tuple[str, date, dict]] = []
+        constituents: list[tuple[str, date, list[dict]]] = []
+        raw_count = new_raw_count = normalized_count = constituent_count = 0
         empty_datasets: list[str] = []
+        current_dataset = "fetch"
         try:
-            for dataset, payload in payloads.items():
-                snapshot_date = _snapshot_date(payload)
-                db.add(
-                    _raw_snapshot(
-                        batch.id,
-                        self.data_source.name,
-                        dataset,
-                        snapshot_date,
-                        payload,
+            for dataset, fetch in fetchers:
+                current_dataset = dataset
+                payload = fetch()
+                try:
+                    snapshot_date = _snapshot_date(payload)
+                except (TypeError, ValueError, OverflowError, OSError) as date_error:
+                    # This date is only an evidence filing date. The malformed
+                    # response is retained and never reaches market normalization.
+                    new_raw_count += _capture_snapshot(
+                        db, batch, self.data_source.name, dataset,
+                        datetime.now(_SHANGHAI).date(), payload,
+                        date_parse_error=f"{type(date_error).__name__}: {date_error}",
                     )
+                    raw_count += 1
+                    raise
+                new_raw_count += _capture_snapshot(
+                    db, batch, self.data_source.name, dataset, snapshot_date, payload,
                 )
                 raw_count += 1
+                payloads.append((dataset, snapshot_date, payload))
+            for tag in ("industry", "cn_concept", "region", "tszs"):
+                current_dataset = f"index_catalog_{tag}"
+                payload = {"item": self.data_source.fetch_ths_indices(tag=tag)}
+                snapshot_date = datetime.now(_SHANGHAI).date()
+                new_raw_count += _capture_snapshot(
+                    db, batch, self.data_source.name, current_dataset, snapshot_date, payload,
+                )
+                raw_count += 1
+                payloads.append((current_dataset, snapshot_date, payload))
+            for index_symbol in index_symbols or []:
+                current_dataset = "index_constituents"
+                members = self.data_source.fetch_index_constituents(symbol=index_symbol)
+                snapshot_date = datetime.now(_SHANGHAI).date()
+                new_raw_count += _capture_snapshot(
+                    db, batch, self.data_source.name, current_dataset, snapshot_date,
+                    {"index_symbol": index_symbol.upper(), "item": members},
+                )
+                raw_count += 1
+                constituents.append((index_symbol, snapshot_date, members))
+
+            # All source responses are durable before the market transaction.
+            # A normalization/write failure rolls back market rows, not raw evidence.
+            for dataset, snapshot_date, payload in payloads:
+                current_dataset = dataset
                 rows = _normalize_payload(dataset, snapshot_date, payload, self.data_source.name)
                 try:
                     check_dataset_supply(dataset, len(rows))
                 except EmptyDatasetError:
-                    # 端点活着但返回空集：留痕、记账、但不把整个批次判成成功。
                     empty_datasets.append(dataset)
                     continue
                 normalized_count += _upsert_alternative_rows(db, rows)
-
-            for index_symbol in index_symbols or []:
-                members = self.data_source.fetch_index_constituents(symbol=index_symbol)
+            for index_symbol, snapshot_date, members in constituents:
+                current_dataset = "index_constituents"
                 constituent_count += _upsert_constituents(
-                    db,
-                    snapshot_date=date.today(),
-                    index_symbol=index_symbol.upper(),
-                    members=members,
-                    source_name=self.data_source.name,
+                    db, snapshot_date=snapshot_date, index_symbol=index_symbol.upper(),
+                    members=members, source_name=self.data_source.name,
                 )
-
             self.repository.finish_batch(
-                db,
-                batch,
-                status="partial" if empty_datasets else "success",
-                row_count=raw_count,
-                accepted_count=raw_count - len(empty_datasets),
-                rejected_count=len(empty_datasets),
+                db, batch, status="partial" if empty_datasets else "success",
+                row_count=raw_count, accepted_count=new_raw_count, rejected_count=0,
                 error_message=(
                     f"empty datasets: {', '.join(sorted(empty_datasets))}"
-                    if empty_datasets
-                    else None
+                    if empty_datasets else None
                 ),
             )
             db.commit()
-        except Exception:
-            db.rollback()
+        except Exception as exc:
+            _fail_capture_batch(
+                db, self.repository, batch, raw_count, new_raw_count, current_dataset, exc,
+            )
             raise
         return AlternativeCollectionResult(
-            batch_no=batch_no,
-            raw_snapshots=raw_count,
-            normalized_rows=normalized_count,
-            constituent_rows=constituent_count,
-            empty_datasets=tuple(sorted(empty_datasets)),
+            batch_no=batch_no, raw_snapshots=raw_count, normalized_rows=normalized_count,
+            constituent_rows=constituent_count, empty_datasets=tuple(sorted(empty_datasets)),
+            new_raw_snapshots=new_raw_count, reused_raw_snapshots=raw_count - new_raw_count,
         )
 
 
@@ -156,6 +162,8 @@ def _normalize_payload(
     items = payload.get("item", [])
     if dataset == "dragon_tiger":
         items = payload.get("stock_items", [])
+    if dataset == "dragon_tiger_hot_money" and "hot_money_items" in payload:
+        items = _flatten_hot_money(payload.get("hot_money_items") or [])
     if dataset == "limit_up_ladder":
         items = _flatten_ladder(items)
     if dataset == "limit_up_statistics":
@@ -324,13 +332,56 @@ def _raw_snapshot(
     )
 
 
+def _capture_snapshot(
+    db: Session, batch: ImportBatch, source_name: str, dataset: str,
+    snapshot_date: date, payload: dict,
+    *, date_parse_error: str | None = None,
+) -> int:
+    captured = RawVendorSnapshotRepository().add_if_changed(
+        db, _raw_snapshot(batch.id, source_name, dataset, snapshot_date, payload),
+    )
+    params = dict(batch.request_params or {})
+    reference = {
+        "dataset": dataset, "snapshot_date": snapshot_date.isoformat(),
+        "raw_snapshot_id": captured.snapshot_id, "origin_batch_id": captured.batch_id,
+        "reused": not captured.inserted,
+    }
+    if date_parse_error is not None:
+        reference.update({
+            "date_role": "capture_date_fallback", "date_parse_error": date_parse_error[:1000],
+            "market_published": False,
+        })
+    params["raw_snapshot_refs"] = [*params.get("raw_snapshot_refs", []), reference]
+    batch.request_params = params
+    db.commit()
+    return int(captured.inserted)
+
+
+def _fail_capture_batch(
+    db: Session, repository: RawDailyBarImportRepository, batch: ImportBatch,
+    raw_count: int, new_raw_count: int, dataset: str, error: Exception,
+) -> None:
+    try:
+        db.rollback()
+        repository.finish_batch(
+            db, batch, status="failed", row_count=raw_count,
+            accepted_count=new_raw_count, rejected_count=0,
+            error_message=f"{dataset}: {type(error).__name__}: {error}"[:4000],
+        )
+        db.commit()
+    except Exception as audit_error:  # noqa: BLE001 - preserve original vendor/DB failure
+        error.add_note(
+            f"failed batch audit unavailable: {type(audit_error).__name__}: {audit_error}"
+        )
+
+
 def _snapshot_date(payload: dict) -> date:
     if payload.get("trade_date"):
         return date.fromisoformat(str(payload["trade_date"]))
     timestamp = payload.get("timestamp") or payload.get("date_ms")
     if timestamp:
         return datetime.fromtimestamp(int(timestamp) / 1000, tz=_SHANGHAI).date()
-    return date.today()
+    return datetime.now(_SHANGHAI).date()
 
 
 def _parse_item_date(value: object) -> date | None:

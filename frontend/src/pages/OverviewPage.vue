@@ -54,6 +54,7 @@ onMounted(() => {
     :rerun-plan="displayRerunPlan"
     :sections="failureSections"
     :selected-failure="selectedFailure"
+    execution-route="/operations"
     @select="selectFailure"
   />
   <p v-else class="inline-error">{{ isLoading ? "失败记录读取中…" : "失败记录暂不可用，请刷新后重试。" }}</p>

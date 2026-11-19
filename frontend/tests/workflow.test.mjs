@@ -9,6 +9,7 @@ import * as vue from 'vue';
 import { fetchPortfolioPlanDrift, PortfolioDriftApiError } from '../src/api.ts';
 import { curvePolyline, normalizeEquity, sameEquityDates } from '../src/components/operations/comparisonCurve.ts';
 import { shanghaiDate } from '../src/components/operations/formatters.ts';
+import { operationDiagnostics } from '../src/components/operations/operationsDiagnostics.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -30,6 +31,7 @@ function setup(relativePath, api = {}, props = {}) {
       useRouter: api.useRouter ?? (() => ({ replace: async () => {} })),
     };
     if (name.endsWith('/comparisonCurve')) return { curvePolyline, normalizeEquity, sameEquityDates };
+    if (name.endsWith('/operationsDiagnostics')) return { operationDiagnostics };
     if (name.endsWith('/api')) return dependencies;
     if (name.startsWith('.') || name === '@lucide/vue') return dependencies;
     return require(name);
@@ -114,6 +116,7 @@ function operationsActions(api = {}) {
       finished_at: '2026-11-18T00:00:01Z',
     })),
     fetch: api.fetch ?? (async () => { throw new Error('unexpected poll'); }),
+    storage: api.storage ?? null,
   });
 }
 
@@ -138,12 +141,297 @@ test('operations action previews rerun parameters before starting an audited tas
     parameters: { issue_id: 7, symbols: ['600000.SH'], start_date: '2026-11-17', end_date: '2026-11-17', adjust_type: 'qfq' },
   };
 
-  await actions.executePlan(plan);
+  await actions.executePlan(plan, () => true);
 
   assert.equal(calls[0][0], 'preview');
   assert.equal(calls[1][0], 'start');
   assert.match(calls[1][3], /^frontend-daily_bar_gap_backfill-/);
   assert.equal(actions.currentAction.value.result.problem_closed, true);
+});
+
+function actionStorage() {
+  const items = new Map();
+  return { getItem: key => items.get(key) ?? null, setItem: (key, value) => items.set(key, value), removeItem: key => items.delete(key) };
+}
+
+test('operations panel binds confirmation to current inputs and uses a valid gap window', async () => {
+  let starts = 0;
+  const actions = operationsActions({ start: async () => { starts += 1; } });
+  const panel = setup('components/operations/OperationsActionPanel.vue', { useOperationsActions: () => actions, shanghaiDate }, { enabled: true });
+  panel.form.actionType = 'daily_bar_gap_backfill';
+  panel.form.symbols = '600000.SH';
+  const dayCount = (Date.parse(panel.form.endDate) - Date.parse(panel.form.startDate)) / 86400000;
+  assert.ok(dayCount >= 0 && dayCount <= 31);
+  assert.equal(panel.validationError.value, '');
+  await panel.runPreview();
+  assert.equal(panel.canConfirm.value, true);
+  panel.form.symbols = '000001.SZ';
+  assert.equal(actions.preview.value, null);
+  assert.equal(panel.canConfirm.value, false);
+  await panel.confirmStart();
+  assert.equal(starts, 0);
+  panel.form.startDate = '2026-09-01';
+  panel.form.endDate = '2026-11-01';
+  assert.match(panel.validationError.value, /32/);
+});
+
+test('changed or overlapping operations previews cannot restore an obsolete execution plan', async () => {
+  const first = deferred();
+  const second = deferred();
+  let request = 0;
+  const actions = operationsActions({ preview: () => ++request === 1 ? first.promise : second.promise });
+  const older = actions.previewAction('daily_data_sync', {});
+  const newer = actions.previewAction('factor_profile_rebuild', { start_date: '2026-11-01' });
+  second.resolve({ action_type: 'factor_profile_rebuild', executable: true, parameters: {}, summary: 'new', warnings: [], checks: {} });
+  await newer;
+  first.resolve({ action_type: 'daily_data_sync', executable: true, parameters: {}, summary: 'old', warnings: [], checks: {} });
+  await older;
+  assert.equal(actions.preview.value.summary, 'new');
+  assert.equal(actions.previewMatches('factor_profile_rebuild', { start_date: '2026-11-01' }), true);
+  const pending = deferred();
+  const changed = operationsActions({ preview: () => pending.promise });
+  const loading = changed.previewAction('daily_data_sync', {});
+  changed.invalidatePreview();
+  pending.resolve({ action_type: 'daily_data_sync', executable: true });
+  await loading;
+  assert.equal(changed.preview.value, null);
+  assert.equal(changed.isPreviewing.value, false);
+});
+
+test('lost action start response survives reload and retries the same idempotency key', async () => {
+  const storage = actionStorage();
+  const calls = [];
+  const original = operationsActions({ storage, start: async (...args) => { calls.push(args); throw new Error('response lost'); } });
+  await original.startAction('daily_data_sync', {});
+  assert.equal(original.pendingStart.value.action_type, 'daily_data_sync');
+  const restored = operationsActions({ storage, start: async (...args) => {
+    calls.push(args);
+    return { action_id: 81, action_type: args[0], parameters: args[1], status: 'success' };
+  } });
+  await restored.startAction('factor_profile_rebuild', { start_date: '2026-11-01' });
+  assert.equal(calls.length, 1);
+  await restored.retryPendingStart();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][2], calls[1][2]);
+  assert.deepEqual(calls[0][1], calls[1][1]);
+  assert.equal(restored.pendingStart.value, null);
+  assert.equal(restored.recoveryActionId.value, 81);
+});
+
+test('a rejected action request permits a corrected submission with a new key', async () => {
+  const calls = [];
+  const actions = operationsActions({ start: async (...args) => {
+    calls.push(args);
+    if (calls.length === 1) throw Object.assign(new Error('invalid parameters'), { status: 422 });
+    return { action_id: 82, action_type: args[0], status: 'success' };
+  } });
+  await actions.startAction('daily_data_sync', { invalid: true });
+  assert.equal(actions.pendingStart.value, null);
+  await actions.startAction('daily_data_sync', {});
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0][2], calls[1][2]);
+});
+
+test('failure execution asks for confirmation after the actual preview', async () => {
+  let starts = 0;
+  let confirmations = 0;
+  const actions = operationsActions({ start: async () => { starts += 1; } });
+  const plan = { supported: true, action_type: 'daily_data_sync', parameters: {} };
+  await actions.executePlan(plan);
+  assert.equal(starts, 0);
+  await actions.executePlan(plan, checked => { confirmations += 1; assert.equal(checked.executable, true); return false; });
+  assert.equal(confirmations, 1);
+  assert.equal(starts, 0);
+});
+
+test('leaving an action panel stops in-flight polling and returning resumes the same task', async () => {
+  const savedWindow = globalThis.window;
+  const timers = new Map();
+  let serial = 0;
+  globalThis.window = { setTimeout: callback => { timers.set(++serial, callback); return serial; }, clearTimeout: id => timers.delete(id) };
+  try {
+    const reply = deferred();
+    const actions = operationsActions({
+      start: async () => ({ action_id: 83, action_type: 'daily_data_sync', status: 'running' }),
+      fetch: async () => reply.promise,
+    });
+    await actions.startAction('daily_data_sync', {});
+    assert.equal(timers.size, 1);
+    const callback = [...timers.values()][0];
+    timers.clear();
+    const poll = callback();
+    actions.stopPolling();
+    reply.resolve({ action_id: 83, status: 'success' });
+    await poll;
+    assert.equal(actions.currentAction.value.status, 'running');
+    assert.equal(timers.size, 0);
+    await actions.resumePolling();
+    assert.equal(timers.size, 1);
+    actions.stopPolling();
+  } finally { globalThis.window = savedWindow; }
+});
+
+test('saved task restoration only reads and ignores an older task response', async () => {
+  const storage = actionStorage();
+  storage.setItem('stock-master.operations-action.v1', JSON.stringify({ action_id: 84, pending: null }));
+  const old = deferred();
+  const reads = [];
+  const actions = operationsActions({ storage, fetch: async id => {
+    reads.push(id);
+    return id === 84 ? old.promise : { action_id: id, status: 'success' };
+  }, start: async () => { throw new Error('restoration must not start a task'); } });
+  const restoring = actions.resumePolling();
+  await actions.restoreAction(85);
+  old.resolve({ action_id: 84, status: 'success' });
+  await restoring;
+  assert.deepEqual(reads, [84, 85]);
+  assert.equal(actions.currentAction.value.action_id, 85);
+  assert.equal(actions.isRestoring.value, false);
+});
+
+test('reading a previous terminal task cannot hide a currently running action', async () => {
+  let reads = 0;
+  const actions = operationsActions({
+    start: async () => ({ action_id: 86, action_type: 'daily_data_sync', status: 'running' }),
+    fetch: async () => { reads += 1; return { action_id: 1, status: 'success' }; },
+  });
+  await actions.startAction('daily_data_sync', {});
+  await actions.restoreAction(1);
+  assert.equal(reads, 0);
+  assert.equal(actions.currentAction.value.action_id, 86);
+  assert.equal(actions.isRunning.value, true);
+  assert.match(actions.errorMessage.value, /仍在后台运行/);
+  actions.stopPolling();
+});
+
+test('demo operations and quality controls cannot submit writes', async () => {
+  let writes = 0;
+  const actions = operationsActions({ start: async () => { writes += 1; }, preview: async () => { writes += 1; } });
+  const panel = setup('components/operations/OperationsActionPanel.vue', { useOperationsActions: () => actions, shanghaiDate }, { enabled: false });
+  await panel.runPreview();
+  await panel.confirmStart();
+  const quality = setup('pages/QualityPage.vue', {
+    useOperationsDashboard: () => ({ source: vue.ref('demo'), displayOverview: vue.ref({}), ensureLoaded() {} }),
+    updateDataQualityIssueStatus: async () => { writes += 1; },
+  });
+  await quality.updateStatus(1, 'fixed');
+  const operations = setup('pages/OperationsPage.vue', {
+    useOperationsDashboard: () => ({ source: vue.ref('demo'), ensureLoaded() {} }),
+    useOperationsActions: () => ({ executePlan: async () => { writes += 1; } }),
+  });
+  await operations.executePlan({ supported: true });
+  assert.equal(writes, 0);
+});
+
+test('factor rebuild and upstream recovery forms preserve the backend action contracts', async () => {
+  const calls = [];
+  const actions = operationsActions({
+    preview: async (actionType, parameters) => {
+      calls.push(['preview', actionType, parameters]);
+      return { action_type: actionType, executable: true, summary: 'checked',
+        parameters: actionType === 'price_value_input_prepare' ? { price_date: '2026-11-17', observation_mode: 'current_research_catchup' } : parameters,
+        warnings: ['current research only'], checks: {} };
+    },
+    start: async (actionType, parameters) => {
+      calls.push(['start', actionType, parameters]);
+      return { action_id: 88, action_type: actionType, status: 'success', parameters, result: { problem_closed: true } };
+    },
+  });
+  const panel = setup('components/operations/OperationsActionPanel.vue', { useOperationsActions: () => actions, shanghaiDate }, { enabled: true });
+  panel.form.actionType = 'factor_values_rebuild';
+  assert.match(panel.validationError.value, /运行编号/);
+  panel.form.originalRunId = '2061';
+  await panel.runPreview();
+  assert.deepEqual(calls.at(-1), ['preview', 'factor_values_rebuild', { original_run_id: 2061 }]);
+  panel.form.actionType = 'alternative_data_sync';
+  panel.form.sources = ['eastmoney'];
+  await panel.runPreview();
+  assert.deepEqual(calls.at(-1), ['preview', 'alternative_data_sync', { sources: ['eastmoney'] }]);
+  panel.form.actionType = 'price_value_input_prepare';
+  await panel.runPreview();
+  assert.deepEqual(calls.at(-1), ['preview', 'price_value_input_prepare', {}]);
+  const savedWindow = globalThis.window;
+  globalThis.window = { confirm: () => true };
+  try { await panel.confirmStart(); } finally { globalThis.window = savedWindow; }
+  assert.deepEqual(calls.at(-1), ['start', 'price_value_input_prepare', { price_date: '2026-11-17', observation_mode: 'current_research_catchup' }]);
+});
+
+test('factor input blockers remain visible without starting or promoting a rebuild', async () => {
+  let starts = 0;
+  const actions = operationsActions({
+    preview: async (actionType, parameters) => ({ action_type: actionType, parameters, executable: false,
+      summary: '可信输入缺失', warnings: [], checks: { input_rows: 0, reason_codes: ['MISSING_TRUSTED_INPUT'], next_action: 'daily_data_sync' } }),
+    start: async () => { starts += 1; },
+  });
+  const plan = { supported: true, action_type: 'factor_values_rebuild', parameters: { original_run_id: 2061 } };
+  let confirmations = 0;
+  await actions.executePlan(plan, () => { confirmations += 1; return true; });
+  assert.equal(confirmations, 0);
+  assert.equal(starts, 0);
+  assert.equal(actions.preview.value.checks.input_rows, 0);
+  assert.deepEqual(actions.preview.value.checks.reason_codes, ['MISSING_TRUSTED_INPUT']);
+});
+
+test('factor diagnostic codes have readable causes and bounded input summaries', () => {
+  const codes = ['ORIGINAL_RUN_UNSUPPORTED', 'PRICE_RELEASE_UNAVAILABLE', 'TRUSTED_PRICE_INPUT_MISSING',
+    'INPUT_ROW_LIMIT_EXCEEDED', 'SYMBOL_LIMIT_EXCEEDED', 'PRICE_WARMUP_INSUFFICIENT', 'UPSTREAM_INPUT_MISSING',
+    'REQUESTED_SYMBOL_PRICE_MISSING', 'TARGET_TRADING_CALENDAR_MISSING', 'TRUSTED_PRICE_DATES_MISSING', 'PRICE_RELEASE_DATE_INCOMPLETE'];
+  const report = operationDiagnostics({ reason_codes: codes, input_rows: 0, detail: '原运行缺少可信输入口径',
+    missing_dependencies: ['financial_statements', 'generic_valuations', 'turnover_percentile_120@v1-qfq'],
+    insufficient_history_symbols: ['600000.SH'], missing_price_dates: ['2026-11-17'] }, 'factor_values_rebuild');
+  assert.equal(report.reasons.length, codes.length);
+  for (const reason of report.reasons) assert.doesNotMatch(reason, /尚未归类/);
+  assert.match(report.reasons.join(' '), /前复权/);
+  assert.match(report.reasons.join(' '), /历史观测不足/);
+  assert.equal(report.detail, '原运行缺少可信输入口径');
+  assert.ok(report.rows.some(row => row.label === '可用价格输入行数' && row.value === '0'));
+  assert.ok(report.rows.some(row => row.label === '缺失依赖' && /财报.*当前研究观察不能替代.*组成因子/.test(row.value)));
+  assert.ok(report.rows.some(row => row.value === '600000.SH'));
+  assert.ok(report.rows.some(row => row.value === '2026-11-17'));
+  assert.equal(report.nextAction, null);
+});
+
+test('diagnostic shortcuts cannot pretend ordinary sync repairs QFQ or research inputs replace factor values', () => {
+  for (const reason of ['PRICE_RELEASE_UNAVAILABLE', 'PRICE_RELEASE_DATE_INCOMPLETE']) {
+    const report = operationDiagnostics({ reason_codes: [reason], next_action: 'daily_data_sync', adjust_type: 'qfq' }, 'factor_values_rebuild');
+    assert.equal(report.nextAction, null);
+    assert.match(report.nextStep, /不能自动重建前复权发布/);
+  }
+  assert.equal(operationDiagnostics({ reason_codes: ['TRUSTED_PRICE_INPUT_MISSING'], next_action: 'daily_data_sync', adjust_type: 'qfq' }, 'factor_values_rebuild').nextAction, null);
+  assert.equal(operationDiagnostics({ reason_codes: ['UPSTREAM_INPUT_MISSING'], missing_dependencies: ['generic_valuations'], next_action: 'price_value_input_prepare' }, 'factor_values_rebuild').nextAction, null);
+  assert.equal(operationDiagnostics({ reason_codes: ['UPSTREAM_INPUT_MISSING'], missing_dependencies: ['macro_data'], next_action: 'alternative_data_sync' }, 'factor_values_rebuild').nextAction, null);
+  const profiles = operationDiagnostics({ available_count: 0, missing_count: 3, missing_factor_examples: ['momentum_20@v1-qfq'], next_action: 'factor_profile_rebuild' }, 'factor_profile_rebuild');
+  assert.equal(profiles.nextAction, null);
+  assert.match(profiles.nextStep, /重建画像不会解除/);
+  const unsupported = operationDiagnostics({ reason_codes: ['UPSTREAM_INPUT_MISSING'], next_action: 'unregistered_action' }, 'factor_values_rebuild');
+  assert.equal(unsupported.nextAction, null);
+});
+
+test('an explained upstream shortcut only fills the relevant form and preserves the original factor run', async () => {
+  let previews = 0;
+  let starts = 0;
+  const actions = operationsActions({
+    preview: async (action_type, parameters) => {
+      previews += 1;
+      return { action_type, parameters, executable: false, summary: '上游输入缺失', warnings: [],
+        checks: { reason_codes: ['UPSTREAM_INPUT_MISSING'], missing_dependencies: ['hot_stock'], next_action: 'alternative_data_sync' } };
+    },
+    start: async () => { starts += 1; },
+  });
+  const panel = setup('components/operations/OperationsActionPanel.vue', { useOperationsActions: () => actions, shanghaiDate }, { enabled: true });
+  panel.form.actionType = 'factor_values_rebuild';
+  panel.form.originalRunId = '2061';
+  await panel.runPreview();
+  assert.match(panel.diagnostics.value.reasons[0], /上游数据或组成因子缺失/);
+  assert.match(panel.diagnostics.value.nextAction.explanation, /历史缺口不保证/);
+  panel.switchSuggestedAction();
+  assert.equal(panel.form.actionType, 'alternative_data_sync');
+  assert.deepEqual(panel.form.sources, ['hithink']);
+  assert.equal(panel.form.originalRunId, '2061');
+  assert.equal(actions.preview.value, null);
+  assert.equal(panel.canConfirm.value, false);
+  assert.equal(previews, 1);
+  assert.equal(starts, 0);
 });
 
 test('research workbench preserves successful sections when one aggregate section fails', async () => {

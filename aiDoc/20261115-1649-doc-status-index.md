@@ -28,11 +28,12 @@ note: >-
 - 两者冲突时以 living docs 与代码为准，并按 `aiDoc/README.md` 的同步规则回写时间戳文档的 `note` 或补一份新 ADR。
 - 本文件不复制各文档的结论，只做状态聚合；要读结论请打开原文。
 
-## 现行有效 `status: current`（28 份）
+## 现行有效 `status: current`（29 份）
 
 | 文档 | 类型 | 截至 | 取代/去向 | 备注 |
 | --- | --- | --- | --- | --- |
 | [`plans/20261024-1522-training-window-selection-plan.md`](plans/20261024-1522-training-window-selection-plan.md) | plan | 2026-10-24 | — | — |
+| [`plans/20261119-1014-operations-recovery-and-index-consistency.md`](plans/20261119-1014-operations-recovery-and-index-consistency.md) | decision | 2026-11-19 | — | — |
 | [`plans/20261119-1049-agent-overall-plan-and-sqlite.md`](plans/20261119-1049-agent-overall-plan-and-sqlite.md) | plan | 2026-11-19 | — | 汇总本轮用户完整目标与分阶段验收。第一阶段为 SQLite 会话与显式记忆； 结构化计划、统一权限、自动执行与失败恢复尚未交付，写执行默认关闭。 |
 | [`relations/20261024-1427-research-database-split.md`](relations/20261024-1427-research-database-split.md) | decision | 2026-10-24 | — | 决策不变；文中「6 张表」现为 7 张，研究库另含 strategy.external_observation。 |
 | [`relations/20261111-0300-intraday-snapshot-guard.md`](relations/20261111-0300-intraday-snapshot-guard.md) | decision | 2026-11-11 | — | — |
@@ -111,4 +112,4 @@ note: >-
 | --- | --- | --- | --- | --- |
 | [`relations/20261013-2207-storage-diagnosis-and-plan.md`](relations/20261013-2207-storage-diagnosis-and-plan.md) | plan | 2026-10-13 | [`relations/20261112-1341-local-storage-retention-and-cleanup.md`](relations/20261112-1341-local-storage-retention-and-cleanup.md) | 保留灾备副本、滚动备份、直接清理 WAL 与保留 30 份筛选快照的建议均已被撤销，不得作为当前口径引用。 |
 
-合计 63 份带时间戳文档。
+合计 64 份带时间戳文档。

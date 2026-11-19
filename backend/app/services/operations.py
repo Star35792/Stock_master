@@ -31,6 +31,7 @@ from app.schemas.operations import (
     PaperOrderSnapshot,
     PaperTradingOverview,
 )
+from app.services.factor_recovery import FactorRecoveryService
 
 
 class OperationsOverviewService:
@@ -41,7 +42,11 @@ class OperationsOverviewService:
         self.repository = repository or OperationsOverviewRepository()
 
     def get_overview(
-        self, db: Session, *, limit: int = 5, research_db: Session | None = None,
+        self,
+        db: Session,
+        *,
+        limit: int = 5,
+        research_db: Session | None = None,
     ) -> OperationsOverview:
         backtest_db = research_db if research_db is not None else db
         return OperationsOverview(
@@ -157,9 +162,7 @@ class OperationsOverviewService:
             )
         raise ValueError("unsupported failure_type")
 
-    def get_alerts(
-        self, db: Session, research_db: Session | None = None
-    ) -> OperationsAlertSummary:
+    def get_alerts(self, db: Session, research_db: Session | None = None) -> OperationsAlertSummary:
         open_severity_counts = self.repository.count_open_data_quality_by_severity(db)
         alert_items = []
         critical_count = open_severity_counts.get("critical", 0)
@@ -172,9 +175,7 @@ class OperationsOverviewService:
                     title="Critical data quality issues",
                     detail="Unresolved critical data quality issues require review",
                     rule="open or reopened data quality issues with severity=critical",
-                    next_action=(
-                        "open the failures center and review data quality issue details"
-                    ),
+                    next_action=("open the failures center and review data quality issue details"),
                 )
             )
         error_count = open_severity_counts.get("error", 0)
@@ -223,9 +224,9 @@ class OperationsOverviewService:
                     key="failed_factor_runs",
                     severity="warning",
                     count=failed_factor_runs,
-                    title="Failed factor runs",
-                    detail="The latest run of these factor versions failed or partially failed",
-                    rule="latest factor_name/factor_version run has status failed or partial",
+                    title="因子运行异常或无可用观察",
+                    detail="最近运行失败、部分完成，或虽然完成但没有写入因子观察值",
+                    rule="latest factor run failed/partial or success with rows_written=0",
                     next_action="review factor parameters, input window, and upstream data quality",
                 )
             )
@@ -299,6 +300,47 @@ class OperationsOverviewService:
                 failure_id=failure_id,
                 issue=detail.data_quality_issue,
             )
+        if detail.factor_run is not None:
+            try:
+                FactorRecoveryService().resolve(db, detail.factor_run.id)
+            except (ValueError, TypeError) as exc:
+                return OperationsRerunPlan(
+                    failure_type=failure_type,
+                    failure_id=failure_id,
+                    supported=False,
+                    action_type="manual_review",
+                    reason=str(exc),
+                    parameters={},
+                )
+            return OperationsRerunPlan(
+                failure_type=failure_type,
+                failure_id=failure_id,
+                supported=True,
+                action_type="factor_values_rebuild",
+                reason="按原运行恢复单因子目标窗口；预检输入后新建重算记录并复查产出",
+                parameters={"original_run_id": detail.factor_run.id},
+            )
+        if detail.job is not None:
+            actions = {
+                "auto_data_sync": ("daily_data_sync", {}),
+                "hithink_daily_sync": ("daily_data_sync", {}),
+                "alternative_data_collection": (
+                    "alternative_data_sync",
+                    {"sources": ["hithink", "eastmoney"]},
+                ),
+                "price_value_input_prep": ("price_value_input_prepare", {}),
+                "price_value_screen": ("price_value_input_prepare", {}),
+            }
+            if detail.job.job_name in actions:
+                action_type, parameters = actions[detail.job.job_name]
+                return OperationsRerunPlan(
+                    failure_type=failure_type,
+                    failure_id=failure_id,
+                    supported=True,
+                    action_type=action_type,
+                    parameters=parameters,
+                    reason="保留历史失败，重新核验当前输入后执行受控恢复；预检决定是否可执行",
+                )
         return OperationsRerunPlan(
             failure_type=failure_type,  # type: ignore[arg-type]
             failure_id=failure_id,
@@ -353,7 +395,11 @@ class OperationsOverviewService:
         )
 
     def get_failures(
-        self, db: Session, *, limit: int = 20, research_db: Session | None = None,
+        self,
+        db: Session,
+        *,
+        limit: int = 20,
+        research_db: Session | None = None,
     ) -> OperationsFailureReport:
         backtest_db = research_db if research_db is not None else db
         data_quality_total = self.repository.count_unresolved_data_quality_issues(db)

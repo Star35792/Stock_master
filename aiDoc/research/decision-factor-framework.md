@@ -2,6 +2,8 @@
 
 ## 1. 结论
 
+运维可按原运行 ID 定向恢复因子值，完整还原输出窗口、证券及复权，要求当前计算器支持同一版本；旧 `input_start_date` 含预热，不能再当输出起点。新 run 记录当前代码、实际价格摘要、active trusted QFQ 发布和原运行引用；空输入、日期缺口或超限阻断，覆盖不足保持 partial。旧失败保留，公式、方向、PIT 和池资格不变；画像仅诊断已有值。见[运维恢复决策](../plans/20261119-1014-operations-recovery-and-index-consistency.md)。
+
 因子核心池的证据长度现按 horizon 单独校验：除总画像天数外，1/5/20 日 Rank IC 与 1 日端点的非空观测数均须达到 `min_trade_dates`。正均值不能替代足够样本；缺失计数按 0 fail-closed。该门禁不改变因子公式或存储结构，也不补齐 release、输入快照、日期身份和样本外资格，详见[因子多周期有效观测数资格闸门](20261102-2152-factor-horizon-observation-gate.md)。
 
 因子画像输入现以 `evidence_identity_v1` 绑定实际 factor release lineage、active trusted QFQ 内容快照、请求窗口、因子/代码版本和完整日期集合。温层 IC 只在逐文件 SHA-256 与 release registry 一致、计算前后内容不变、每个因子实际画像日期等于 QFQ 预期日期时写 `strategy_eligible`；完整文件清单进入审计 JSON。汇总不信任信封自述，而是从 `factor_profile` 重读日期集合并复核 hash/count/首末日，同时要求 eligibility 与 identity 各自只有一个 distinct 值。旧文本、混合身份、部分重算和任意子窗口都 fail-closed。为满足本轮“不改变存储结构”的约束，信封兼容承载于既有 `evidence_eligibility_reason VARCHAR(500)`；这是过渡性 provenance 载体，不是新增一等 schema。完整设计见[因子画像输入身份闸门](20261103-0313-factor-profile-evidence-identity.md)。

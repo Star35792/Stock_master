@@ -65,6 +65,10 @@ V1 和后续阶段可能接入：
 
 ## 4. raw.daily_bar 原始记录
 
+另类数据的当前采集先提交批次，再逐响应保存 raw，最后以独立事务发布 market。后续抓取、日期解析或标准化失败时，已收到的响应保留，market 回滚、批次标失败；非法业务日期仅以真实采集日归档 raw 并注明 `market_published=false`。同来源、dataset、快照日期和内容哈希复用原 raw ID，真实变化新增版本；采集时间保存在批次，不为内容强加变化的时间字段。
+
+此路径批次 `row_count` 为收到的响应数，`accepted_count` 为本次新增 raw 数，复用计数及原 raw/batch 引用进入 `request_params.raw_snapshot_refs`；不是 market 质量通过数。空 dataset 仍为 partial。人工重试保留历史失败，并产生新的业务任务。历史 DuckDB 重复键/索引 FATAL 未重现，不把此次证据留存改进表述为其底层原因已经消除。
+
 `raw.daily_bar` 保存所有来源的日线记录。
 
 建议字段：

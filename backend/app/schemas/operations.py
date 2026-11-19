@@ -306,6 +306,9 @@ OperationsActionType = Literal[
     "daily_data_sync",
     "daily_bar_gap_backfill",
     "factor_profile_rebuild",
+    "factor_values_rebuild",
+    "alternative_data_sync",
+    "price_value_input_prepare",
 ]
 
 

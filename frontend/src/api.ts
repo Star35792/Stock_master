@@ -38,7 +38,7 @@ export async function fetchPaperAccounts(): Promise<PaperAccount[]> {
 async function jsonApi<T>(response: Response, message: string): Promise<T> {
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? `${message} (${response.status})`);
+    throw Object.assign(new Error(payload?.detail ?? `${message} (${response.status})`), { status: response.status });
   }
   return response.json() as Promise<T>;
 }

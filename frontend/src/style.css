@@ -1553,6 +1553,43 @@ pre {
   font: inherit;
 }
 
+.action-form .action-source-option {
+  display: flex;
+  align-items: center;
+}
+
+.action-form .action-source-option input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.action-workbench button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.diagnostic-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.diagnostic-summary div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.4fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.diagnostic-summary dt {
+  color: #667085;
+}
+
+.diagnostic-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .action-date-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
