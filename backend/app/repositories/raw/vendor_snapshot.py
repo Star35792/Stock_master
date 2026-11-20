@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.raw import RawVendorSnapshot
+from app.models.raw import ImportBatch, RawVendorSnapshot
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,11 @@ class CapturedVendorSnapshot:
 
 
 class RawVendorSnapshotRepository:
+    def get_capture_references(
+        self, db: Session, *, batch_id: int, snapshot_id: int
+    ) -> tuple[ImportBatch | None, RawVendorSnapshot | None]:
+        return db.get(ImportBatch, batch_id), db.get(RawVendorSnapshot, snapshot_id)
+
     def add_if_changed(
         self, db: Session, snapshot: RawVendorSnapshot,
     ) -> CapturedVendorSnapshot:

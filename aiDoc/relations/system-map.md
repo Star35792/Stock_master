@@ -52,6 +52,7 @@
 - 温层大表导出先占用新的 release 目录，逐表行数校验失败即停止后续大表写入；全部通过后才原子写入成功 summary。导出失败清理本次未发布目录，避免留下整套 Parquet；硬中断或删除受阻仍可能留下无有效 summary 的目录，需后续核对清理。历史失败目录也须按引用与状态核对后单独清理。
 - `libs/hithink_sdk/marketdb`：DuckDB SDK/toolkit，适合 notebook 和历史数据分析，不等同于后端 `market` 可信层。后端不 import 它（HiThink 取数走 `app/data_sources/hithink.py` 自有 urllib 实现），它也不参与 `scripts/ci_check.py` 的任何门命令。
 - `libs/a_stock_data/loader`：把未入库的 `a-stock-data-main/SKILL.md` 内嵌 Python 用 AST 白名单净化成可 import 模块，供 `data_sources/tencent.py`、`tdx_official.py` 与对账脚本真实 import。不变式：导入时不得发起任何外网请求（上游代码块常在模块级直接取数并打印）。它是外部实现的适配层，不是第二个事实源，产出仍只进 `raw`。
+- 智能体的腾讯单股报价复用该适配器，通过原维护确认链写入 raw 快照和审计任务。通达信工具只读已有日线来源对账。`agent.db` 保留有界状态和原记录引用。见[数据源导入策略](../data/source-ingestion-policy.md#1-支持来源分类)。
 - 检查门：本地与 CI 共用 `scripts/ci_check.py`（backend = Ruff + 全量 pytest；frontend = `bun test` + `bun run build`），前端唯一运行时是 Bun（版本 pin 在 `frontend/.bun-version`），步骤契约由 `backend/tests/test_ci_check_runner.py` 锁定。
 - API 生命周期管理 `AutoDataSyncWorker`：启动后在后台线程串行执行全市场未复权日线同步；股票横截面覆盖达标后触发 `daily_loop(skip_sync=true)`，依次更新 QFQ、暂存 curated 价格、计算因子并经发布闸门原子切换。行情日期未前进但该日没有已发布闭环时仍会重试。每次结束后等待配置间隔再检查，关闭时等待当前任务完成；使用单 worker，任务与水位复用 `JobLog`（物理表 `metadata.job_log`）。
 - HiThink dump 的批量日线构建保持集合式历史导入；存在任一第二来源、量额缺失/一零一正、停牌或其他硬拒绝、价格连续性/极端涨幅警告、历史盘中采集时点的日期在提交前复用公共质量与对账服务。冲突、警告及硬拒绝行保留原始值与 raw ID 供审计但退出可信消费路径，重复复核只复用未关闭的同类问题。通达信目前仍由独立采集入口获取，是对账源而非自动故障切换源。

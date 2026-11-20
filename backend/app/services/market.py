@@ -290,6 +290,7 @@ class MarketQueryService:
         is_conflict: bool | None,
         limit: int,
         offset: int,
+        source_name: str | None = None,
     ) -> Page[DailyBarSourceCompareRead]:
         rows, total = self.source_compare_repository.list(
             db,
@@ -300,6 +301,7 @@ class MarketQueryService:
             is_conflict=is_conflict,
             limit=limit,
             offset=offset,
+            source_name=source_name,
         )
         return Page(
             items=[DailyBarSourceCompareRead.model_validate(row) for row in rows],

@@ -7,4 +7,5 @@ MAINTENANCE_ACTIONS = {
     "rebuild_factor_profiles": "factor_profile_rebuild",
     "repair_factor_values": "factor_values_rebuild",
     "refresh_alternative_data": "alternative_data_sync",
+    "capture_tencent_quote": "tencent_quote_capture",
 }

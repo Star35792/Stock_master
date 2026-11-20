@@ -59,6 +59,12 @@ export const factLabels: Record<string, string> = {
   publish_eligible: "原服务允许发布", market_release_id: "可信行情发布 ID", curated_release_id: "前复权发布 ID",
   alternative_status: "补充来源采集状态", failed_services_count: "失败的因子族数", empty_services_count: "无产物的因子族数",
   reason_codes_count: "原任务原因码数",
+  observed_at: "报价采集时点", quote_time_verified: "已核验报价时点", observation_status: "报价采集结果",
+  price_cny: "腾讯报价（元）", pe_ttm: "腾讯滚动市盈率", pb: "腾讯市净率",
+  batch_id: "本次采集批次 ID", raw_snapshot_id: "来源快照 ID", raw_batch_id: "来源快照归档批次 ID",
+  trade_date: "交易日", total: "对账总记录数", compared_sample_count: "返回对账样本数", conflict_sample_count: "样本中的冲突数",
+  source_a: "对账来源 A", source_b: "对账来源 B", raw_id_a: "原始记录 A", raw_id_b: "原始记录 B",
+  close_diff: "收盘价差（元）", conflict_reason: "冲突原因",
 };
 
 export function factValue(value: string | number | boolean | null): string {

@@ -309,8 +309,15 @@ OperationsActionType = Literal[
     "factor_profile_rebuild",
     "factor_values_rebuild",
     "alternative_data_sync",
+    "tencent_quote_capture",
     "price_value_input_prepare",
 ]
+
+
+class TencentQuoteCaptureArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    symbol: str = Field(pattern=r"^[0-9]{6}(\.(SH|SZ|BJ))?$")
 
 
 class OperationsActionPreviewRequest(BaseModel):

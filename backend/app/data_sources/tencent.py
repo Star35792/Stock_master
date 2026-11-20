@@ -18,9 +18,9 @@ This adapter therefore publishes two things the other sources cannot:
 
 Vendor contract, measured on 2026-11-11
 -----------------------------------------
-* The quote endpoint takes a list of **bare six-digit codes** and answers with
-  a mapping keyed by the same bare code.  Prefixes (``sh``/``sz``/``bj``) are
-  rejected.
+* The valuation collector supplies bare six-digit codes. The a-stock-data
+  adapter also accepts explicit ``sh``/``sz``/``bj`` prefixes and returns the
+  original request keys, which the single-stock capture uses to disambiguate.
 * A single request cannot carry the whole market: the URL length limit makes
   the vendor answer **HTTP 414 Request-URI Too Large**.  Batches of 60 codes
   are safe.
@@ -108,7 +108,10 @@ _LIBS_ROOT = Path(__file__).resolve().parents[3] / "libs"
 if str(_LIBS_ROOT) not in sys.path:
     sys.path.insert(0, str(_LIBS_ROOT))
 
-from a_stock_data.loader import load as _load_a_stock_data  # noqa: E402
+from a_stock_data.loader import (  # noqa: E402
+    DEFAULT_SKILL_PATH,
+    load as _load_a_stock_data,
+)
 
 #: Maximum number of codes per request.  The vendor builds the quote URL from
 #: the code list, and a large enough list overflows the URI length limit and
@@ -255,6 +258,10 @@ class TencentQuoteDataSource:
     name = "tencent"
     source_type = "vendor_api"
 
+    @staticmethod
+    def has_local_source() -> bool:
+        return DEFAULT_SKILL_PATH.is_file()
+
     def __init__(self, *, batch_size: int = BATCH_SIZE) -> None:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
@@ -270,7 +277,7 @@ class TencentQuoteDataSource:
         return self._module
 
     def fetch_quotes(self, codes: list[str]) -> dict[str, dict[str, Any]]:
-        """Fetch raw quote payloads for bare six-digit codes.
+        """Fetch parsed vendor quotes for bare codes or explicit vendor-prefixed codes.
 
         Batches are issued sequentially so a single oversized request cannot
         abort the whole sweep, and a failed batch is reported rather than

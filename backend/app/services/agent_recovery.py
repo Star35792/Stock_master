@@ -294,6 +294,20 @@ class AgentEvidenceRecovery:
                 return report
             if runs:
                 report.outputs["run_id"] = artifact.id
+        if identity.tool == "capture_tencent_quote":
+            from app.services.tencent_quote_capture import verify_quote_capture
+
+            result = metadata.get("result")
+            preview = metadata.get("preview")
+            checks = preview.get("checks") if isinstance(preview, dict) else None
+            if not verify_quote_capture(
+                db,
+                action_id=job.id,
+                symbol=checks.get("symbol") if isinstance(checks, dict) else None,
+                observation=result.get("quote_observation") if isinstance(result, dict) else None,
+            ):
+                report.status, report.reason = "conflict", "原腾讯报价任务与 raw 来源引用无法核对。"
+                return report
         report.outputs["task_id"] = job.id
         report.status, report.reason = "verified", "原任务及其产物身份核验通过，不提升研究资格。"
         return report

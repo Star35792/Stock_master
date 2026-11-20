@@ -24,6 +24,7 @@ from app.schemas.operations import (
     OperationsActionRead,
     OperationsActionStartRequest,
     OperationsActionType,
+    TencentQuoteCaptureArgs,
 )
 from app.services.agent_maintenance_contract import MAINTENANCE_ACTIONS
 from app.services.auto_data_sync import (
@@ -40,6 +41,7 @@ from app.services.job_lease import merge_job_lease_metadata
 from app.services.job_logging import logged_job
 from app.services.price_value_input_prep import PriceValueInputPrepService
 from app.services.price_value_screen import PriceValueScreenService
+from app.services.tencent_quote_capture import TencentQuoteCaptureService
 from app.utils.agent_identity import parameters_hash
 from app.utils.duckdb_write_lock import duckdb_write_lock
 
@@ -80,6 +82,25 @@ class OperationsActionService:
         parameters: dict[str, Any],
     ) -> OperationsActionPreview:
         normalized = self._normalize_parameters(action_type, parameters)
+        if action_type == "tencent_quote_capture":
+            service = TencentQuoteCaptureService()
+            symbol = service.resolve_stock(db, normalized["symbol"])
+            configured = service.data_source.has_local_source()
+            executable = bool(symbol and configured)
+            if not configured:
+                summary = "缺少本机 a-stock-data-main/SKILL.md。"
+            elif not symbol:
+                summary = "证券主数据中无对应的有效人民币股票。请核对代码和交易所。"
+            else:
+                summary = f"采集 {symbol} 的腾讯报价快照，保存供应商原始证据。"
+            return OperationsActionPreview(
+                action_type=action_type,
+                executable=executable,
+                summary=summary,
+                parameters=normalized,
+                checks={"symbol": symbol, "source_name": "tencent", "configured": configured},
+                warnings=["报价时点与鲜度未核实，仅供查看来源快照。"],
+            )
         if action_type == "daily_data_and_factors_sync":
             checks = DataMaintenanceWorkflow().checks(db)
             return OperationsActionPreview(
@@ -260,6 +281,8 @@ class OperationsActionService:
         agent_identity: dict | None = None,
         expected_preview: dict | None = None,
     ) -> OperationsActionRead:
+        if request.action_type == "tencent_quote_capture" and agent_identity is None:
+            raise ValueError("腾讯报价采集须通过聊天助手确认计划步骤。")
         if agent_identity is not None:
             identity = AgentActionIdentity.model_validate(agent_identity)
             expected_action = MAINTENANCE_ACTIONS.get(identity.tool)
@@ -376,6 +399,10 @@ class OperationsActionService:
                 checked = self.preview(db, action_type=action_type, parameters=parameters)
                 if not checked.executable:
                     raise ValueError(f"执行前复查被阻断：{checked.summary}; {checked.checks}")
+                if action_type == "tencent_quote_capture" and (
+                    checked.checks != metadata["preview"]["checks"]
+                ):
+                    raise ValueError("腾讯报价采集范围变化，请重新预检确认。")
             result, completion_status = self._execute_action(
                 db,
                 action_id=action_id,
@@ -398,6 +425,11 @@ class OperationsActionService:
         action_type: OperationsActionType,
         parameters: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
+        if action_type == "tencent_quote_capture":
+            job = self.job_repository.get(db, action_id)
+            return TencentQuoteCaptureService().capture(
+                db, action_id=action_id, symbol=job.metadata_["preview"]["checks"]["symbol"]
+            )
         if action_type == "daily_data_and_factors_sync":
             job = self.job_repository.get(db, action_id)
             return DataMaintenanceWorkflow().execute(
@@ -578,6 +610,8 @@ class OperationsActionService:
         action_type: OperationsActionType,
         parameters: dict[str, Any],
     ) -> dict[str, Any]:
+        if action_type == "tencent_quote_capture":
+            return TencentQuoteCaptureArgs.model_validate(parameters).model_dump(mode="json")
         if action_type == "factor_values_rebuild":
             if set(parameters) != {"original_run_id"}:
                 raise ValueError("factor_values_rebuild only accepts original_run_id")

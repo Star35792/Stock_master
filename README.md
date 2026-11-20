@@ -206,6 +206,7 @@ curl http://127.0.0.1:8000/health
 
 - 前端 `/agent`：普通查询直接读取，聊天中的同步、修复或研究意图自动提交可审阅计划，缺参可直接继续聊天补充。批准后运行预检，每项写入单独确认；随后自动跟踪任务与复查，下一项写入仍需确认。刷新会话只观察原任务，不自动重放。见[聊天维护合同](aiDoc/plans/20261120-1551-agent-chat-data-maintenance.md)。
 - `GET /api/v1/agent/status`：配置状态、全局写门、`data_maintenance_enabled`及各工具`write_enabled`，不返回密钥。
+- 在 `/agent` 输入“查通达信 600519.SH 在 2026-11-10 的日线对账”可查已有对账记录。输入“采集腾讯 600519.SH 的报价”会生成单股采集计划。腾讯采集依赖本机 `a-stock-data-main/SKILL.md`。如需执行，在 `backend/.env` 设置 `AGENT_DATA_MAINTENANCE_ENABLED=true` 并重启后端，再批准计划、运行预检、确认该步骤。结果显示原始快照引用和采集时间，报价时点与鲜度未核实。详见[数据源导入策略](aiDoc/data/source-ingestion-policy.md#1-支持来源分类)。
 - 状态响应新增`skills`名称/用途目录；规划和查询支持`/技能名 需求`及模型按需选择。首批`data-quality-diagnosis`、`factor-backtest-review`、`position-risk-review`加载正文/Markdown引用，不能执行任意脚本。计划`skills`绑定包哈希，变化后旧批准失效；会话与执行`skill_checks`提供缺失项、原证据和材料检查状态，`goal_verified=false`不变。见[技能合同](aiDoc/plans/20261120-1233-agent-skills-and-evidence-loop.md)。
 - `POST /api/v1/agent/chat`、`GET /api/v1/agent/sessions`、`GET /api/v1/agent/sessions/{session_id}`：对话与持久会话。
 - `POST /api/v1/agent/chat/stream`、`POST /api/v1/agent/plans/stream`：沿用`message/session_id`的SSE接口，展示阶段、实际工具和公开文字增量；规划只流阶段。最终`done`在会话保存后返回权威结果，断线/截断标未完成，载入原会话不自动重发。见[流式合同](aiDoc/plans/20261120-1424-agent-streaming-and-query-default.md)。

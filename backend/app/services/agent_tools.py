@@ -24,7 +24,7 @@ from app.repositories.agent_recovery import (
 from app.repositories.system import JobLogRepository
 from app.scheduler.database_job_lock import database_job_lock
 from app.schemas.agent_recovery import AgentActionIdentity
-from app.schemas.operations import OperationsActionStartRequest
+from app.schemas.operations import OperationsActionStartRequest, TencentQuoteCaptureArgs
 from app.schemas.strategy import FactorSelectionBacktestRequest
 from app.services.agent_maintenance_contract import MAINTENANCE_ACTIONS as MAINTENANCE
 from app.services.agent_recovery import AgentEvidenceRecovery
@@ -63,6 +63,10 @@ class LimitArgs(ToolArgs):
 
 class MarketArgs(ToolArgs):
     symbol: str = Field(pattern=r"^\d{6}\.(SH|SZ|BJ)$")
+
+
+class DailySourceCompareArgs(MarketArgs):
+    trade_date: date
 
 
 class QualityArgs(LimitArgs):
@@ -130,7 +134,7 @@ class PlanArgs(RunArgs):
 class Tool:
     title: str
     description: str
-    arguments: type[ToolArgs]
+    arguments: type[BaseModel]
     writes: bool = False
 
 
@@ -139,6 +143,11 @@ TOOLS = {
     "operations_overview": Tool("数据与任务概览", "查询数据覆盖、质量和后台任务状态。", LimitArgs),
     "quality_issues": Tool("质量问题", "查询未解决的质量问题。不能直接关闭问题。", QualityArgs),
     "market_summary": Tool("可信行情", "查询证券可信日线摘要，包含日期和质量状态。", MarketArgs),
+    "tdx_daily_comparison": Tool(
+        "通达信日线来源对账",
+        "按指定证券和交易日读取已有的通达信未复权日线对账记录。空结果表示缺少对账记录。",
+        DailySourceCompareArgs,
+    ),
     "factor_definitions": Tool("因子目录", "查询因子名称、版本与定义；回测前核对。", LimitArgs),
     "backtest_result": Tool("回测结果", "查询真实 run_id 的结果、资格和期末持仓。", RunArgs),
     "position_holdings": Tool("持仓分析", "只读查询人工账本的持仓和逐股报价日期。", BookArgs),
@@ -168,6 +177,13 @@ TOOLS = {
         "补采情绪与资金流",
         "通过已有来源重新采集当前情绪与资金流并复查，不能补造历史或修复所有数据问题。",
         SourceRefreshArgs,
+        True,
+    ),
+    "capture_tencent_quote": Tool(
+        "采集腾讯报价",
+        "用户要求拉取腾讯当前报价时提交计划。仅一个明确的A股代码，支持六位或带交易所的代码。"
+        "保存来源快照，不做历史查询；采集时间不代表报价时间。",
+        TencentQuoteCaptureArgs,
         True,
     ),
     "run_factor_backtest": Tool(
@@ -223,6 +239,27 @@ class AgentTools:
     def read(self, name, args):
         if name == "task_status":
             return self.task(args["task_id"])
+        if name == "tdx_daily_comparison":
+            trade_date = date.fromisoformat(args["trade_date"])
+            with SessionLocal() as db:
+                page = MarketQueryService().list_source_compares(
+                    db,
+                    symbol=args["symbol"],
+                    start_date=trade_date,
+                    end_date=trade_date,
+                    adjust_type="none",
+                    is_conflict=None,
+                    offset=0,
+                    limit=10,
+                    source_name="tdx_official",
+                )
+                return {
+                    **page.model_dump(mode="json"),
+                    "symbol": args["symbol"],
+                    "trade_date": trade_date.isoformat(),
+                    "adjust_type": "none",
+                    "source_name": "tdx_official",
+                }
         with self.context() as (db, research, positions):
             match name:
                 case "research_overview":

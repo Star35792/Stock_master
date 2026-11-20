@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.market import DailyBarSourceCompare
@@ -17,6 +17,7 @@ class DailyBarSourceCompareRepository:
         end_date: date | None = None,
         adjust_type: str | None = None,
         is_conflict: bool | None = None,
+        source_name: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[DailyBarSourceCompare], int]:
@@ -31,6 +32,11 @@ class DailyBarSourceCompareRepository:
             filters.append(DailyBarSourceCompare.adjust_type == adjust_type)
         if is_conflict is not None:
             filters.append(DailyBarSourceCompare.is_conflict == is_conflict)
+        if source_name is not None:
+            filters.append(or_(
+                DailyBarSourceCompare.source_a == source_name,
+                DailyBarSourceCompare.source_b == source_name,
+            ))
 
         total = (
             db.scalar(select(func.count()).select_from(DailyBarSourceCompare).where(*filters))

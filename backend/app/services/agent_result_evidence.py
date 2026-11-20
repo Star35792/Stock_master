@@ -179,6 +179,17 @@ def result_evidence(value):
             )
         )
         limits.append("可信日线收盘数据，非实时行情；无报价时不能推断价格。")
+    elif value.get("source_name") == "tdx_official" and isinstance(value.get("items"), list):
+        source = {"kind": "market", "symbol": value["symbol"]}
+        facts = _scalars(value, ("symbol", "trade_date", "adjust_type", "source_name", "total"))
+        rows = value["items"]
+        facts["compared_sample_count"] = len(rows)
+        facts["conflict_sample_count"] = sum(row.get("is_conflict") is True for row in rows)
+        if len(rows) == 1:
+            facts.update(_scalars(rows[0], (
+                "source_a", "source_b", "raw_id_a", "raw_id_b", "close_diff", "conflict_reason",
+            )))
+        limits.append("仅查询已有的通达信未复权日线对账；空样本表示缺少对账记录。")
     elif "action_id" in value and "action_type" in value:
         source = {"kind": "operations", "id": value["action_id"]}
         facts = _scalars(
@@ -193,6 +204,14 @@ def result_evidence(value):
         )
         facts.update(_scalars(value.get("parameters") or {}, ("start_date", "end_date")))
         result = value.get("result") or {}
+        quote = result.get("quote_observation")
+        if value["action_type"] == "tencent_quote_capture" and isinstance(quote, dict):
+            facts.update(_scalars(quote, (
+                "symbol", "source_name", "observed_at", "quote_time_verified",
+                "observation_status", "price_cny", "pe_ttm", "pb", "batch_id",
+                "raw_snapshot_id", "raw_batch_id",
+            )))
+            limits.append("腾讯报价快照仅供查看。采集时间与报价时间分开，报价时点和鲜度未核实。")
         facts.update(
             _scalars(result, ("problem_closed", "quality_issue_updated", "daily_loop_job_id"))
         )
