@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.agent_skills import AgentSkillIdentity
+
 
 class PlanningModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -51,6 +53,7 @@ class AgentPlanDraft(PlanningModel):
 
 
 class AgentPlanRead(AgentPlanDraft):
+    skills: list[AgentSkillIdentity] = Field(default_factory=list, max_length=3)
     # Up to eight model assumptions plus one server-owned default note per step.
     assumptions: list[str] = Field(default_factory=list, max_length=16)
     plan_id: str

@@ -7,7 +7,7 @@ import AgentResultEvidence from "./AgentResultEvidence.vue";
 const props = defineProps<{ plans: AgentPlan[]; executions: AgentExecution[]; busy: boolean; executionBusy: boolean; toolTitles: Record<string, string> }>();
 const emit = defineEmits<{ decision: [planId: string, decision: "approve" | "reject"]; control: [planId: string, operation: "advance" | "refresh" | "cancel"]; inspect: [planId: string, stepId: string]; explain: [version: number] }>();
 const plansNewestFirst = computed(() => [...props.plans].reverse());
-const labels: Record<string, string> = { needs_input: "待补充参数", draft: "待审阅", approved: "计划已批准", rejected: "已拒绝", superseded: "已被新需求替代", expired: "已过期或代码已变化" };
+const labels: Record<string, string> = { needs_input: "待补充参数", draft: "待审阅", approved: "计划已批准", rejected: "已拒绝", superseded: "已被新需求替代", expired: "已过期或代码/技能已变化" };
 const intents: Record<string, string> = { data_maintenance: "数据维护", stock_research: "选股研究", position_analysis: "持仓分析", portfolio_planning: "组合规划", consultation: "解释咨询" };
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const executionFor = (id: string) => props.executions.find(item => item.plan_id === id);
@@ -22,6 +22,7 @@ const executionLabels: Record<string, string> = { ready: "待继续", running: "
     <article v-for="plan in plansNewestFirst" :key="plan.plan_id" class="plan-card">
       <h3>第 {{ plan.version }} 版 · {{ intents[plan.intent] }} <span>{{ labels[plan.status] }}</span></h3>
       <p class="goal">{{ plan.goal }}</p>
+      <p v-for="skill in plan.skills ?? []" :key="skill.name" class="muted">专业技能：{{ skill.name }} · {{ skill.content_hash.slice(0, 12) }}</p>
       <div v-if="plan.status === 'needs_input'" class="questions" role="status">
         <strong>请补充后生成新版本</strong>
         <p>日期请用 YYYY-MM-DD，预算请用数字金额（如 1000000）；因子方向请明确 true / false。</p>

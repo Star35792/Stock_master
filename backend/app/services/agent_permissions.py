@@ -6,6 +6,7 @@ from app.config.settings import settings
 from app.schemas.agent_planning import AgentPlanRead
 from app.services.agent_execution_contract import parameters_hash
 from app.services.agent_planning import plan_hash
+from app.services.agent_skills import SkillRegistry
 from app.services.agent_state import AgentStateStore
 
 
@@ -34,6 +35,7 @@ def validate_grant(grant, tool, parameters, confirmation_id, *, task_id=None, st
         or plan.plan_hash != plan_hash(grant["session_id"], plan)
         or plan.code_version != settings.app_code_version
         or plan.expires_at <= now
+        or not SkillRegistry().matches(plan.skills)
     ):
         raise ValueError("计划身份或批准不再有效。")
     execution = saved.get("executions", {}).get(plan.plan_id, {})

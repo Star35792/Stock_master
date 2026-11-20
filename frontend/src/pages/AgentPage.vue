@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentSkillPanel from "../components/AgentSkillPanel.vue";
 import { Bot, RefreshCw, Send, Sparkles } from "@lucide/vue";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
@@ -43,7 +44,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
     </div>
     <p v-if="!loading && status && !status.configured" class="agent-error">请在后端配置 DEEPSEEK_API_KEY 并重启服务；此页面不会读取或展示密钥。</p>
     <p v-if="error" role="alert" class="agent-error">{{ error }}</p>
-    <p class="agent-muted">当前阶段：故障恢复与证据核验。先批准计划，再按范围执行；只读瞬时失败有限重试。写步骤仍需逐项确认，默认关闭；结果未知时核验原任务，不重复执行。</p>
+    <p class="agent-muted">支持按需加载专业技能与材料核查。先批准计划，再按范围执行；写步骤仍需逐项确认，默认关闭。材料齐备不表示研究目标或策略资格已认证。</p>
     <label v-if="sessions.length" class="agent-history">恢复历史会话 <select :disabled="busy || loading" :value="session?.session_id ?? ''" @change="restore(($event.target as HTMLSelectElement).value)"><option value="" disabled>选择已保存对话</option><option v-for="item in sessions" :key="item.session_id" :value="item.session_id">{{ item.title }}</option></select></label>
 
     <div class="agent-grid">
@@ -68,6 +69,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
       </section>
 
       <aside class="agent-evidence" aria-label="操作与证据">
+        <AgentSkillPanel :skills="status?.skills ?? []" :checks="[...(session?.skill_checks ?? []), ...(session?.executions ?? []).flatMap(item => item.skill_checks ?? [])]" :busy="busy || loading" @select="input = `/${$event} `" />
         <p v-if="plansNeedReload && !busy" role="alert" class="agent-error">计划状态尚未核实，批准已停用。请点击重新连接，再审阅当前版本。</p>
         <AgentPlanPanel :plans="session?.plans ?? []" :executions="session?.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" @explain="send(`请解释第${$event}版计划的已保存执行结果，引用真实ID、日期和原服务指标，分别说明事实、缺失与推断及限制；不要生成新写预览。`, 'chat')" />
         <section class="agent-panel">

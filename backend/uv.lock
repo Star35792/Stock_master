@@ -1030,6 +1030,7 @@ dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "pydantic-settings" },
     { name = "pytz" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1080,6 +1081,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'all'", specifier = ">=8.4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.0" },
     { name = "pytz", specifier = ">=2026.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", marker = "extra == 'all'", specifier = ">=0.12.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },

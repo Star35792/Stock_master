@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from app.schemas.agent_planning import PlanningModel
+from app.schemas.agent_skills import AgentSkillVerification
 
 
 class AgentPlanControl(PlanningModel):
@@ -43,6 +44,7 @@ class AgentStepExecution(PlanningModel):
 
 
 class AgentPlanExecution(PlanningModel):
+    skill_checks: list[AgentSkillVerification] = Field(default_factory=list, max_length=3)
     plan_id: str
     version: int
     plan_hash: str

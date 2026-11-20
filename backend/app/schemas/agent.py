@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.agent_execution import AgentPlanExecution
 from app.schemas.agent_planning import AgentPlanRead
+from app.schemas.agent_skills import AgentSkillVerification
 
 
 class AgentChatRequest(BaseModel):
@@ -45,6 +46,7 @@ class AgentSessionRead(BaseModel):
     actions: list[AgentActionRead]
     plans: list[AgentPlanRead] = Field(default_factory=list)
     executions: list[AgentPlanExecution] = Field(default_factory=list)
+    skill_checks: list[AgentSkillVerification] = Field(default_factory=list, max_length=8)
 
 
 class AgentMemoryWrite(BaseModel):

@@ -38,6 +38,8 @@
 
 ## 工具边界
 
+- 智能体Skill为`backend/app/agent_skills`发布的方法资料，正文/Markdown引用仅进瞬态模型上下文；agent.db保存身份和有界检查摘要，业务事实仍取原服务。计划绑定包哈希，批准/推进/确认/后台均重验，加载不能产生授权；只读补查受明确资源、轮数与去重限制，计划不自动追加步骤。见[技能决定](../plans/20261120-1233-agent-skills-and-evidence-loop.md)。
+
 - DuckDB 写入协调采用操作系统锁：同路径常驻 `.guard` 文件维持稳定锁对象，PID 文件仅作诊断，持有时间不构成抢锁理由；退出或进程崩溃后 OS 释放锁。不要删除 `.guard` 文件。兼容旧 PID 文件时，存活或未知持有者保持阻断。研究库启动初始化与请求访问共同协调研究锁；分库集成测试的主库不建立 strategy 表。
 - `metadata.job_log` 的新 `running` 记录必须绑定 `_job_lease.version=process_slot_v1`。每个产生日志的进程先占用主库同目录 `.job_leases/` 下 32 个固定 OS 锁槽之一；首次占槽时先在锁内收敛该槽旧 owner 遗留的 leased-running，再允许写新记录。API 与长期 scheduler 启动也扫描空闲槽。只有成功取得已登记槽的 OS 锁并在事务内二次确认仍为 `running`，才写 `failed + completion_status=unknown`；时间、PID、缺 guard、坏元数据或未知版本都不是死亡证据。占槽恢复只在本进程会话无待写事务时执行，避免提前提交调用方业务写入。该租约只证明本机 owner 进程是否仍持锁，不是任务重试、分布式租约或 DuckDB writer mutex，也不授权清理任务可能产生的 raw、release、WAL、临时文件或研究产物。旧版无租约记录只能通过精确 ID、默认 dry-run 的维护命令由操作人显式收敛；带租约但槽不可核验（缺 guard 或元数据非法）的记录，操作人额外加 `--confirm-owner-exited` 才可收敛，活锁与可自动恢复的记录即便带此参数仍被拒绝，杜绝与运行中 owner 或启动扫描争抢。`--list` 只读报告每条 running 记录的可关闭分类。
 

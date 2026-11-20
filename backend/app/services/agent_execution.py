@@ -15,6 +15,7 @@ from app.services.agent_execution_contract import (
     result_summary,
 )
 from app.services.agent_planning import plan_hash
+from app.services.agent_skill_verification import SkillTurn, observation
 from app.services.agent_tools import MAINTENANCE, TOOLS, json_ready
 
 IN_FLIGHT = {"reading", "preflighting", "starting"}
@@ -400,6 +401,11 @@ class AgentExecutionService:
                 execution, state = self._state(session, plan_id, step.step_id)
                 state.parameters_hash = parameters_hash(step.tool, args)
                 self._read_state(state, raw, error)
+                if not error and plan.skills:
+                    proof = observation(step.tool, args, json_ready(raw))
+                    if proof:
+                        proof["observed_at"] = self.owner.clock()
+                        state.summary["skill_observation"] = proof
                 if execution.status != "cancelled":
                     execution.status = (
                         "ready"
@@ -424,6 +430,32 @@ class AgentExecutionService:
             return self.owner.snapshot(session)
         finally:
             session.lock.release()
+
+    def verify_skills(self, session, execution):
+        plan = next(p for p in session.plans if p.plan_id == execution.plan_id)
+        if not plan.skills or not self.owner.skills.matches(plan.skills):
+            execution.skill_checks = []
+            return
+        context = SkillTurn(self.owner.skills, "", [], self.owner.clock)
+        for identity in plan.skills:
+            context.dispatch("load_skill", {"name": identity.name})
+        for state in execution.steps:
+            proof = state.summary.get("skill_observation")
+            if state.status == "success" and isinstance(proof, dict):
+                context.observations[(proof["tool"], proof.get("resource_id"))] = proof
+                context.scopes.setdefault(proof["tool"], set()).add(
+                    proof.get("resource_id", proof.get("symbol"))
+                )
+        execution.skill_checks = context.finish()
+        for report in execution.skill_checks:
+            report.observed_at = max(
+                (
+                    proof["observed_at"]
+                    for proof in report.evidence_refs
+                    if isinstance(proof.get("observed_at"), (int, float))
+                ),
+                default=execution.started_at,
+            )
 
     @staticmethod
     def _cancel(session, execution):

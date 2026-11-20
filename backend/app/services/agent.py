@@ -16,9 +16,17 @@ from app.repositories.agent import AgentStateConflict
 from app.schemas.agent import AgentActionRead, AgentSessionRead
 from app.schemas.agent_execution import AgentPlanExecution
 from app.schemas.agent_planning import AgentPlanRead
+from app.schemas.agent_skills import AgentSkillVerification
 from app.services.agent_errors import AgentConflictError, AgentNotFoundError
 from app.services.agent_execution import AgentExecutionService, Proposal
 from app.services.agent_planning import MAX_PLAN_BYTES, MAX_PLANS, generate_draft, plan_hash
+from app.services.agent_skill_verification import SkillTurn, verification_tool_definition
+from app.services.agent_skills import (
+    CONTEXT_TOOLS,
+    SkillContext,
+    SkillRegistry,
+    skill_tool_definitions,
+)
 from app.services.agent_state import AgentStateStore
 from app.services.agent_tools import TOOLS, AgentTools, json_ready, tool_definitions
 from app.services.deepseek import AgentUnavailableError, DeepSeekClient
@@ -48,15 +56,17 @@ class Conversation:
     steps: list[dict] = field(default_factory=list)
     actions: dict[str, Proposal] = field(default_factory=dict)
     executions: dict[str, AgentPlanExecution] = field(default_factory=dict)
+    skill_checks: list[AgentSkillVerification] = field(default_factory=list)
     lock: Any = field(default_factory=Lock)
 
 
 class AgentService:
-    def __init__(self, *, client=None, tools=None, store=None, clock=time):
+    def __init__(self, *, client=None, tools=None, store=None, clock=time, skills=None):
         self.client = client or DeepSeekClient()
         self.tools = tools or AgentTools()
         self.store = store or AgentStateStore()
         self.clock = clock
+        self.skills = skills or SkillRegistry()
         self.sessions: dict[str, Conversation] = {}
         self.lock = Lock()
         self.executor = AgentExecutionService(self)
@@ -77,6 +87,7 @@ class AgentService:
             "confirmation_ttl_minutes": 10,
             "planning_available": True,
             "plan_execution_enabled": True,
+            "skills": self.skills.catalog(),
         }
 
     def conversation(self, session_id=None):
@@ -97,6 +108,10 @@ class AgentService:
                         revision=saved["revision"],
                         history=saved.get("history", []),
                         messages=saved.get("messages", []),
+                        skill_checks=[
+                            AgentSkillVerification.model_validate(item)
+                            for item in saved.get("skill_checks", [])
+                        ],
                         steps=saved.get("steps", []),
                         plans=[
                             AgentPlanRead.model_validate(plan) for plan in saved.get("plans", [])
@@ -132,6 +147,9 @@ class AgentService:
         session.history = saved.get("history", [])
         session.messages = saved.get("messages", [])
         session.steps = saved.get("steps", [])
+        session.skill_checks = [
+            AgentSkillVerification.model_validate(item) for item in saved.get("skill_checks", [])
+        ]
         session.plans = [AgentPlanRead.model_validate(p) for p in saved.get("plans", [])]
         session.executions = {
             key: AgentPlanExecution.model_validate(value)
@@ -157,6 +175,7 @@ class AgentService:
             "history": session.history,
             "messages": session.messages,
             "steps": session.steps,
+            "skill_checks": [item.model_dump(mode="json") for item in session.skill_checks],
             "plans": [plan.model_dump(mode="json") for plan in session.plans],
             "executions": {
                 key: value.model_dump(mode="json") for key, value in session.executions.items()
@@ -183,9 +202,13 @@ class AgentService:
     def snapshot(self, session):
         for plan in session.plans:
             if plan.status in {"draft", "needs_input", "approved"} and (
-                plan.expires_at <= self.clock() or plan.code_version != settings.app_code_version
+                plan.expires_at <= self.clock()
+                or plan.code_version != settings.app_code_version
+                or not self.skills.matches(plan.skills)
             ):
                 plan.status = "expired"
+        for execution in session.executions.values():
+            self.executor.verify_skills(session, execution)
         for action in session.actions.values():
             if action.view.status == "pending" and (
                 action.expires < self.clock() or action.code_version != settings.app_code_version
@@ -198,6 +221,7 @@ class AgentService:
             actions=[action.view.model_copy(deep=True) for action in session.actions.values()],
             plans=[plan.model_copy(deep=True) for plan in session.plans],
             executions=[item.model_copy(deep=True) for item in session.executions.values()],
+            skill_checks=[item.model_copy(deep=True) for item in session.skill_checks],
         )
 
     def get(self, session_id):
@@ -267,10 +291,14 @@ class AgentService:
                 {key: item[key] for key in ("kind", "content")} for item in self.store.memories()
             ]
             previous = session.plans[-1].model_dump(mode="json") if session.plans else None
-            draft, missing = generate_draft(self.client, messages, memories, previous)
+            context = SkillContext(self.skills, message)
+            draft, missing = generate_draft(
+                self.client, messages, memories, previous, skill_context=context
+            )
             now = self.clock()
             plan = AgentPlanRead(
                 **draft.model_dump(),
+                skills=context.identities,
                 plan_id=token_urlsafe(24),
                 version=len(session.plans) + 1,
                 plan_hash="",
@@ -333,6 +361,14 @@ class AgentService:
     def _run(self, session):
         from app.services.agent_result_evidence import execution_context
 
+        context = SkillTurn(
+            self.skills,
+            session.messages[-1]["content"],
+            [item["content"] for item in session.messages if item["role"] == "user"],
+            self.clock,
+        )
+        history = list(session.history)  # Full Skill text lives only in this request.
+
         today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
         prompt = (
             f"你是 Stock Master 的本地单用户研究智能体。今天是上海时间 {today}。用中文回答。"
@@ -353,6 +389,18 @@ class AgentService:
             "请同时说明证据限制；业务目标未核验，不能根据completed声称目标已达成。"
             f"\n已保存执行观察：{execution_context(session)}"
         )
+        prompt += context.prompt()
+        prompt += (
+            "\n使用技能时按读取→观察→verify_skill核查材料的循环工作。"
+            "核验缺项可在用户明确资源范围内继续只读补查，不能猜资源ID。"
+            "重复相同查询不会重新执行；无法补齐就说明未完成和需补充的参数。"
+            "技能流程不生成写预览，需要写入则提出新计划。结束前verify_skill，"
+            "材料齐备只表示可以解读，不代表研究目标达成。"
+        )
+        definitions = (
+            tool_definitions() + skill_tool_definitions() + [verification_tool_definition()]
+        )
+        final_check_requested = False
         if not settings.agent_write_enabled:
             prompt += (
                 "当前业务写执行关闭；可以执行已批准计划内的只读查询，并生成写预览，"
@@ -373,9 +421,10 @@ class AgentService:
                 return "上下文达到上限，请查看工具结果并新建对话继续。"
             try:
                 response = self.client.complete(
-                    [{"role": "system", "content": prompt}, *session.history], tool_definitions()
+                    [{"role": "system", "content": prompt}, *history], definitions
                 )
             except AgentUnavailableError:
+                session.skill_checks = (session.skill_checks + context.finish())[-8:]
                 if session.steps:
                     return "模型暂不可用；已取得的工具结果和待确认提案保留在下方，请稍后重试。"
                 raise
@@ -384,6 +433,19 @@ class AgentService:
             if not isinstance(content, str) or len(content) > 10000:
                 raise AgentUnavailableError("模型返回的文本格式或长度不合法。")
             if not calls:
+                if context.loaded and not context.reports and not final_check_requested:
+                    final_check_requested = True
+                    history.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "尚未核查本轮技能材料。先调用verify_skill，"
+                                "缺项可补查；不能直接宣称完成。"
+                            ),
+                        }
+                    )
+                    continue
+                session.skill_checks = (session.skill_checks + context.finish())[-8:]
                 return content or "模型没有返回可用内容，请补充需求后重试。"
             if not isinstance(calls, list) or len(calls) > 4:
                 raise AgentUnavailableError("模型工具调用数量超过上限。")
@@ -410,20 +472,29 @@ class AgentService:
             session.history.append(
                 {"role": "assistant", "content": content, "tool_calls": clean_calls}
             )
+            history.append(session.history[-1])
             pending = False
             for call in clean_calls:
                 name = call["function"]["name"]
                 spec = TOOLS.get(name)
                 try:
-                    if spec is None:
+                    if name in CONTEXT_TOOLS:
+                        result = context.dispatch(name, json.loads(call["function"]["arguments"]))
+                    elif name == "verify_skill":
+                        result = context.verify(
+                            json.loads(call["function"]["arguments"])
+                        ).model_dump(mode="json")
+                    elif spec is None:
                         raise ValueError("工具不在允许清单")
-                    if pending:
+                    elif pending:
                         result = {"blocked": True, "reason": "请先确认当前提案并等待任务完成。"}
                     else:
                         args = spec.arguments.model_validate_json(
                             call["function"]["arguments"]
                         ).model_dump(mode="json")
                         if spec.writes:
+                            if context.loaded:
+                                raise ValueError("技能只读检查不能产生写预览，请先生成新计划。")
                             if self._write_blocked(session):
                                 raise ValueError("请先处理待确认提案并等待运行中的任务结束")
                             if len(session.actions) >= 8:
@@ -448,7 +519,14 @@ class AgentService:
                                 result = {"awaiting_confirmation": True, "preview": preview}
                                 pending = True
                         else:
-                            result = json_ready(self.tools.read(name, args))
+                            key = context.read_key(name, args)
+                            if context.loaded and key in context.read_cache:
+                                result = context.read_cache[key]
+                            else:
+                                result = json_ready(self.tools.read(name, args))
+                                if context.loaded:
+                                    context.read_cache[key] = result
+                            context.observe(name, args, result)
                 except (ValidationError, ValueError) as exc:
                     # Validation errors must not echo arbitrary model arguments.
                     result = {
@@ -460,11 +538,25 @@ class AgentService:
                         "error": "服务暂不可用，请查看对应页面或稍后重试。",
                         "error_type": type(exc).__name__,
                     }
+                transient_result = result if name in CONTEXT_TOOLS else bounded_result(result)
+                # Context tool bodies are reloadable code assets, not another stored fact source.
+                if name in CONTEXT_TOOLS and isinstance(result, dict):
+                    result = {
+                        key: value
+                        for key, value in result.items()
+                        if key not in {"instructions", "content"}
+                    }
                 result = bounded_result(result)
                 session.steps.append(
                     {
                         "tool": name,
-                        "title": spec.title if spec else "未允许的工具",
+                        "title": spec.title
+                        if spec
+                        else {
+                            "load_skill": "加载专业技能",
+                            "read_skill_reference": "读取技能参考",
+                            "verify_skill": "核查技能材料",
+                        }.get(name, "未允许的工具"),
                         "result": result,
                     }
                 )
@@ -474,6 +566,12 @@ class AgentService:
                         "role": "tool",
                         "tool_call_id": call["id"],
                         "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
+                history.append(
+                    {
+                        **session.history[-1],
+                        "content": json.dumps(transient_result, ensure_ascii=False),
                     }
                 )
             if pending:
@@ -486,7 +584,8 @@ class AgentService:
                     "已生成独立操作预览；请切换先规划并批准计划，"
                     "在计划内重新预检后才能逐项确认。此独立预览不能直接执行。"
                 )
-        return "本轮已达到工具调用上限。请查看下方结果，再发送下一步需求。"
+        session.skill_checks = (session.skill_checks + context.finish())[-8:]
+        return "本轮已达到工具调用上限。请查看下方结果和材料缺失项，再发送下一步需求。"
 
     def _write_blocked(self, session):
         for action in session.actions.values():

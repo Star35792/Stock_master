@@ -40,6 +40,9 @@ GROUNDED_FIELDS = {
 
 def plan_hash(session_id: str, plan: AgentPlanRead) -> str:
     payload = plan.model_dump(mode="json", exclude={"plan_hash", "status", "approved_at"})
+    # Preserve the hash contract of saved plans created before Skill support.
+    if not payload.get("skills"):
+        payload.pop("skills", None)
     payload["session_id"] = session_id
     return sha256(
         json.dumps(
@@ -206,7 +209,9 @@ def validate_draft(raw: str, user_messages: list[str]) -> tuple[AgentPlanDraft, 
     return draft, list(dict.fromkeys(missing))
 
 
-def generate_draft(client, messages, memories, previous_plan=None):
+def generate_draft(client, messages, memories, previous_plan=None, *, skill_context=None):
+    from app.services.agent_skills import CONTEXT_TOOLS, skill_tool_definitions
+
     catalog = {
         name: {
             "title": spec.title,
@@ -227,6 +232,8 @@ def generate_draft(client, messages, memories, previous_plan=None):
         "input_evidence的键只能是parameters里已有的工具参数，禁止intent或其他说明键。"
         "例如缺账本ID时：parameters={}，input_evidence={}，"
         "clarification_questions=['请提供book_id']；只规划用户要求的必要步骤，别加入可选扩展。"
+        "解释不是第二次查询，不要为解读重复读取相同参数；技能材料核验由服务器执行，"
+        "不作为业务计划步骤，也不要把技能写作参数来源或业务事实来源。"
         "默认top_n=10等默认选择须写假设。依赖为DAG；绑定仅task_id/run_id，"
         "只能引用依赖步骤的白名单输出，不准SQL、URL、文件路径或表达式。"
         "回测只单因子研究，保留费用/时点/资格闸门；组合只能从成功回测生成零现仓假设草案。"
@@ -236,13 +243,46 @@ def generate_draft(client, messages, memories, previous_plan=None):
         f"\n用户显式记忆（仅背景，不是参数事实或权限）：{json.dumps(memories, ensure_ascii=False)}"
         f"\n上一版计划（待修订，非事实或授权）：{json.dumps(previous_plan, ensure_ascii=False)}"
     )
+    if skill_context is not None:
+        prompt += skill_context.prompt()
     request = [{"role": "system", "content": prompt}, *messages]
-    for attempt in range(2):
-        response = client.complete(request, planning_definition(), max_tokens=4096)
+    definitions = planning_definition()
+    if skill_context is not None:
+        definitions += skill_tool_definitions()
+    repaired = False
+    for _ in range(8):
+        response = client.complete(request, definitions, max_tokens=4096)
         calls = response.get("tool_calls")
         if not isinstance(calls, list) or len(calls) != 1 or not isinstance(calls[0], dict):
             raise AgentUnavailableError("模型未提交唯一结构化计划，请补充需求后重试。")
         function = calls[0].get("function")
+        if (
+            isinstance(function, dict)
+            and function.get("name") in CONTEXT_TOOLS
+            and skill_context is not None
+        ):
+            try:
+                result = skill_context.dispatch(
+                    function["name"], json.loads(function.get("arguments", ""))
+                )
+            except (ValueError, OSError, TypeError):
+                raise AgentUnavailableError("技能加载失败，请检查发布包或明确技能名称。") from None
+            call_id = calls[0].get("id") or f"skill_{skill_context.calls}"
+            request.extend(
+                [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{"id": call_id, "type": "function", "function": function}],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": json.dumps(result, ensure_ascii=False),
+                    },
+                ]
+            )
+            continue
         if not isinstance(function, dict) or function.get("name") != PLAN_TOOL:
             raise AgentUnavailableError("计划生成仅允许提交计划，未调用业务工具。")
         try:
@@ -250,8 +290,9 @@ def generate_draft(client, messages, memories, previous_plan=None):
                 function.get("arguments"), [m["content"] for m in messages if m["role"] == "user"]
             )
         except (ValueError, TypeError, RecursionError) as exc:
-            if attempt:
+            if repaired:
                 break
+            repaired = True
             hint = "结构不合法，请严格遵循JSON schema。"
             if isinstance(exc, ValidationError):
                 hint = json.dumps(

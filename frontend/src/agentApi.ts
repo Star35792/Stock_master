@@ -1,3 +1,15 @@
+export interface AgentSkillIdentity { name: string; content_hash: string }
+export interface AgentSkillVerification {
+  skill: AgentSkillIdentity;
+  status: "ready_to_explain" | "needs_evidence" | "needs_input";
+  task_check_complete: boolean;
+  goal_verified: false;
+  observed_at: number;
+  missing_checks: string[];
+  evidence_refs: Array<Record<string, unknown>>;
+  limitations: string[];
+}
+
 export interface AgentAction {
   action_id: string;
   tool: string;
@@ -18,9 +30,11 @@ export interface AgentSession {
   actions: AgentAction[];
   plans: AgentPlan[];
   executions: AgentExecution[];
+  skill_checks?: AgentSkillVerification[];
 }
 
 export interface AgentExecution {
+  skill_checks?: AgentSkillVerification[];
   plan_id: string;
   version: number;
   plan_hash: string;
@@ -34,6 +48,7 @@ export interface AgentExecution {
 }
 
 export interface AgentPlan {
+  skills?: AgentSkillIdentity[];
   plan_id: string;
   version: number;
   plan_hash: string;
@@ -57,6 +72,7 @@ export interface AgentPlan {
 }
 
 export interface AgentStatus {
+  skills?: Array<{ name: string; description: string }>;
   configured: boolean;
   write_enabled: boolean;
   model: string;

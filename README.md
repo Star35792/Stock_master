@@ -206,6 +206,7 @@ curl http://127.0.0.1:8000/health
 
 - 前端 `/agent`：默认先规划，缺参补问后生成新版本，可审阅/批准/拒绝及刷新恢复；另可选择查询与解释，并显式管理记忆。批准计划不会执行。
 - `GET /api/v1/agent/status`：配置状态与当前写门，不返回密钥。
+- 状态响应新增`skills`名称/用途目录；规划和查询支持`/技能名 需求`及模型按需选择。首批`data-quality-diagnosis`、`factor-backtest-review`、`position-risk-review`加载正文/Markdown引用，不能执行任意脚本。计划`skills`绑定包哈希，变化后旧批准失效；会话与执行`skill_checks`提供缺失项、原证据和材料检查状态，`goal_verified=false`不变。见[技能合同](aiDoc/plans/20261120-1233-agent-skills-and-evidence-loop.md)。
 - `POST /api/v1/agent/chat`、`GET /api/v1/agent/sessions`、`GET /api/v1/agent/sessions/{session_id}`：对话与持久会话。
 - `POST /api/v1/agent/plans`：仅生成结构化计划/补问，不调用业务工具；会话响应新增 `plans` 列表。
 - `POST /api/v1/agent/plans/{id}/decision`：提交当前 `session_id/version/plan_hash` 和 `approve/reject`；批准仅保存状态，不创建任务。过期、代码变化、旧版本或缺参拒绝批准。
