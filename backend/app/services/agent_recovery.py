@@ -16,14 +16,9 @@ from app.schemas.agent_recovery import (
     AgentReadCheckpoint,
     AgentRecoveryRead,
 )
+from app.services.agent_maintenance_contract import MAINTENANCE_ACTIONS as MAINTENANCE_TOOLS
 from app.utils.agent_identity import parameters_hash
 from app.utils.duckdb_write_lock import DuckDbWriteLockTimeout
-
-MAINTENANCE_TOOLS = {
-    "sync_daily_data": "daily_data_sync",
-    "repair_daily_gaps": "daily_bar_gap_backfill",
-    "rebuild_factor_profiles": "factor_profile_rebuild",
-}
 
 
 def read_failure_kind(exc):

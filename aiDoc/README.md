@@ -16,6 +16,8 @@
 
 ## Reference Map
 
+聊天发起同步、受控修复、维护专用权限及自动跟踪见[聊天数据维护闭环](plans/20261120-1551-agent-chat-data-maintenance.md)。普通聊天自动提交可审阅计划；每项写入仍单独确认，部分失败保留实际产物与原因。
+
 智能体Skill、按需上下文、包哈希及检查反馈见[技能与材料验证循环](plans/20261120-1233-agent-skills-and-evidence-loop.md)。首版三份指令技能，材料齐备不认证研究目标或策略资格。
 
 默认查询、SSE公开答复、工具进度与断线恢复见[流式答复与默认查询](plans/20261120-1424-agent-streaming-and-query-default.md)。必要缺参显示实际问题；写计划及逐项确认继续保留。

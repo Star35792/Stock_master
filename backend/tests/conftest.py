@@ -31,6 +31,7 @@ os.environ["RESEARCH_DB_PATH"] = str(_test_db_root / "research.duckdb")
 os.environ["RESEARCH_READ_SOURCE"] = "control"
 # API tests must never launch vendor downloads using a developer's .env key.
 os.environ["AUTO_DATA_SYNC_ENABLED"] = "false"
+os.environ["AGENT_DATA_MAINTENANCE_ENABLED"] = "false"
 atexit.register(shutil.rmtree, _test_db_root, ignore_errors=True)
 
 from sqlalchemy import create_engine, text  # noqa: E402

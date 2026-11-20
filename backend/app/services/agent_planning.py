@@ -18,7 +18,10 @@ MAX_PLANS = 4
 # Only identifiers may flow between steps; ranges, budgets and securities remain explicit.
 BINDING_OUTPUTS = {
     "sync_daily_data": {"task_id"},
+    "sync_data_and_factors": {"task_id"},
     "repair_daily_gaps": {"task_id"},
+    "repair_factor_values": {"task_id"},
+    "refresh_alternative_data": {"task_id"},
     "rebuild_factor_profiles": {"task_id"},
     "run_factor_backtest": {"task_id", "run_id"},
     "create_portfolio_from_backtest": {"task_id"},
@@ -35,7 +38,20 @@ GROUNDED_FIELDS = {
     "book_id",
     "task_id",
     "higher_is_better",
+    "original_run_id",
 }
+
+
+def planning_catalog():
+    return {
+        name: {
+            "title": spec.title,
+            "description": spec.description,
+            "writes": spec.writes,
+            "parameters": spec.arguments.model_json_schema(),
+        }
+        for name, spec in TOOLS.items()
+    }
 
 
 def plan_hash(session_id: str, plan: AgentPlanRead) -> str:
@@ -214,14 +230,7 @@ def generate_draft(
 ):
     from app.services.agent_skills import CONTEXT_TOOLS, skill_tool_definitions
 
-    catalog = {
-        name: {
-            "title": spec.title,
-            "writes": spec.writes,
-            "parameters": spec.arguments.model_json_schema(),
-        }
-        for name, spec in TOOLS.items()
-    }
+    catalog = planning_catalog()
     prompt = (
         "你是Stock Master研究计划助手，用中文。只提交一次submit_research_plan，禁止调用业务工具。"
         "只能做数据维护、选股研究、持仓只读分析、组合草案和解释咨询，不能下单或改真实账本。"
@@ -237,6 +246,9 @@ def generate_draft(
         "解释不是第二次查询，不要为解读重复读取相同参数；技能材料核验由服务器执行，"
         "不作为业务计划步骤，也不要把技能写作参数来源或业务事实来源。"
         "只把阻止当前必要步骤的缺参写入clarification_questions。"
+        "同步数据和因子使用sync_data_and_factors，不能用rebuild_factor_profiles代替因子计算。"
+        "该同步不需要用户填写日期，范围由服务器在预检时确定。categories/sources等有默认值"
+        "的字段可省略；不要要求用户补充可选字段。不能承诺修复所有质量问题或修改采集代码。"
         "全局operations_overview/quality_issues不要求证券和日期，"
         "可选的证券下钻、以后修复所需证券/日期不能阻断当前只读诊断，也不要写成必需补问。"
         "默认top_n=10等默认选择须写假设。依赖为DAG；绑定仅task_id/run_id，"

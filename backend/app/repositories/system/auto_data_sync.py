@@ -10,6 +10,13 @@ AUTO_DATA_SYNC_JOB = "auto_data_sync"
 
 
 class AutoDataSyncRepository:
+    def has_unadjusted_bars_after(self, db: Session, *, trade_date: date) -> bool:
+        return db.scalar(
+            select(DailyBar.id)
+            .where(DailyBar.adjust_type == "none", DailyBar.trade_date > trade_date)
+            .limit(1)
+        ) is not None
+
     def market_coverage_on_date(self, db: Session, *, trade_date: date) -> dict:
         """Return stock coverage by exchange plus separately reported index rows."""
         eligibility = (

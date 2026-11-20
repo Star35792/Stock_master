@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from app.scheduler import alternative_data
-from app.scheduler.alternative_data import (
+from app.services import alternative_data_workflow as alternative_data
+from app.services.alternative_data_workflow import (
     JOB_NAME,
     run_alternative_data_collection,
 )

@@ -204,8 +204,8 @@ curl http://127.0.0.1:8000/health
 
 ### 智能体会话与可审阅计划
 
-- 前端 `/agent`：默认查询与解释，实时显示公开答复和实际工具过程；需要写操作时选择先规划，缺参展示具体问题，可审阅/批准/拒绝及刷新恢复，并显式管理记忆。批准计划不会执行。
-- `GET /api/v1/agent/status`：配置状态与当前写门，不返回密钥。
+- 前端 `/agent`：普通查询直接读取，聊天中的同步、修复或研究意图自动提交可审阅计划，缺参可直接继续聊天补充。批准后运行预检，每项写入单独确认；随后自动跟踪任务与复查，下一项写入仍需确认。刷新会话只观察原任务，不自动重放。见[聊天维护合同](aiDoc/plans/20261120-1551-agent-chat-data-maintenance.md)。
+- `GET /api/v1/agent/status`：配置状态、全局写门、`data_maintenance_enabled`及各工具`write_enabled`，不返回密钥。
 - 状态响应新增`skills`名称/用途目录；规划和查询支持`/技能名 需求`及模型按需选择。首批`data-quality-diagnosis`、`factor-backtest-review`、`position-risk-review`加载正文/Markdown引用，不能执行任意脚本。计划`skills`绑定包哈希，变化后旧批准失效；会话与执行`skill_checks`提供缺失项、原证据和材料检查状态，`goal_verified=false`不变。见[技能合同](aiDoc/plans/20261120-1233-agent-skills-and-evidence-loop.md)。
 - `POST /api/v1/agent/chat`、`GET /api/v1/agent/sessions`、`GET /api/v1/agent/sessions/{session_id}`：对话与持久会话。
 - `POST /api/v1/agent/chat/stream`、`POST /api/v1/agent/plans/stream`：沿用`message/session_id`的SSE接口，展示阶段、实际工具和公开文字增量；规划只流阶段。最终`done`在会话保存后返回权威结果，断线/截断标未完成，载入原会话不自动重发。见[流式合同](aiDoc/plans/20261120-1424-agent-streaming-and-query-default.md)。
@@ -272,6 +272,7 @@ curl http://127.0.0.1:8000/health
 | `DEEPSEEK_API_KEY` | 后端模型密钥（不返回前端） | 空 |
 | `DEEPSEEK_MODEL` | 模型名称 | `deepseek-flash` |
 | `AGENT_WRITE_ENABLED` | 智能体业务写开关；默认关闭，计划批准不会改变此值 | `false` |
+| `AGENT_DATA_MAINTENANCE_ENABLED` | 仅开放计划内逐项确认的数据维护，不开放研究/组合写入 | `false` |
 | `RESEARCH_READ_SOURCE` | 研究输入读取路径（`warm` / `control`） | `warm` |
 | `AKSHARE_TIMEOUT_SECONDS` | AkShare 超时 | `30` |
 | `HITHINK_FINANCE_API_KEY` | 同花顺金融数据服务密钥（缺失时自动同步记录警告并跳过） | 空 |

@@ -54,6 +54,11 @@ export const factLabels: Record<string, string> = {
   phase: "任务阶段", started_at: "任务开始时点", finished_at: "任务结束时点", problem_closed: "原任务范围内问题已闭合",
   quality_issue_updated: "质量问题已更新", scope: "复查范围", profile_rows: "画像行数",
   failed_count: "失败数", empty_factor_count: "空因子数", unresolved_rows: "未解决行数", remaining_gap_count: "剩余缺口数",
+  completed_through: "日线完成日期", target_trade_date: "本次目标交易日", factor_rows: "实际因子行数",
+  daily_loop_job_id: "日级闭环原任务 ID", daily_loop_status: "日级闭环状态", gate_status: "原发布闸门",
+  publish_eligible: "原服务允许发布", market_release_id: "可信行情发布 ID", curated_release_id: "前复权发布 ID",
+  alternative_status: "补充来源采集状态", failed_services_count: "失败的因子族数", empty_services_count: "无产物的因子族数",
+  reason_codes_count: "原任务原因码数",
 };
 
 export function factValue(value: string | number | boolean | null): string {

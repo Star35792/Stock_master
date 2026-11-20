@@ -1,6 +1,6 @@
 """Verify run_all_factors injects the curated reader only when enabled + qfq."""
 
-import app.scheduler.factor_pipeline as pipeline
+import app.services.factor_pipeline_workflow as pipeline
 from app.lake import CuratedDailyBarReader
 
 

@@ -25,8 +25,14 @@ from app.schemas.operations import (
     OperationsActionStartRequest,
     OperationsActionType,
 )
-from app.services.auto_data_sync import AutoDataSyncService, completed_daily_cutoff
+from app.services.agent_maintenance_contract import MAINTENANCE_ACTIONS
+from app.services.auto_data_sync import (
+    MIN_STOCK_COVERAGE_RATE,
+    AutoDataSyncService,
+    completed_daily_cutoff,
+)
 from app.services.daily_bar_market_builder import DailyBarMarketBuildService
+from app.services.data_maintenance_workflow import DataMaintenanceWorkflow
 from app.services.factor_batch_profiler import FactorBatchProfilerService
 from app.services.factor_recovery import FactorRecoveryService
 from app.services.gap_backfill import MissingDailyBarBackfillService
@@ -74,6 +80,24 @@ class OperationsActionService:
         parameters: dict[str, Any],
     ) -> OperationsActionPreview:
         normalized = self._normalize_parameters(action_type, parameters)
+        if action_type == "daily_data_and_factors_sync":
+            checks = DataMaintenanceWorkflow().checks(db)
+            return OperationsActionPreview(
+                action_type=action_type,
+                executable=DataMaintenanceWorkflow.executable(checks),
+                summary=(
+                    f"同步可信日线并计算因子至 {checks['target_trade_date'] or '待核实交易日'}；"
+                    "包括前复权发布、14自然日滚动因子计算和原生产闸门。"
+                ),
+                parameters={},
+                checks=checks,
+                warnings=[
+                    "原始采集先留raw，再经质量校验发布market；不绕过现有可信发布闸门。",
+                    "因子计算沿用既有公式与输入资格；画像重建另行执行。",
+                    "情绪与资金流采集当前快照，不补造历史；失败或空结果保留为部分完成。",
+                    "完成仅证明本次范围内的数据与因子产物，不代表所有历史质量问题已解决。",
+                ],
+            )
         if action_type == "factor_values_rebuild":
             try:
                 _context, checks = self.factor_recovery.inspect(db, normalized["original_run_id"])
@@ -217,10 +241,16 @@ class OperationsActionService:
         *,
         request: OperationsActionStartRequest,
         agent_identity: dict | None = None,
+        expected_preview: dict | None = None,
     ) -> OperationsActionRead:
         # Single API worker, plus the shared OS writer guard for maintenance jobs.
         with _start_lock, duckdb_write_lock(self.write_lock_path):
-            return self._start_locked(db, request=request, agent_identity=agent_identity)
+            return self._start_locked(
+                db,
+                request=request,
+                agent_identity=agent_identity,
+                expected_preview=expected_preview,
+            )
 
     def _start_locked(
         self,
@@ -228,14 +258,11 @@ class OperationsActionService:
         *,
         request: OperationsActionStartRequest,
         agent_identity: dict | None = None,
+        expected_preview: dict | None = None,
     ) -> OperationsActionRead:
         if agent_identity is not None:
             identity = AgentActionIdentity.model_validate(agent_identity)
-            expected_action = {
-                "sync_daily_data": "daily_data_sync",
-                "repair_daily_gaps": "daily_bar_gap_backfill",
-                "rebuild_factor_profiles": "factor_profile_rebuild",
-            }.get(identity.tool)
+            expected_action = MAINTENANCE_ACTIONS.get(identity.tool)
             if (
                 request.idempotency_key != f"agent:{identity.confirmation_id}"
                 or request.action_type != expected_action
@@ -268,6 +295,15 @@ class OperationsActionService:
         )
         if not preview.executable:
             raise ValueError(preview.summary)
+        if expected_preview is not None:
+            from app.services.agent_execution_contract import compact_preview, preview_hash
+
+            if preview_hash(compact_preview(preview.model_dump(mode="json"))) != preview_hash(
+                compact_preview(expected_preview)
+            ):
+                raise OperationsActionConflictError(
+                    "确认后的来源、范围或影响已变化，请重新预检确认。"
+                )
 
         metadata = merge_job_lease_metadata(
             db,
@@ -334,9 +370,12 @@ class OperationsActionService:
             metadata = job.metadata_ or {}
             action_type = metadata["action_type"]
             parameters = dict(metadata.get("parameters") or {})
-            checked = self.preview(db, action_type=action_type, parameters=parameters)
-            if not checked.executable:
-                raise ValueError(f"执行前复查被阻断：{checked.summary}; {checked.checks}")
+            if action_type == "daily_data_and_factors_sync":
+                DataMaintenanceWorkflow().validate_frozen(db, metadata["preview"]["checks"])
+            else:
+                checked = self.preview(db, action_type=action_type, parameters=parameters)
+                if not checked.executable:
+                    raise ValueError(f"执行前复查被阻断：{checked.summary}; {checked.checks}")
             result, completion_status = self._execute_action(
                 db,
                 action_id=action_id,
@@ -359,13 +398,22 @@ class OperationsActionService:
         action_type: OperationsActionType,
         parameters: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
+        if action_type == "daily_data_and_factors_sync":
+            job = self.job_repository.get(db, action_id)
+            return DataMaintenanceWorkflow().execute(
+                db,
+                checks=job.metadata_["preview"]["checks"],
+                session_factory=self.session_factory,
+                job_repository=self.job_repository,
+            )
         if action_type == "daily_data_sync":
             result = AutoDataSyncService().sync(db)
+            closed = result.coverage.get("stock_coverage_rate", 0) >= MIN_STOCK_COVERAGE_RATE
             return {
                 "sync": self._json_ready(result),
-                "problem_closed": True,
+                "problem_closed": closed,
                 "recheck": {"coverage": result.coverage, "scope": "unadjusted_daily_prices_only"},
-            }, "success"
+            }, "success" if closed else "partial"
 
         if action_type == "factor_values_rebuild":
             return self.factor_recovery.execute(
@@ -559,9 +607,9 @@ class OperationsActionService:
             if parameters.get("price_date") is not None:
                 normalized["price_date"] = date.fromisoformat(parameters["price_date"]).isoformat()
             return normalized
-        if action_type == "daily_data_sync":
+        if action_type in {"daily_data_sync", "daily_data_and_factors_sync"}:
             if parameters:
-                raise ValueError("daily_data_sync does not accept parameters")
+                raise ValueError(f"{action_type} does not accept parameters")
             return {}
         if action_type == "daily_bar_gap_backfill":
             if not isinstance(parameters.get("symbols"), list):

@@ -17,6 +17,7 @@ from app.services.agent_execution_contract import (
 from app.services.agent_planning import plan_hash
 from app.services.agent_skill_verification import SkillTurn, observation
 from app.services.agent_tools import MAINTENANCE, TOOLS, json_ready
+from app.services.agent_write_policy import write_enabled
 
 IN_FLIGHT = {"reading", "preflighting", "starting"}
 MAX_DISPATCHES = 32
@@ -247,6 +248,10 @@ class AgentExecutionService:
             current.summary = result_summary(raw)
             if isinstance(raw.get("recovery"), dict):
                 current.summary["recovery"] = raw["recovery"]
+            if isinstance(raw.get("result"), dict) and isinstance(
+                raw["result"].get("observation"), dict
+            ):
+                current.summary["observation"] = raw["result"]["observation"]
             status = raw.get("status")
             if status in {"queued", "running"}:
                 current.status = "waiting_task"
@@ -260,8 +265,6 @@ class AgentExecutionService:
                     else:
                         current.status, current.reason = "unknown", "任务缺少已核实的回测run_id。"
                 current.summary.update(result_summary(raw["result"]))
-                if isinstance(raw["result"].get("observation"), dict):
-                    current.summary["observation"] = raw["result"]["observation"]
             else:
                 current.status = status if status in {"partial", "failed"} else "unknown"
                 current.reason = "任务未完整成功，下游保持阻断。"
@@ -490,7 +493,7 @@ class AgentExecutionService:
                 return self.owner.snapshot(session), None
             if decision != "confirm":
                 raise ValueError("操作决定无效。")
-            if not settings.agent_write_enabled:
+            if not write_enabled(action.tool):
                 raise AgentConflictError("写执行仍关闭；可运行只读计划并查看预检。")
             if not action.plan_id or not action.step_id:
                 raise AgentConflictError("历史独立预览没有计划授权，请在批准计划内重新预检。")

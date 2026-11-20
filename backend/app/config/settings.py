@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=6, ge=1, le=10)
     agent_db_path: str = "data/agent.db"
     agent_write_enabled: bool = False
+    agent_data_maintenance_enabled: bool = False
 
     metadata_db_path: str = "data/stock_master.duckdb"
 

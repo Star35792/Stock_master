@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from hashlib import sha256
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -25,6 +26,7 @@ from app.scheduler.database_job_lock import database_job_lock
 from app.schemas.agent_recovery import AgentActionIdentity
 from app.schemas.operations import OperationsActionStartRequest
 from app.schemas.strategy import FactorSelectionBacktestRequest
+from app.services.agent_maintenance_contract import MAINTENANCE_ACTIONS as MAINTENANCE
 from app.services.agent_recovery import AgentEvidenceRecovery
 from app.services.backtest import DailyBacktestService
 from app.services.backtest_query import BacktestQueryService
@@ -91,6 +93,16 @@ class ProfileArgs(ToolArgs):
     categories: list[str] | None = Field(default=None, max_length=10)
 
 
+class FactorRecoveryArgs(ToolArgs):
+    original_run_id: int = Field(gt=0)
+
+
+class SourceRefreshArgs(ToolArgs):
+    sources: list[Literal["hithink", "eastmoney"]] = Field(
+        default_factory=lambda: ["hithink", "eastmoney"], min_length=1, max_length=2
+    )
+
+
 class BacktestArgs(ToolArgs):
     name: str = Field(min_length=1, max_length=100)
     factor_name: str = Field(min_length=1, max_length=100)
@@ -133,11 +145,30 @@ TOOLS = {
     "latest_screen": Tool("最新选股报告", "读取现有价值初筛报告；保留日期与资格限制。", ToolArgs),
     "task_status": Tool("任务进度", "查询已确认任务的真实状态；完成后再安排下一步。", TaskArgs),
     "sync_daily_data": Tool("采集可信日线", "预览日线采集，经用户按钮确认才执行。", ToolArgs, True),
+    "sync_data_and_factors": Tool(
+        "同步行情与因子",
+        "按最近已完结交易日运行既有日级闭环：行情、复权发布、因子计算及质量闸门。"
+        "同步数据和因子使用此工具，不能用画像重建代替。日期和回看窗口由服务端预检确定。",
+        ToolArgs,
+        True,
+    ),
     "repair_daily_gaps": Tool(
         "回填日线缺口", "预览最多50证券、32自然日的qfq缺口回填。", GapArgs, True
     ),
     "rebuild_factor_profiles": Tool(
         "重建因子画像", "预览因子画像重建，经用户确认执行。", ProfileArgs, True
+    ),
+    "repair_factor_values": Tool(
+        "恢复失败因子运行",
+        "仅按用户明确的 original_run_id 恢复失败、部分或零观察因子运行；沿用原版本与范围。",
+        FactorRecoveryArgs,
+        True,
+    ),
+    "refresh_alternative_data": Tool(
+        "补采情绪与资金流",
+        "通过已有来源重新采集当前情绪与资金流并复查，不能补造历史或修复所有数据问题。",
+        SourceRefreshArgs,
+        True,
     ),
     "run_factor_backtest": Tool(
         "因子探索回测", "预检单因子探索回测，保留费用、次日执行及数据闸门。", BacktestArgs, True
@@ -150,14 +181,7 @@ TOOLS = {
     ),
 }
 
-MAINTENANCE = {
-    "sync_daily_data": "daily_data_sync",
-    "repair_daily_gaps": "daily_bar_gap_backfill",
-    "rebuild_factor_profiles": "factor_profile_rebuild",
-}
-
-
-def tool_definitions():
+def tool_definitions(*, read_only=False):
     return [
         {
             "type": "function",
@@ -168,6 +192,7 @@ def tool_definitions():
             },
         }
         for name, spec in TOOLS.items()
+        if not read_only or not spec.writes
     ]
 
 
@@ -345,6 +370,7 @@ class AgentTools:
                         idempotency_key=f"agent:{action_id}",
                     ),
                     agent_identity=identity.model_dump(mode="json"),
+                    expected_preview=preview,
                 )
                 # A failure here leaves a known starting intent and no automatic replay.
                 with duckdb_write_lock("data/duckdb_write.lock", timeout_seconds=3):
@@ -467,7 +493,12 @@ class AgentTools:
         report = self.recover_action(
             tool, parameters, confirmation_id, code_version=identity.code_version, task_id=task_id
         )
-        result = dict(report.outputs) if report.status == "verified" else None
+        identity_established = report.status == "verified" or (
+            tool in MAINTENANCE
+            and report.status in {"partial", "failed"}
+            and report.task_id == task_id
+        )
+        result = dict(report.outputs) if identity_established else None
         if result is not None:
             # Identity is established first. A failed read must retain that original evidence.
             try:

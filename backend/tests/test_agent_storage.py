@@ -81,7 +81,7 @@ def test_pending_actions_restore_but_expired_or_changed_code_cannot_execute(stor
     tools = Mock()
     tools.preview.return_value = {"executable": True, "summary": "待确认"}
     agent = make_agent(store, response=proposal_response(), tools=tools)
-    result = agent.chat("同步日线")
+    result = prepare_sync(agent)
     restored = make_agent(AgentStateStore(factory), clock=lambda: 1601, tools=tools)
     assert restored.get(result.session_id).actions[0].status == "expired"
     with pytest.raises(AgentConflictError):
@@ -112,11 +112,12 @@ def test_confirmation_intent_survives_failure_and_is_never_blindly_replayed(stor
 
 def test_phase_one_write_gate_blocks_confirm_even_with_valid_action(storage, monkeypatch):
     monkeypatch.setattr(settings, "agent_write_enabled", False)
+    monkeypatch.setattr(settings, "agent_data_maintenance_enabled", False)
     store, _ = storage
     tools = Mock()
     tools.preview.return_value = {"executable": True}
     agent = make_agent(store, response=proposal_response(), tools=tools)
-    result = agent.chat("同步")
+    result = prepare_sync(agent)
     with pytest.raises(AgentConflictError, match="写执行仍关闭"):
         agent.decide(result.session_id, result.actions[0].action_id, "confirm")
     tools.start.assert_not_called()

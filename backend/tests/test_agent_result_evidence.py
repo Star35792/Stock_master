@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from app.config.settings import settings
 from app.schemas.agent_execution import AgentStepExecution
 from app.schemas.agent_recovery import AgentRecoveryRead
 from app.services import agent_tools as tools_module
@@ -199,3 +200,86 @@ def test_write_postcheck_preserves_verified_identity_and_never_replays(monkeypat
         facts = result["result"]["observation"]["evidence"]["facts"]
         assert facts["source_run_id"] == 7 and facts["execution_allowed"] is False
     assert not tools.start.called
+
+
+def maintenance_observation():
+    return {
+        "action_id": 71,
+        "action_type": "daily_data_and_factors_sync",
+        "status": "partial",
+        "result": {
+            "problem_closed": False,
+            "daily_loop_job_id": 72,
+            "sync": {"completed_through": "2026-11-19"},
+            "recheck": {
+                "target_trade_date": "2026-11-19",
+                "factor_rows": 123,
+                "daily_loop_status": "partial",
+                "gate_status": "blocked",
+                "publish_eligible": False,
+                "empty_services": ["MacroFactorService"],
+                "failed_services": [],
+                "reason_codes": ["ALTERNATIVE_DATA_SOURCE_FAILED"],
+            },
+        },
+    }
+
+
+def test_partial_maintenance_preserves_original_result_without_promoting_success(monkeypatch):
+    tools = AgentTools()
+    receipt = tools.action_identity("sync_data_and_factors", {}, "confirmed-identity-000000001")
+    job = SimpleNamespace(
+        job_name="operator_action",
+        metadata_={
+            "action_type": "daily_data_and_factors_sync",
+            "parameters": {},
+            "idempotency_key": f"agent:{receipt.confirmation_id}",
+            "parameters_hash": receipt.parameters_hash,
+            "_agent_action": receipt.model_dump(),
+        },
+    )
+
+    @contextmanager
+    def session():
+        yield Mock()
+
+    monkeypatch.setattr(tools_module, "SessionLocal", session)
+    tools.jobs = SimpleNamespace(get=lambda *_: job)
+    tools.start = Mock()
+    tools.task = Mock(return_value=maintenance_observation())
+    tools.recover_action = Mock(
+        return_value=AgentRecoveryRead(
+            status="partial",
+            reason="原任务未完整成功",
+            task_id=71,
+            confirmation_id=receipt.confirmation_id,
+        )
+    )
+    result = tools.task_for_action(71, receipt.confirmation_id, receipt.tool, {})
+    facts = result["result"]["observation"]["evidence"]["facts"]
+    assert result["status"] == "partial" and not tools.start.called
+    assert facts["completed_through"] == "2026-11-19" and facts["factor_rows"] == 123
+    assert facts["daily_loop_job_id"] == 72 and facts["empty_services_count"] == 1
+
+
+def test_partial_maintenance_evidence_survives_refresh_and_explanation(storage, monkeypatch):
+    monkeypatch.setattr(settings, "agent_write_enabled", False)
+    monkeypatch.setattr(settings, "agent_data_maintenance_enabled", True)
+    service, tools, view = setup(storage[0], [step("sync_data_and_factors", "sync")])
+    pending = control(service, view)
+    service.decide(view.session_id, pending.actions[-1].action_id, "confirm")
+    tools.task_value = {
+        "task_id": 71,
+        "status": "partial",
+        "result": {"observation": result_summary(maintenance_observation())},
+    }
+    blocked = control(service, view, "refresh")
+    assert blocked.executions[0].status == "blocked"
+    assert blocked.executions[0].steps[0].status == "partial"
+    model = SimpleNamespace(complete=Mock(return_value={"content": "部分完成，需复核缺失来源"}))
+    restarted = AgentService(store=AgentStateStore(storage[1]), client=model, tools=Mock())
+    restarted.chat("解释原同步结果", blocked.session_id)
+    prompt = model.complete.call_args.args[0][0]["content"]
+    assert "2026-11-19" in prompt and '"factor_rows": 123' in prompt
+    assert "ALTERNATIVE_DATA_SOURCE_FAILED" in prompt and "MacroFactorService" in prompt
+    assert len(tools.starts) == 1 and not restarted.tools.mock_calls

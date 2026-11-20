@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from app.api.routes import agent as route
 from app.config.settings import Settings, settings
+from app.schemas.agent import AgentActionRead
 from app.services import agent_tools as tools_module
 from app.services.agent import (
     AgentConflictError,
@@ -22,6 +23,7 @@ from app.services.agent import (
     AgentService,
     bounded_result,
 )
+from app.services.agent_execution import Proposal
 from app.services.agent_tools import TOOLS, AgentTools, GapArgs
 from app.services.backtest import PersistedBacktestResult
 from app.services.deepseek import AgentUnavailableError, DeepSeekClient
@@ -123,6 +125,24 @@ def prepare_sync(agent):
     )
 
 
+def legacy_preview(agent):
+    """Saved pre-plan previews remain readable, but are never new write authorization."""
+    session = agent.conversation()
+    session.actions["legacy-action"] = Proposal(
+        AgentActionRead(
+            action_id="legacy-action",
+            tool="sync_daily_data",
+            title="历史同步预览",
+            parameters={},
+            preview={"executable": True},
+        ),
+        agent.clock() + 600,
+        settings.app_code_version,
+    )
+    agent.persist(session)
+    return agent.snapshot(session)
+
+
 def test_read_tool_loop_keeps_facts_and_server_owned_roles():
     agent, tools, _ = service(
         call("market_summary", {"symbol": "600000.SH"}), {"content": "收盘12.300000"}
@@ -167,14 +187,14 @@ def test_concurrent_confirmation_starts_once():
 
 def test_cancel_expire_and_cross_session_fail_closed():
     agent, tools, clock = service(call("sync_daily_data"), call("sync_daily_data"))
-    view = agent.chat("同步")
+    view = prepare_sync(agent)
     other = agent.conversation()
     with pytest.raises(AgentNotFoundError):
         agent.decide(other.session_id, view.actions[0].action_id, "confirm")
     agent.decide(view.session_id, view.actions[0].action_id, "cancel")
     with pytest.raises(AgentConflictError):
         agent.decide(view.session_id, view.actions[0].action_id, "confirm")
-    fresh = agent.chat("同步")
+    fresh = prepare_sync(agent)
     clock[0] += 601
     with pytest.raises(AgentConflictError):
         agent.decide(fresh.session_id, fresh.actions[0].action_id, "confirm")
@@ -183,18 +203,16 @@ def test_cancel_expire_and_cross_session_fail_closed():
     assert agent.get(fresh.session_id).session_id == fresh.session_id
 
 
-def test_existing_pending_or_running_action_blocks_second_write(monkeypatch):
+def test_unadvertised_write_calls_never_create_dead_previews(monkeypatch):
     monkeypatch.setattr(settings, "agent_max_steps", 1)
     agent, tools, _ = service(
         call("sync_daily_data"), call("sync_daily_data"), call("sync_daily_data")
     )
     view = agent.chat("同步")
     agent.chat("再同步", view.session_id)
-    assert len(tools.previews) == 1
-    with pytest.raises(AgentConflictError, match="计划授权"):
-        agent.decide(view.session_id, view.actions[0].action_id, "confirm")
+    assert not tools.previews and not view.actions
     agent.chat("再同步", view.session_id)
-    assert len(tools.previews) == 1
+    assert not tools.previews and not tools.starts
 
 
 @pytest.mark.parametrize("tool_call", [None, 1, {"function": []}, {"id": "x", "function": None}])

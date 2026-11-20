@@ -24,6 +24,7 @@ from app.repositories.agent_recovery import (
 from app.schemas.agent_recovery import AgentActionIdentity, AgentReadCheckpoint
 from app.schemas.operations import OperationsActionPreview, OperationsActionStartRequest
 from app.services import operations_actions
+from app.services.agent_maintenance_contract import MAINTENANCE_ACTIONS
 from app.services.agent_recovery import (
     AgentEvidenceRecovery,
     ReadRecoveryPolicy,
@@ -46,6 +47,44 @@ def identity(**changes):
             **changes,
         }
     )
+
+
+@pytest.mark.parametrize(
+    "tool,parameters",
+    [
+        ("sync_data_and_factors", {}),
+        ("repair_factor_values", {"original_run_id": 7}),
+        ("refresh_alternative_data", {"sources": ["eastmoney", "hithink"]}),
+    ],
+)
+@pytest.mark.parametrize("status", ["success", "partial"])
+def test_new_maintenance_tools_recover_original_operator_identity(
+    databases, tool, parameters, status
+):
+    db, artifacts = databases
+    receipt = identity(tool=tool, parameters_hash=parameters_hash(tool, parameters))
+    job = JobLog(
+        job_name="operator_action",
+        job_type="repair",
+        status=status,
+        metadata_={
+            "idempotency_key": f"agent:{receipt.confirmation_id}",
+            "action_type": MAINTENANCE_ACTIONS[tool],
+            "parameters": parameters,
+            AGENT_EVIDENCE_KEY: receipt.model_dump(),
+        },
+    )
+    db.add(job)
+    db.commit()
+    report = AgentEvidenceRecovery().inspect(
+        db,
+        artifacts,
+        identity=receipt,
+        parameters=parameters,
+        task_id=job.id,
+    )
+    assert report.status == ("verified" if status == "success" else "partial")
+    assert report.task_id == job.id
 
 
 class Clock:

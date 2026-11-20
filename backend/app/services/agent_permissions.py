@@ -8,10 +8,11 @@ from app.services.agent_execution_contract import parameters_hash
 from app.services.agent_planning import plan_hash
 from app.services.agent_skills import SkillRegistry
 from app.services.agent_state import AgentStateStore
+from app.services.agent_write_policy import write_enabled
 
 
 def validate_grant(grant, tool, parameters, confirmation_id, *, task_id=None, store=None, now=None):
-    if not settings.agent_write_enabled or not isinstance(grant, dict):
+    if not write_enabled(tool) or not isinstance(grant, dict):
         raise ValueError("写执行关闭或缺少服务端计划授权。")
     now = time() if now is None else now
     if (

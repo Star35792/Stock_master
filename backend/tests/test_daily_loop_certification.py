@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.scheduler.daily_loop import _gather_certification_metadata
+from app.services.daily_data_workflow import _gather_certification_metadata
 
 
 def _session_factory():

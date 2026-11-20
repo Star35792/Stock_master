@@ -193,7 +193,10 @@ def result_evidence(value):
         )
         facts.update(_scalars(value.get("parameters") or {}, ("start_date", "end_date")))
         result = value.get("result") or {}
-        facts.update(_scalars(result, ("problem_closed", "quality_issue_updated")))
+        facts.update(
+            _scalars(result, ("problem_closed", "quality_issue_updated", "daily_loop_job_id"))
+        )
+        facts.update(_scalars(result.get("sync") or {}, ("completed_through",)))
         recheck = result.get("recheck") or {}
         facts.update(
             _scalars(
@@ -204,11 +207,30 @@ def result_evidence(value):
                     "failed_count",
                     "empty_factor_count",
                     "unresolved_rows",
+                    "target_trade_date",
+                    "factor_rows",
+                    "daily_loop_status",
+                    "gate_status",
+                    "publish_eligible",
+                    "market_release_id",
+                    "curated_release_id",
+                    "alternative_status",
                 ),
             )
         )
         if isinstance(recheck.get("candidates"), list):
             facts["remaining_gap_count"] = len(recheck["candidates"])
+        for key, label in (
+            ("failed_services", "失败的因子族"),
+            ("empty_services", "无产物的因子族"),
+            ("reason_codes", "原任务原因码"),
+        ):
+            values = recheck.get(key)
+            if isinstance(values, list):
+                facts[key + "_count"] = len(values)
+                if values:
+                    codes = [item[:100] for item in values[:8] if isinstance(item, str)]
+                    limits.append(label + "：" + "、".join(codes))
         limits.append("维护结论限于原任务复查范围，不提升市场数据或研究证据资格。")
     else:
         return None

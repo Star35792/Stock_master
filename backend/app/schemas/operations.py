@@ -303,6 +303,7 @@ class OperationsRerunPlan(BaseModel):
 
 
 OperationsActionType = Literal[
+    "daily_data_and_factors_sync",
     "daily_data_sync",
     "daily_bar_gap_backfill",
     "factor_profile_rebuild",

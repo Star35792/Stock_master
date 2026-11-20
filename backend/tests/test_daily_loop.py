@@ -5,13 +5,13 @@ import pytest
 
 from app.config.settings import Settings
 from app.scheduler.alternative_data import AlternativeDataCollectionResult
-from app.scheduler.daily_loop import run_daily_loop
-from app.scheduler.factor_pipeline import FactorBatchResult
 from app.services import (
     DailyBarCollectionResult,
     HithinkDailySyncResult,
     MarketBuildResult,
 )
+from app.services.daily_data_workflow import run_daily_loop
+from app.services.factor_pipeline_workflow import FactorBatchResult
 
 
 class FakeJobLog:
@@ -104,13 +104,13 @@ def _reset_daily_loop_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     # FACTOR_READS_CURATED=true). Tests that explicitly enable curated mode
     # monkeypatch settings again after this fixture runs.
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.settings",
+        "app.services.daily_data_workflow.settings",
         Settings(factor_reads_curated=False),
     )
     # Mock trading calendar so all existing tests see today as a trading day.
     day = date.today()
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.completed_daily_cutoff",
+        "app.services.daily_data_workflow.completed_daily_cutoff",
         lambda: day,
     )
 
@@ -126,7 +126,7 @@ def _reset_daily_loop_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda self, db, exchanges, trade_date: [SimpleNamespace(is_open=True)],
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop._gather_certification_metadata",
+        "app.services.daily_data_workflow._gather_certification_metadata",
         lambda db, target_date, **kwargs: {
             "target_trade_date": target_date.isoformat(),
             "gate_status": "pending",
@@ -143,7 +143,7 @@ def _reset_daily_loop_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     # must never reach the network, so the default collector is stubbed here;
     # the dedicated alternative-data tests inject their own fake.
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_alternative_data_collection",
+        "app.services.daily_data_workflow.run_alternative_data_collection",
         lambda **kwargs: AlternativeDataCollectionResult(status="success"),
     )
 
@@ -218,8 +218,8 @@ def test_daily_loop_runs_sync_then_factor_pipeline(monkeypatch: pytest.MonkeyPat
         factor_calls.append({"symbols": symbols, **kwargs})
         return _fake_factor_result()
 
-    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
-    monkeypatch.setattr("app.scheduler.daily_loop.run_all_factors", fake_factors)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_hithink_daily_sync", fake_sync)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_all_factors", fake_factors)
 
     result = run_daily_loop(
         symbols=["600519.SH", "000001.SZ"],
@@ -260,13 +260,13 @@ def test_daily_loop_blocks_publishing_a_session_captured_before_the_close(
     target = date.today()
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(
             trusted_count=0, intraday_dates=(target,), intraday_count=5
         ),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 
@@ -300,9 +300,9 @@ def test_daily_loop_fetches_active_symbols_when_none_provided(
         sync_calls.append({"symbols": symbols})
         return _fake_sync_result()
 
-    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_hithink_daily_sync", fake_sync)
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors", lambda **kwargs: _fake_factor_result()
+        "app.services.daily_data_workflow.run_all_factors", lambda **kwargs: _fake_factor_result()
     )
 
     result = run_daily_loop(
@@ -322,7 +322,7 @@ def test_daily_loop_can_close_a_pre_synced_full_market_dump(
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.AutoDataSyncRepository.market_coverage_on_date",
+        "app.services.daily_data_workflow.AutoDataSyncRepository.market_coverage_on_date",
         lambda self, db, trade_date: {
             "trade_date": trade_date.isoformat(),
             "eligible_stocks": 100,
@@ -333,11 +333,11 @@ def test_daily_loop_can_close_a_pre_synced_full_market_dump(
         },
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: pytest.fail("per-symbol sync must stay bypassed"),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 
@@ -362,7 +362,7 @@ def test_daily_loop_marks_failed_when_sync_raises(monkeypatch: pytest.MonkeyPatc
     def fake_sync(*, symbols: object = None, **kwargs: object) -> HithinkDailySyncResult:
         raise RuntimeError("sync broken")
 
-    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_hithink_daily_sync", fake_sync)
 
     result = run_daily_loop(
         symbols=["600519.SH"],
@@ -387,11 +387,11 @@ def test_daily_loop_marks_failed_when_factor_service_fails(
     security_repo = FakeSecurityRepository(["600519.SH"])
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(failed=["SomeService"]),
     )
 
@@ -417,11 +417,11 @@ def test_daily_loop_skips_curated_build_by_default(
     security_repo = FakeSecurityRepository(["600519.SH"])
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 
@@ -451,7 +451,7 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     warm_connection = SimpleNamespace(close=lambda: closed_connections.append(True))
     # This orchestration test must not read a developer's local Parquet releases.
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.WarmLayerStore.connect",
+        "app.services.daily_data_workflow.WarmLayerStore.connect",
         lambda self, **kwargs: warm_connection,
     )
 
@@ -475,15 +475,15 @@ def test_daily_loop_rebuilds_curated_when_enabled(
         )
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.settings",
+        "app.services.daily_data_workflow.settings",
         Settings(factor_reads_curated=True),
     )
     monkeypatch.setattr(
@@ -496,28 +496,28 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     )
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.ReleaseService.compute_parquet_checksum",
+        "app.services.daily_data_workflow.ReleaseService.compute_parquet_checksum",
         lambda path: "c" * 64,
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.ReleaseService.build_parquet_manifest",
+        "app.services.daily_data_workflow.ReleaseService.build_parquet_manifest",
         lambda path: [],
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop._compute_market_qfq_checksum",
+        "app.services.daily_data_workflow._compute_market_qfq_checksum",
         lambda db, **kwargs: "m" * 64,
     )
     finalized: list[object] = []
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.CuratedLayer.prepare_prices_qfq_publish",
+        "app.services.daily_data_workflow.CuratedLayer.prepare_prices_qfq_publish",
         lambda self, staged: SimpleNamespace(result=staged),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.CuratedLayer.finalize_prices_qfq_publish",
+        "app.services.daily_data_workflow.CuratedLayer.finalize_prices_qfq_publish",
         lambda self, transaction: finalized.append(transaction),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop._market_qfq_result",
+        "app.services.daily_data_workflow._market_qfq_result",
         lambda db: SimpleNamespace(
             row_count=20,
             min_date=date(2026, 1, 1),
@@ -526,12 +526,12 @@ def test_daily_loop_rebuilds_curated_when_enabled(
     )
     release_ids = iter(["market-release", "curated-release"])
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.ReleaseService.build_release",
+        "app.services.daily_data_workflow.ReleaseService.build_release",
         lambda self, db, **kwargs: SimpleNamespace(release_id=next(release_ids)),
     )
     activated: list[str] = []
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.ReleaseRepository.activate",
+        "app.services.daily_data_workflow.ReleaseRepository.activate",
         lambda self, db, *, release_id: activated.append(release_id),
     )
 
@@ -563,7 +563,7 @@ def test_daily_loop_rebuilds_curated_when_enabled(
 
 def test_release_activation_failure_restores_previous_curated_tree(tmp_path) -> None:
     from app.lake import CuratedDatasetResult, CuratedLayer, DataLake
-    from app.scheduler.daily_loop import _publish_and_activate_curated
+    from app.services.daily_data_workflow import _publish_and_activate_curated
 
     lake = DataLake(tmp_path / "lake")
     layer = CuratedLayer(lake)
@@ -621,11 +621,11 @@ def test_daily_loop_fails_when_sync_adjust_type_incompatible_with_curated(
     security_repo = FakeSecurityRepository(["600519.SH"])
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.settings",
+        "app.services.daily_data_workflow.settings",
         Settings(factor_reads_curated=True),
     )
 
@@ -664,7 +664,7 @@ def test_daily_loop_skips_on_non_trading_day(monkeypatch: pytest.MonkeyPatch) ->
         sync_calls.append(kwargs)
         return _fake_sync_result()
 
-    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_hithink_daily_sync", fake_sync)
 
     result = run_daily_loop(
         symbols=["600519.SH"],
@@ -703,7 +703,7 @@ def test_daily_loop_fails_when_calendar_missing(monkeypatch: pytest.MonkeyPatch)
         sync_calls.append(kwargs)
         return _fake_sync_result()
 
-    monkeypatch.setattr("app.scheduler.daily_loop.run_hithink_daily_sync", fake_sync)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_hithink_daily_sync", fake_sync)
 
     result = run_daily_loop(
         symbols=["600519.SH"],
@@ -742,10 +742,10 @@ def test_daily_loop_collects_alternative_data_before_the_factor_pipeline(
         return _fake_factor_result()
 
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
-    monkeypatch.setattr("app.scheduler.daily_loop.run_all_factors", fake_factors)
+    monkeypatch.setattr("app.services.daily_data_workflow.run_all_factors", fake_factors)
 
     result = run_daily_loop(
         symbols=["600519.SH"],
@@ -774,11 +774,11 @@ def test_daily_loop_degrades_to_partial_when_alternative_source_fails(
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 
@@ -815,11 +815,11 @@ def test_daily_loop_degrades_to_partial_when_alternative_datasets_are_empty(
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 
@@ -856,11 +856,11 @@ def test_daily_loop_survives_an_alternative_collector_crash(
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 
@@ -890,11 +890,11 @@ def test_daily_loop_can_skip_alternative_collection(
     session = FakeSession()
     job_log_repo = FakeJobLogRepository()
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_hithink_daily_sync",
+        "app.services.daily_data_workflow.run_hithink_daily_sync",
         lambda **kwargs: _fake_sync_result(),
     )
     monkeypatch.setattr(
-        "app.scheduler.daily_loop.run_all_factors",
+        "app.services.daily_data_workflow.run_all_factors",
         lambda **kwargs: _fake_factor_result(),
     )
 

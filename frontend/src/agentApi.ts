@@ -75,8 +75,9 @@ export interface AgentStatus {
   skills?: Array<{ name: string; description: string }>;
   configured: boolean;
   write_enabled: boolean;
+  data_maintenance_enabled?: boolean;
   model: string;
-  tools: Array<{ name: string; title: string; requires_confirmation: boolean }>;
+  tools: Array<{ name: string; title: string; requires_confirmation: boolean; write_enabled?: boolean }>;
   planning_available: boolean;
   plan_execution_enabled: boolean;
 }

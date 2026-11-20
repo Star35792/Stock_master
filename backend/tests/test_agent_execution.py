@@ -20,6 +20,7 @@ from app.services.agent_permissions import validate_grant
 from app.services.agent_state import AgentStateStore
 from app.services.agent_tools import AgentTools
 from app.services.operations_actions import OperationsActionService
+from tests.test_agent import legacy_preview
 from tests.test_agent_planning import agent, draft, step, storage as storage
 
 
@@ -89,7 +90,9 @@ def test_unapproved_and_legacy_write_paths_cannot_dispatch(storage, monkeypatch)
     service.client.complete.return_value = {
         "tool_calls": [{"id": "legacy", "function": {"name": "sync_daily_data", "arguments": "{}"}}]
     }
-    legacy = service.chat("同步日线")
+    rejected = service.chat("同步日线")
+    assert not rejected.actions and not tools.previews
+    legacy = legacy_preview(service)
     with pytest.raises(AgentConflictError, match="计划授权"):
         service.decide(legacy.session_id, legacy.actions[-1].action_id, "confirm")
     assert not tools.starts

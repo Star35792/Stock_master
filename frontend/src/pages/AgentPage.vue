@@ -11,7 +11,7 @@ const {
   session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete,
   connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError,
   sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget,
-  load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose,
+  load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshProgress, canWrite, dispose,
 } = createAgentWorkspace();
 const messagePane = ref<HTMLElement | null>(null);
 const inputElement = ref<HTMLTextAreaElement | null>(null);
@@ -75,7 +75,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(async () => {
   await load();
   resizeInput();
-  timer = setInterval(() => { if (!busy.value) void refreshTasks(); }, 4000);
+  timer = setInterval(() => { if (!busy.value) void refreshProgress(); }, 4000);
 });
 onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 </script>
@@ -115,15 +115,15 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 
           <div v-if="session?.plans?.length || session?.actions.length || plansNeedReload" class="agent-followup">
             <p v-if="plansNeedReload && !busy" role="alert" class="agent-error">计划状态尚未核实，批准已停用。请载入原会话，再审阅当前版本。<button :disabled="loading" @click="load">载入原会话</button></p>
-            <AgentPlanPanel v-if="session?.plans?.length" :plans="session.plans" :executions="session.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" @explain="send(`请解释第${$event}版计划的已保存执行结果，引用真实ID、日期和原服务指标，分别说明事实、缺失与推断及限制；不要生成新写预览。`, 'chat')" />
+            <AgentPlanPanel v-if="session?.plans?.length" :plans="session.plans" :executions="session.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" :write-permissions="Object.fromEntries((status?.tools ?? []).filter(tool => tool.requires_confirmation).map(tool => [tool.name, canWrite(tool.name)]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" @explain="send(`请解释第${$event}版计划的已保存执行结果，引用真实ID、日期和原服务指标，分别说明事实、缺失与推断及限制；不要生成新写预览。`, 'chat')" />
             <section v-if="session?.actions.length" class="agent-panel" aria-label="操作提案">
               <h2>操作提案</h2>
               <article v-for="action in session.actions" :key="action.action_id" class="agent-action">
                 <h3>{{ action.title }}<span class="agent-tag">{{ labels[action.status] ?? action.status }}</span></h3>
                 <p>{{ action.preview.summary }}</p>
                 <details :open="action.status === 'pending'"><summary>参数与影响</summary><pre>{{ pretty(action.parameters) }}</pre><pre>{{ pretty(action.preview) }}</pre></details>
-                <p v-if="action.status === 'pending'" class="agent-muted">{{ !action.plan_id ? '独立预览没有计划授权，请在批准计划内重新预检。' : status?.write_enabled ? '确认会重检来源与影响，再创建后台任务。授权最多有效10分钟。' : '写执行默认关闭；目前仅可审阅此步骤。' }}</p>
-                <div v-if="action.status === 'pending'" class="agent-action-buttons"><button :disabled="busy || loading || plansNeedReload || !status?.write_enabled || !action.plan_id" @click="decide(action.action_id, 'confirm')">确认此步骤</button><button class="agent-secondary" :disabled="busy || loading" @click="decide(action.action_id, 'cancel')">取消</button></div>
+                <p v-if="action.status === 'pending'" class="agent-muted">{{ !action.plan_id ? '历史预览没有计划授权；直接在聊天中重新提出需求即可生成计划。' : canWrite(action.tool) ? '确认会重检来源与影响，再创建后台任务。任务完成后自动复查；下一项写入仍需确认。' : '此操作的写权限关闭；需在后端开启相应权限并重启服务。' }}</p>
+                <div v-if="action.status === 'pending'" class="agent-action-buttons"><button :disabled="busy || loading || plansNeedReload || !canWrite(action.tool) || !action.plan_id" @click="decide(action.action_id, 'confirm')">确认此步骤</button><button class="agent-secondary" :disabled="busy || loading" @click="decide(action.action_id, 'cancel')">取消</button></div>
                 <div v-if="action.task_id" class="agent-task"><strong>任务 #{{ action.task_id }} · {{ labels[tasks[action.task_id]?.status ?? 'queued'] }}</strong><p>{{ tasks[action.task_id]?.error_message }}</p><details v-if="tasks[action.task_id]?.result"><summary>任务结果</summary><pre>{{ pretty(tasks[action.task_id]?.result) }}</pre></details><button class="agent-secondary" :disabled="busy || loading" @click="send(`查询任务 ${action.task_id} 的状态与结果；若已完成，请复查并给出下一步建议。`, 'chat')">复查并继续</button></div>
               </article>
             </section>
@@ -180,7 +180,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
         <details class="agent-setting-section"><summary>连接与使用说明 <span class="agent-dot" :class="{ ready: connected && status?.configured }" /></summary>
           <p class="agent-connection" role="status">{{ connectionLabel }}<button class="agent-secondary" :disabled="loading || busy" @click="load"><RefreshCw :size="14" aria-hidden="true" />重新连接</button></p>
           <p v-if="connected && !status?.configured" class="agent-muted">请在后端配置 DEEPSEEK_API_KEY 并重启服务。</p>
-          <p class="agent-muted">需求与对话会发送给 DeepSeek。普通对话查询现有数据；采集、回测等操作请在输入框选择“先规划”。批准计划不会执行，写步骤仍需逐项确认。{{ status?.write_enabled ? '当前允许在授权范围内确认写步骤。' : '当前写执行默认关闭。' }}</p>
+          <p class="agent-muted">需求与对话会发送给 DeepSeek。直接提出同步、修复或研究需求即可生成计划；补充参数也可继续聊天。批准后运行预检，每项写入单独确认，随后自动跟踪原任务并复查。{{ status?.write_enabled ? '研究和维护写权限已开启。' : status?.data_maintenance_enabled ? '数据维护已开启；研究和组合写权限关闭。' : '写权限关闭；需在后端配置相应权限并重启。' }}</p>
           <p class="agent-muted">技能检查材料齐备不代表研究目标或策略资格已认证。</p>
         </details>
       </div>

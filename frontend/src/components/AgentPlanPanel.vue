@@ -4,24 +4,26 @@ import type { AgentPlan, AgentExecution } from "../agentApi";
 import AgentRecoveryEvidence from "./AgentRecoveryEvidence.vue";
 import AgentResultEvidence from "./AgentResultEvidence.vue";
 
-const props = defineProps<{ plans: AgentPlan[]; executions: AgentExecution[]; busy: boolean; executionBusy: boolean; toolTitles: Record<string, string> }>();
+const props = defineProps<{ plans: AgentPlan[]; executions: AgentExecution[]; busy: boolean; executionBusy: boolean; toolTitles: Record<string, string>; writePermissions?: Record<string, boolean> }>();
 const emit = defineEmits<{ decision: [planId: string, decision: "approve" | "reject"]; control: [planId: string, operation: "advance" | "refresh" | "cancel"]; inspect: [planId: string, stepId: string]; explain: [version: number] }>();
 const plansNewestFirst = computed(() => [...props.plans].reverse());
 const labels: Record<string, string> = { needs_input: "待补充参数", draft: "待审阅", approved: "计划已批准", rejected: "已拒绝", superseded: "已被新需求替代", expired: "已过期或代码/技能已变化" };
 const intents: Record<string, string> = { data_maintenance: "数据维护", stock_research: "选股研究", position_analysis: "持仓分析", portfolio_planning: "组合规划", consultation: "解释咨询" };
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const executionFor = (id: string) => props.executions.find(item => item.plan_id === id);
+const disabledWrites = (plan: AgentPlan) => plan.steps.filter(step => props.writePermissions?.[step.tool] === false).map(step => props.toolTitles[step.tool] ?? step.tool);
 const executionLabels: Record<string, string> = { ready: "待继续", running: "处理中 / 结果待核实", awaiting_confirmation: "等待逐项确认", waiting_task: "等待任务", completed: "步骤完成 · 目标待核验", blocked: "已阻断", cancelled: "已停止后续步骤", pending: "待运行", reading: "读取中 / 待核实", preflighting: "预检中 / 待核实", starting: "任务创建中 / 待核实", waiting_read: "等待原任务", success: "步骤调用完成", partial: "部分失败", failed: "失败", unknown: "结果未知" };
 </script>
 
 <template>
   <section class="plan-panel" aria-label="可审阅计划">
-    <h2>研究计划 <span>{{ plans.length }}/4</span></h2>
-    <p class="muted">批准只保存计划。点击运行后按依赖执行只读步骤；写步骤必须另行预检并逐项确认。任务成功不等于研究目标或证据资格已达成。</p>
+    <h2>执行计划 <span>{{ plans.length }}/4</span></h2>
+    <p class="muted">先批准计划，再运行预检，每项写入单独确认。确认后自动跟踪原任务并复查，下一项写入仍需确认。重新载入会话仅观察原任务，可点击继续恢复后续步骤。</p>
     <p v-if="!plans.length" class="muted">使用“先规划”提交需求，查看目标、依赖、参数和完成条件。</p>
     <article v-for="plan in plansNewestFirst" :key="plan.plan_id" class="plan-card">
       <h3>第 {{ plan.version }} 版 · {{ intents[plan.intent] }} <span>{{ labels[plan.status] }}</span></h3>
       <p class="goal">{{ plan.goal }}</p>
+      <p v-if="disabledWrites(plan).length" class="questions" role="status">以下操作的写权限关闭：{{ disabledWrites(plan).join('、') }}。可审阅和预检，当前无法确认执行；请查看连接与使用说明。</p>
       <p v-for="skill in plan.skills ?? []" :key="skill.name" class="muted">专业技能：{{ skill.name }} · {{ skill.content_hash.slice(0, 12) }}</p>
       <div v-if="plan.status === 'needs_input'" class="questions" role="status">
         <strong>请补充后生成新版本</strong>

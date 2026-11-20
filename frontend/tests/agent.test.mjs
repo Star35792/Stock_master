@@ -322,3 +322,133 @@ test("editing a memory submits its original identity and revision", async () => 
   expect(payload.revision).toBe(2);
   expect(state.memories.value[0].revision).toBe(3);
 });
+
+function trackedSession(status = "waiting_task", stepStatus = "waiting_task") {
+  return { ...planSession("approved"), actions: [{ ...session().actions[0], plan_id: "plan-1", task_id: 71, status: "confirmed" }],
+    executions: [{ plan_id: "plan-1", status, steps: [{ step_id: "collect", status: stepStatus, task_id: 71 }] }] };
+}
+
+const taskProgress = status => ({ task_id: 71, status, phase: status, result: null, error_message: null });
+
+test("maintenance scope enables only its own confirmation buttons", async () => {
+  const state = workspace({ fetchAgentStatus: async () => ({ configured: true, write_enabled: false, data_maintenance_enabled: true,
+    tools: [{ name: "sync_daily_data", write_enabled: true }, { name: "run_factor_backtest", write_enabled: false }] }) });
+  await state.load();
+  expect(state.canWrite("sync_daily_data")).toBe(true);
+  expect(state.canWrite("run_factor_backtest")).toBe(false);
+  expect(state.canWrite("execute_sql")).toBe(false);
+});
+
+test("explicit run tracks the original task and continues to the next preflight without confirming", async () => {
+  const calls = [];
+  let confirms = 0;
+  let taskStatus = "queued";
+  const state = workspace({ fetchAgentSession: async () => planSession("approved"),
+    fetchAgentTask: async () => taskProgress(taskStatus),
+    decideAgentAction: async () => { confirms += 1; return session(); },
+    controlAgentPlan: async (_plan, _id, operation) => {
+      calls.push(operation);
+      if (operation === "refresh") {
+        return taskStatus === "success" ? trackedSession("ready", "success") : trackedSession();
+      }
+      return calls.length === 1 ? trackedSession() : trackedSession("awaiting_confirmation", "awaiting_confirmation");
+    } });
+  await state.load(); await state.restore("session-1");
+  await state.controlPlan("plan-1", "advance");
+  await state.refreshProgress();
+  expect(state.tasks.value[71].status).toBe("queued");
+  taskStatus = "running";
+  for (let i = 0; i < 256; i += 1) await state.refreshProgress();
+  expect(state.tasks.value[71].status).toBe("running");
+  expect(calls).toEqual(["advance"]);
+
+  taskStatus = "success";
+  await state.refreshProgress();
+  await state.refreshProgress();
+  expect(calls).toEqual(["advance", "refresh", "advance"]);
+  expect(state.session.value.executions[0].status).toBe("awaiting_confirmation");
+  expect(confirms).toBe(0);
+});
+
+test("restoring a task observes it without automatically advancing the plan", async () => {
+  const calls = [];
+  const state = workspace({ fetchAgentSession: async () => trackedSession(),
+    fetchAgentTask: async () => taskProgress("success"), controlAgentPlan: async (_p, _s, operation) => {
+    calls.push(operation); return trackedSession("ready", "success");
+  } });
+  await state.load(); await state.restore("session-1");
+  await state.refreshProgress();
+  expect(calls).toEqual(["refresh"]);
+});
+
+test("partial task observation blocks automatic downstream work", async () => {
+  const calls = [];
+  const state = workspace({ fetchAgentSession: async () => planSession("approved"),
+    fetchAgentTask: async () => taskProgress("partial"), controlAgentPlan: async (_p, _s, operation) => {
+    calls.push(operation); return operation === "advance" ? trackedSession() : trackedSession("blocked", "partial");
+  } });
+  await state.load(); await state.restore("session-1");
+  await state.controlPlan("plan-1", "advance");
+  await state.refreshProgress(); await state.refreshProgress();
+  expect(calls).toEqual(["advance", "refresh"]);
+});
+
+test("a temporary task progress error can recover without consuming a plan observation", async () => {
+  const calls = [];
+  let unavailable = true;
+  const state = workspace({
+    fetchAgentSession: async () => trackedSession(),
+    fetchAgentTask: async () => {
+      if (unavailable) throw new Error("连接中断");
+      return taskProgress("failed");
+    },
+    controlAgentPlan: async (_p, _s, operation) => {
+      calls.push(operation);
+      return trackedSession("blocked", "failed");
+    },
+  });
+  await state.load(); await state.restore("session-1");
+  await state.refreshProgress();
+  expect(state.taskError.value).toBe("连接中断");
+  expect(calls).toEqual([]);
+
+  unavailable = false;
+  await state.refreshProgress();
+  expect(state.taskError.value).toBeNull();
+  expect(calls).toEqual(["refresh"]);
+});
+
+test("reconnecting after an uncertain plan response observes the task without resuming the plan", async () => {
+  const calls = [];
+  const state = workspace({
+    fetchAgentSession: async () => trackedSession(),
+    fetchAgentTask: async () => taskProgress("success"),
+    controlAgentPlan: async (_p, _s, operation) => {
+      calls.push(operation);
+      if (calls.length === 1) return trackedSession();
+      if (calls.length === 2) throw new Error("连接中断");
+      return trackedSession("ready", "success");
+    },
+  });
+  await state.load(); await state.restore("session-1");
+  await state.controlPlan("plan-1", "advance");
+  await state.refreshProgress();
+  expect(state.plansNeedReload.value).toBe(true);
+
+  await state.load();
+  await state.refreshProgress();
+  expect(calls).toEqual(["advance", "refresh", "refresh"]);
+  expect(state.session.value.executions[0].status).toBe("ready");
+});
+
+test("resetting during a progress observation cannot resume the old plan", async () => {
+  let release;
+  let calls = 0;
+  const state = workspace({ fetchAgentSession: async () => trackedSession(), fetchAgentTask: async () => new Promise(resolve => { release = resolve; }),
+    controlAgentPlan: async () => { calls += 1; return trackedSession(); } });
+  // Restore a session directly: its task card is observed by refreshProgress below.
+  await state.load(); state.session.value = trackedSession();
+  const pending = state.refreshProgress();
+  state.reset(); release({ task_id: 71, status: "success" }); await pending;
+  expect(state.session.value).toBeNull(); expect(calls).toBe(0);
+});

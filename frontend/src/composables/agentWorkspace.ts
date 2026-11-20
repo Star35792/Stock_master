@@ -22,6 +22,10 @@ const defaultDeps = {
   fetchAgentSessions, fetchAgentMemories, saveAgentMemory, deleteAgentMemory,
 };
 
+function isFinishedTask(task: AgentTask | undefined) {
+  return task?.status === "success" || task?.status === "partial" || task?.status === "failed";
+}
+
 export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}) {
   const deps = { ...defaultDeps, ...overrides };
   const session = ref<AgentSession | null>(null);
@@ -50,6 +54,13 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   const storageKey = "stock-master-agent-session";
   let disposed = false;
   let generation = 0;
+  let trackingBusy = false;
+  const autoContinue = new Set<string>();
+
+  function canWrite(tool: string) {
+    return status.value?.tools?.find(item => item.name === tool)?.write_enabled
+      ?? status.value?.write_enabled ?? false;
+  }
 
   function saveSession(value: AgentSession, epoch = generation) {
     if (disposed || epoch !== generation) return;
@@ -64,7 +75,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     const ids = [...new Set(session.value?.actions.flatMap(action => action.task_id === null ? [] : [action.task_id]) ?? [])];
     taskError.value = null;
     await Promise.all(ids.map(async id => {
-      if (["success", "partial", "failed"].includes(tasks.value[id]?.status ?? "")) return;
+      if (isFinishedTask(tasks.value[id])) return;
       try {
         const value = await deps.fetchAgentTask(id);
         if (!disposed && epoch === generation) tasks.value = { ...tasks.value, [id]: value };
@@ -72,6 +83,32 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
         if (!disposed && epoch === generation) taskError.value = cause instanceof Error ? cause.message : "任务进度读取失败";
       }
     }));
+  }
+
+  async function refreshProgress() {
+    if (trackingBusy || busy.value || loading.value || disposed || plansNeedReload.value) return;
+    trackingBusy = true;
+    const epoch = generation;
+    const sessionId = session.value?.session_id;
+    try {
+      await refreshTasks();
+      if (disposed || epoch !== generation || busy.value || !sessionId) return;
+      const executions = session.value?.executions ?? [];
+      // Ordinary progress reads leave the bounded plan observation budget for result verification.
+      const pendingVerification = executions.find(item => item.steps.some(step =>
+        step.status === "waiting_task" && step.task_id !== null && isFinishedTask(tasks.value[step.task_id]),
+      ));
+      const current = pendingVerification
+        ?? executions.find(item => item.status === "ready" && autoContinue.has(item.plan_id));
+      if (!current) return;
+      const planId = current.plan_id;
+      if (pendingVerification) await controlPlan(planId, "refresh");
+      if (disposed || plansNeedReload.value || session.value?.session_id !== sessionId || !autoContinue.has(planId)) return;
+      const plan = session.value.plans.find(item => item.plan_id === planId);
+      const execution = session.value.executions.find(item => item.plan_id === planId);
+      if (plan?.status === "approved" && execution?.status === "ready") await controlPlan(planId, "advance");
+      if (["completed", "blocked", "cancelled"].includes(execution?.status ?? "")) autoContinue.delete(planId);
+    } finally { trackingBusy = false; }
   }
 
   async function refreshHistory() {
@@ -90,6 +127,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   async function load() {
     if (busy.value || disposed) return;
     const epoch = ++generation;
+    autoContinue.clear();
     loading.value = true;
     connected.value = false;
     error.value = null;
@@ -151,7 +189,8 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
       streamIncomplete.value = true;
       error.value = streamController?.signal.aborted ? "已停止接收；请载入原会话核对已开始的查询。" : cause instanceof Error ? cause.message : "智能体请求失败";
       const knownId = streamSessionId ?? session.value?.session_id;
-      if (requestMode === "plan" && knownId) {
+      if (knownId) {
+        plansNeedReload.value = true;
         try {
           const restored = await deps.fetchAgentSession(knownId);
           if (disposed || epoch !== generation) return;
@@ -175,6 +214,8 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     error.value = null;
     try {
       saveSession(await deps.decideAgentAction(actionId, session.value.session_id, decision));
+      const action = session.value?.actions.find(item => item.action_id === actionId);
+      if (decision === "confirm" && action?.plan_id && action.task_id) autoContinue.add(action.plan_id);
       await refreshTasks();
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : "操作确认失败";
@@ -211,6 +252,10 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
         error.value = cause instanceof Error ? cause.message : "计划执行状态待核实，请重新载入";
       }
     } finally {
+      if (epoch === generation && !plansNeedReload.value) {
+        if (operation === "advance") autoContinue.add(planId);
+        if (operation === "cancel") autoContinue.delete(planId);
+      }
       if (epoch === generation && !disposed) { busy.value = false; executionBusy.value = false; }
     }
   }
@@ -237,6 +282,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   function reset() {
     if (busy.value) return;
     generation += 1;
+    autoContinue.clear();
     loading.value = false;
     session.value = null;
     plansNeedReload.value = false;
@@ -254,6 +300,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   async function restore(id: string) {
     if (busy.value) return;
     const epoch = ++generation;
+    autoContinue.clear();
     loading.value = true;
     error.value = null;
     try {
@@ -289,5 +336,5 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     finally { busy.value = false; }
   }
 
-  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; streamController?.abort(); } };
+  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, refreshProgress, canWrite, dispose: () => { disposed = true; generation += 1; streamController?.abort(); } };
 }
