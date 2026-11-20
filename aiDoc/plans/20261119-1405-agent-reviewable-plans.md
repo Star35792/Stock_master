@@ -6,6 +6,7 @@ superseded_by: plans/20261119-1457-agent-permissions-and-execution.md
 note: >-
   冻结计划、输入来源和审批合同继续适用；执行尚未交付的阶段描述由第三阶段取代。
   正文保留第二阶段落定时的事实与验证，恢复与跨库核验继续留在第四阶段。
+  默认先规划入口由 plans/20261120-1424-agent-streaming-and-query-default.md 取代为默认查询；原计划合同继续适用。
 ---
 # 智能体第二阶段：意图识别与可审阅计划
 

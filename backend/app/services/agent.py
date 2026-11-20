@@ -28,6 +28,7 @@ from app.services.agent_skills import (
     skill_tool_definitions,
 )
 from app.services.agent_state import AgentStateStore
+from app.services.agent_stream import AgentStreamStopped
 from app.services.agent_tools import TOOLS, AgentTools, json_ready, tool_definitions
 from app.services.deepseek import AgentUnavailableError, DeepSeekClient
 
@@ -239,7 +240,7 @@ class AgentService:
         finally:
             session.lock.release()
 
-    def chat(self, message, session_id=None):
+    def chat(self, message, session_id=None, *, events=None):
         message = message.strip()
         if not message:
             raise ValueError("请输入需求。")
@@ -253,10 +254,20 @@ class AgentService:
             session.history.append({"role": "user", "content": message})
             session.messages.append({"role": "user", "content": message})
             self.persist(session)
-            reply = self._run(session)
+            if events:
+                events.emit("session", session_id=session.session_id)
+                events.emit("phase", message="已保存需求，正在读取上下文。")
+            reply = self._run(session, events=events)
             session.history.append({"role": "assistant", "content": reply})
             session.messages.append({"role": "assistant", "content": reply})
             return self.snapshot(session)
+        except (AgentUnavailableError, AgentStreamStopped):
+            if events and not session.persistence_failed:
+                self._close_interrupted_calls(session)
+                partial = events.draft[:10000] + "\n\n答复未完成，请载入原会话核对已取得结果。"
+                session.history.append({"role": "assistant", "content": partial})
+                session.messages.append({"role": "assistant", "content": partial})
+            raise
         finally:
             try:
                 if not session.persistence_failed:
@@ -264,7 +275,35 @@ class AgentService:
             finally:
                 session.lock.release()
 
-    def plan(self, message, session_id=None):
+    @staticmethod
+    def _close_interrupted_calls(session):
+        """Pair registered calls without replaying an unrecorded operation."""
+        answered = set()
+        for item in reversed(session.history):
+            if item["role"] == "tool":
+                answered.add(item["tool_call_id"])
+                continue
+            for call in item.get("tool_calls", []):
+                if call["id"] not in answered:
+                    session.history.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": json.dumps(
+                                {
+                                    "interrupted": True,
+                                    "execution_status": "unverified",
+                                    "reason": (
+                                        "响应中断，此调用没有已记录结果；不能视作成功，不会重放。"
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    )
+            break
+
+    def plan(self, message, session_id=None, *, events=None):
         message = message.strip()
         if not message or len(message) > 4000:
             raise ValueError("请输入不超过4000字的研究需求。")
@@ -284,6 +323,9 @@ class AgentService:
             session.history.append({"role": "user", "content": message})
             # Invalidate the previous approval before any slow provider call (cross-process CAS).
             self.persist(session)
+            if events:
+                events.emit("session", session_id=session.session_id)
+                events.emit("phase", message="正在整理计划；本阶段不会调用业务工具。")
             messages = list(session.messages)
             if len(json.dumps(messages, ensure_ascii=False).encode()) > 48000:
                 raise AgentConflictError("计划上下文已达上限，请新建对话。")
@@ -293,8 +335,10 @@ class AgentService:
             previous = session.plans[-1].model_dump(mode="json") if session.plans else None
             context = SkillContext(self.skills, message)
             draft, missing = generate_draft(
-                self.client, messages, memories, previous, skill_context=context
+                self.client, messages, memories, previous, skill_context=context, events=events
             )
+            if events:
+                events.check()
             now = self.clock()
             plan = AgentPlanRead(
                 **draft.model_dump(),
@@ -312,11 +356,25 @@ class AgentService:
             if len(plan.model_dump_json().encode()) > MAX_PLAN_BYTES + 4096:
                 raise AgentConflictError("计划和缺失输入超过容量上限，请缩小需求。")
             session.plans.append(plan)
-            reply = (
-                "计划需要补充明确参数，请查看补问和缺失输入。批准前不会调用业务工具。"
-                if plan.status == "needs_input"
-                else "已生成可审阅计划。请核对目标、参数、依赖和完成条件；批准计划不会执行。"
-            )
+            if plan.status == "needs_input":
+                questions = list(
+                    dict.fromkeys([*plan.clarification_questions, *plan.missing_inputs])
+                )
+                reply = (
+                    "这次计划还需要以下信息：\n"
+                    + "\n".join(
+                        f"{index + 1}. {question}" for index, question in enumerate(questions)
+                    )
+                    + "\n补齐后可重新规划；当前没有执行业务工具。"
+                )
+            else:
+                reply = (
+                    f"已生成计划：{plan.goal}\n"
+                    + "\n".join(
+                        f"{index + 1}. {step.purpose}" for index, step in enumerate(plan.steps)
+                    )
+                    + "\n请审阅后批准。批准只保存计划，运行与写入确认另行进行。"
+                )
             session.messages.append({"role": "assistant", "content": reply})
             session.history.append({"role": "assistant", "content": reply})
             self.persist(session)
@@ -358,7 +416,7 @@ class AgentService:
         finally:
             session.lock.release()
 
-    def _run(self, session):
+    def _run(self, session, *, events=None):
         from app.services.agent_result_evidence import execution_context
 
         context = SkillTurn(
@@ -396,6 +454,12 @@ class AgentService:
             "重复相同查询不会重新执行；无法补齐就说明未完成和需补充的参数。"
             "技能流程不生成写预览，需要写入则提出新计划。结束前verify_skill，"
             "材料齐备只表示可以解读，不代表研究目标达成。"
+            "全局数据诊断可直接读取operations_overview和quality_issues，"
+            "symbol和日期不是这两项全局检查的必填参数；别为可选下钻或以后修复阻塞当前查询。"
+            "概览未提供完整市场覆盖率时明确说明未核验，不能由问题数推断覆盖达标。"
+            "全局检查默认只看10条样本，不自行挑选用户未指定的证券下钻。"
+            "答复默认不超过1000字，提炼事实、缺失、推断及最多3项下一步建议，勿倾倒工具原文。"
+            "工具失败只说明返回的错误，不猜失败原因；不得把参数校验失败解释为证券不受支持。"
         )
         definitions = (
             tool_definitions() + skill_tool_definitions() + [verification_tool_definition()]
@@ -416,18 +480,40 @@ class AgentService:
                     ensure_ascii=False,
                 )
             )
-        for _ in range(settings.agent_max_steps):
+        for round_index in range(settings.agent_max_steps):
             if len(json.dumps(session.history)) > 80000:
                 return "上下文达到上限，请查看工具结果并新建对话继续。"
             try:
-                response = self.client.complete(
-                    [{"role": "system", "content": prompt}, *history], definitions
-                )
+                request = [{"role": "system", "content": prompt}, *history]
+                if events:
+                    events.check()
+                    events.draft = ""
+                    events.emit(
+                        "round", round=round_index + 1, message="正在判断下一步并组织答复。"
+                    )
+                if events and callable(getattr(self.client, "stream_complete", None)):
+
+                    def on_text(text):
+                        events.draft += text
+                        events.emit("text", text=text)
+
+                    response = self.client.stream_complete(
+                        request, definitions, on_text=on_text, check=events.check
+                    )
+                else:
+                    response = self.client.complete(request, definitions)
+                    if events and response.get("content"):
+                        events.draft = response["content"]
+                        events.emit("text", text=response["content"])
             except AgentUnavailableError:
                 session.skill_checks = (session.skill_checks + context.finish())[-8:]
+                if events:
+                    raise
                 if session.steps:
                     return "模型暂不可用；已取得的工具结果和待确认提案保留在下方，请稍后重试。"
                 raise
+            if events:
+                events.check()
             calls = response.get("tool_calls") or []
             content = response.get("content") or ""
             if not isinstance(content, str) or len(content) > 10000:
@@ -456,7 +542,9 @@ class AgentService:
                 function = call["function"]
                 if (
                     not isinstance(call.get("id"), str)
+                    or not call["id"]
                     or len(call["id"]) > 100
+                    or any(item["id"] == call["id"] for item in clean_calls)
                     or not isinstance(function.get("name"), str)
                     or not isinstance(function.get("arguments"), str)
                     or len(function["arguments"]) > 12000
@@ -469,6 +557,9 @@ class AgentService:
                         "function": {"name": function["name"], "arguments": function["arguments"]},
                     }
                 )
+            if events:
+                events.draft = ""
+                events.emit("draft_reset", message="正在查询工具；此前文字为过程草稿。")
             session.history.append(
                 {"role": "assistant", "content": content, "tool_calls": clean_calls}
             )
@@ -478,12 +569,20 @@ class AgentService:
                 name = call["function"]["name"]
                 spec = TOOLS.get(name)
                 try:
+                    if events:
+                        events.check()
                     if name in CONTEXT_TOOLS:
                         result = context.dispatch(name, json.loads(call["function"]["arguments"]))
+                        if events:
+                            events.emit("progress", tool=name, message="已加载技能方法或参考资料。")
                     elif name == "verify_skill":
                         result = context.verify(
                             json.loads(call["function"]["arguments"])
                         ).model_dump(mode="json")
+                        if events:
+                            events.emit(
+                                "progress", tool=name, message="已核查本轮材料。", result=result
+                            )
                     elif spec is None:
                         raise ValueError("工具不在允许清单")
                     elif pending:
@@ -492,6 +591,14 @@ class AgentService:
                         args = spec.arguments.model_validate_json(
                             call["function"]["arguments"]
                         ).model_dump(mode="json")
+                        if events:
+                            events.emit(
+                                "tool_start",
+                                tool=name,
+                                title=spec.title,
+                                parameters=args,
+                                message=f"正在{'预检' if spec.writes else '查询'}：{spec.title}",
+                            )
                         if spec.writes:
                             if context.loaded:
                                 raise ValueError("技能只读检查不能产生写预览，请先生成新计划。")
@@ -527,6 +634,8 @@ class AgentService:
                                 if context.loaded:
                                     context.read_cache[key] = result
                             context.observe(name, args, result)
+                except AgentStreamStopped:
+                    raise
                 except (ValidationError, ValueError) as exc:
                     # Validation errors must not echo arbitrary model arguments.
                     result = {
@@ -574,6 +683,16 @@ class AgentService:
                         "content": json.dumps(transient_result, ensure_ascii=False),
                     }
                 )
+                if events:
+                    events.emit(
+                        "tool_end",
+                        tool=name,
+                        title=spec.title if spec else name,
+                        result=result,
+                        message="工具返回失败。"
+                        if isinstance(result, dict) and result.get("error")
+                        else "工具调用已返回，结果仍需核查。",
+                    )
             if pending:
                 if not settings.agent_write_enabled:
                     return (

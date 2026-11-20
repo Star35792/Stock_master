@@ -1,4 +1,5 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.repositories.agent import AgentStateConflict
 from app.schemas.agent import (
@@ -12,6 +13,7 @@ from app.schemas.agent_planning import AgentPlanDecision
 from app.schemas.agent_recovery import AgentRecoveryRequest
 from app.services.agent import AgentConflictError, AgentNotFoundError, AgentService
 from app.services.agent_plan_recovery import AgentPlanRecoveryService
+from app.services.agent_stream import AgentStream
 from app.services.deepseek import AgentUnavailableError
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -80,6 +82,26 @@ def agent_chat(payload: AgentChatRequest):
         return service.chat(payload.message, payload.session_id)
     except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
         raise _http_error(exc) from None
+
+
+@router.post("/chat/stream")
+def agent_chat_stream(payload: AgentChatRequest, request: Request):
+    stream = AgentStream()
+    return StreamingResponse(
+        stream.frames(request.is_disconnected, service.chat, payload.message, payload.session_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/plans/stream")
+def agent_plan_stream(payload: AgentChatRequest, request: Request):
+    stream = AgentStream()
+    return StreamingResponse(
+        stream.frames(request.is_disconnected, service.plan, payload.message, payload.session_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/plans", response_model=AgentSessionRead)

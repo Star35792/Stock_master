@@ -13,7 +13,10 @@ import {
   type AgentTask,
 } from "../agentApi";
 
+import { streamAgentRequest, type AgentStreamEvent } from "../agentStream";
+
 const defaultDeps = {
+  streamAgentRequest,
   createAgentPlan, decideAgentPlan, controlAgentPlan, recoverAgentPlanStep,
   fetchAgentStatus, fetchAgentSession, fetchAgentTask, sendAgentMessage, decideAgentAction,
   fetchAgentSessions, fetchAgentMemories, saveAgentMemory, deleteAgentMemory,
@@ -25,7 +28,14 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   const status = ref<Awaited<ReturnType<typeof fetchAgentStatus>> | null>(null);
   const tasks = ref<Record<number, AgentTask>>({});
   const input = ref("");
-  const mode = ref<"plan" | "chat">("plan");
+  const mode = ref<"plan" | "chat">("chat");
+  const streamEvents = ref<AgentStreamEvent[]>([]);
+  const draft = ref("");
+  const pendingMessage = ref("");
+  const streamIncomplete = ref(false);
+  const connected = ref(false);
+  let streamSessionId: string | null = null;
+  let streamController: AbortController | null = null;
   const plansNeedReload = ref(false);
   const busy = ref(false);
   const executionBusy = ref(false);
@@ -66,11 +76,13 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     if (busy.value || disposed) return;
     const epoch = ++generation;
     loading.value = true;
+    connected.value = false;
     error.value = null;
     try {
       const value = await deps.fetchAgentStatus();
       if (disposed || epoch !== generation) return;
       status.value = value;
+      connected.value = true;
       const [savedSessions, savedMemories] = await Promise.all([deps.fetchAgentSessions(), deps.fetchAgentMemories()]);
       if (disposed || epoch !== generation) return;
       sessions.value = savedSessions;
@@ -79,6 +91,8 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
       try { saved = sessionStorage.getItem(storageKey); } catch { /* memory-only mode */ }
       if (saved && !disposed) {
         saveSession(await deps.fetchAgentSession(saved), epoch);
+        pendingMessage.value = "";
+        draft.value = "";
         if (disposed || epoch !== generation) return;
         await refreshTasks();
       }
@@ -91,20 +105,53 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     const text = message.trim();
     if (busy.value || loading.value || !text || !status.value?.configured || disposed) return;
     busy.value = true;
+    const epoch = ++generation;
     error.value = null;
+    pendingMessage.value = text;
+    draft.value = "";
+    streamEvents.value = [];
+    streamIncomplete.value = false;
+    streamController = new AbortController();
     if (requestMode === "plan") plansNeedReload.value = true;
     try {
-      const submit = requestMode === "plan" ? deps.createAgentPlan : deps.sendAgentMessage;
-      saveSession(await submit(text, session.value?.session_id ?? null));
+      const value = await deps.streamAgentRequest(requestMode, text, session.value?.session_id ?? streamSessionId, event => {
+        if (disposed || epoch !== generation) return;
+        if (event.type === "session" && event.session_id) {
+          streamSessionId = event.session_id;
+          input.value = "";
+          try { sessionStorage.setItem(storageKey, event.session_id); } catch { /* memory-only mode */ }
+        }
+        if (event.type === "round" || event.type === "draft_reset") draft.value = "";
+        if (event.type === "text" && typeof event.text === "string") draft.value += event.text;
+        else if (!["session", "done"].includes(event.type)) streamEvents.value = [...streamEvents.value, event].slice(-40);
+      }, streamController.signal);
+      if (disposed || epoch !== generation) return;
+      saveSession(value, epoch);
+      pendingMessage.value = "";
+      draft.value = "";
       input.value = "";
       await refreshTasks();
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : "智能体请求失败";
-      if (requestMode === "plan" && session.value) {
-        try { saveSession(await deps.fetchAgentSession(session.value.session_id)); }
+      if (disposed || epoch !== generation) return;
+      streamIncomplete.value = true;
+      error.value = streamController?.signal.aborted ? "已停止接收；请载入原会话核对已开始的查询。" : cause instanceof Error ? cause.message : "智能体请求失败";
+      const knownId = streamSessionId ?? session.value?.session_id;
+      if (requestMode === "plan" && knownId) {
+        try {
+          const restored = await deps.fetchAgentSession(knownId);
+          if (disposed || epoch !== generation) return;
+          saveSession(restored, epoch);
+          pendingMessage.value = "";
+          draft.value = "";
+        }
         catch { /* Keep approvals disabled until an explicit reload succeeds. */ }
       }
-    } finally { busy.value = false; }
+    } finally { if (!disposed && epoch === generation) { busy.value = false; streamController = null; } }
+  }
+
+  function stopResponse() {
+    streamIncomplete.value = true;
+    streamController?.abort();
   }
 
   async function decide(actionId: string, decision: "confirm" | "cancel") {
@@ -181,6 +228,11 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     error.value = null;
     input.value = "";
     tasks.value = {};
+    streamSessionId = null;
+    pendingMessage.value = "";
+    draft.value = "";
+    streamEvents.value = [];
+    streamIncomplete.value = false;
     try { sessionStorage.removeItem(storageKey); } catch { /* memory-only mode */ }
   }
 
@@ -191,6 +243,11 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     error.value = null;
     try {
       saveSession(await deps.fetchAgentSession(id), epoch);
+      pendingMessage.value = "";
+      draft.value = "";
+      streamEvents.value = [];
+      streamIncomplete.value = false;
+      streamSessionId = id;
       if (epoch === generation && !disposed) { tasks.value = {}; await refreshTasks(); }
     } catch (cause) {
       if (epoch === generation && !disposed) error.value = cause instanceof Error ? cause.message : "会话恢复失败";
@@ -217,5 +274,5 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     finally { busy.value = false; }
   }
 
-  return { session, status, tasks, input, mode, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; } };
+  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; streamController?.abort(); } };
 }

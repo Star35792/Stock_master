@@ -209,7 +209,9 @@ def validate_draft(raw: str, user_messages: list[str]) -> tuple[AgentPlanDraft, 
     return draft, list(dict.fromkeys(missing))
 
 
-def generate_draft(client, messages, memories, previous_plan=None, *, skill_context=None):
+def generate_draft(
+    client, messages, memories, previous_plan=None, *, skill_context=None, events=None
+):
     from app.services.agent_skills import CONTEXT_TOOLS, skill_tool_definitions
 
     catalog = {
@@ -234,6 +236,9 @@ def generate_draft(client, messages, memories, previous_plan=None, *, skill_cont
         "clarification_questions=['请提供book_id']；只规划用户要求的必要步骤，别加入可选扩展。"
         "解释不是第二次查询，不要为解读重复读取相同参数；技能材料核验由服务器执行，"
         "不作为业务计划步骤，也不要把技能写作参数来源或业务事实来源。"
+        "只把阻止当前必要步骤的缺参写入clarification_questions。"
+        "全局operations_overview/quality_issues不要求证券和日期，"
+        "可选的证券下钻、以后修复所需证券/日期不能阻断当前只读诊断，也不要写成必需补问。"
         "默认top_n=10等默认选择须写假设。依赖为DAG；绑定仅task_id/run_id，"
         "只能引用依赖步骤的白名单输出，不准SQL、URL、文件路径或表达式。"
         "回测只单因子研究，保留费用/时点/资格闸门；组合只能从成功回测生成零现仓假设草案。"
@@ -251,7 +256,12 @@ def generate_draft(client, messages, memories, previous_plan=None, *, skill_cont
         definitions += skill_tool_definitions()
     repaired = False
     for _ in range(8):
+        if events:
+            events.check()
+            events.emit("phase", message="模型正在整理目标、必要参数与步骤。")
         response = client.complete(request, definitions, max_tokens=4096)
+        if events:
+            events.check()
         calls = response.get("tool_calls")
         if not isinstance(calls, list) or len(calls) != 1 or not isinstance(calls[0], dict):
             raise AgentUnavailableError("模型未提交唯一结构化计划，请补充需求后重试。")
@@ -265,6 +275,10 @@ def generate_draft(client, messages, memories, previous_plan=None, *, skill_cont
                 result = skill_context.dispatch(
                     function["name"], json.loads(function.get("arguments", ""))
                 )
+                if events:
+                    events.emit(
+                        "progress", tool=function["name"], message="已加载计划所需技能资料。"
+                    )
             except (ValueError, OSError, TypeError):
                 raise AgentUnavailableError("技能加载失败，请检查发布包或明确技能名称。") from None
             call_id = calls[0].get("id") or f"skill_{skill_context.calls}"

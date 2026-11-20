@@ -1,23 +1,28 @@
 <script setup lang="ts">
 import AgentSkillPanel from "../components/AgentSkillPanel.vue";
 import { Bot, RefreshCw, Send, Sparkles } from "@lucide/vue";
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { createAgentWorkspace } from "../composables/agentWorkspace";
 import AgentPlanPanel from "../components/AgentPlanPanel.vue";
 import type { AgentMemory } from "../agentApi";
 
-const { session, status, tasks, input, mode, plansNeedReload, busy, executionBusy, loading, error, taskError, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose } = createAgentWorkspace();
+const { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose } = createAgentWorkspace();
 const memoryText = ref("");
+const messagePane = ref<HTMLElement | null>(null);
+watch([draft, pendingMessage, () => session.value?.messages.length], async () => {
+  await nextTick();
+  messagePane.value?.scrollTo({ top: messagePane.value.scrollHeight });
+});
 const memoryKind = ref<"preference" | "constraint" | "lesson">("preference");
 const editingMemory = ref<AgentMemory | null>(null);
 function editMemory(memory: AgentMemory) { editingMemory.value = memory; memoryKind.value = memory.kind; memoryText.value = memory.content; }
 function clearMemoryForm() { editingMemory.value = null; memoryText.value = ""; }
 async function saveMemory() { if (await remember(memoryKind.value, memoryText.value, editingMemory.value ?? undefined)) clearMemoryForm(); }
 const examples = [
-  "检查数据覆盖和未解决的质量问题，给我下一步处理建议",
-  "查询最近的研究回测，解释结果和仍未解决的数据资格限制",
-  "帮我规划日线采集、缺口回填、因子研究和组合草案的流程，缺参数先问我",
+  { text: "检查数据覆盖和未解决的质量问题，给我下一步处理建议", mode: "chat" as const },
+  { text: "查询最近的研究回测，解释结果和仍未解决的数据资格限制", mode: "chat" as const },
+  { text: "帮我规划日线采集、缺口回填、因子研究和组合草案的流程，缺参数先问我", mode: "plan" as const },
 ];
 const labels: Record<string, string> = { starting: "创建结果待核实", pending: "等待确认", confirmed: "已确认", cancelled: "已取消", expired: "已过期", queued: "已排队", running: "执行中", success: "成功", partial: "部分完成", failed: "失败" };
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
@@ -37,8 +42,8 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
     </header>
 
     <div class="agent-connection" role="status">
-      <span class="agent-dot" :class="{ ready: status?.configured }" />
-      <strong>{{ loading ? "连接中" : status?.configured ? `${status.model} · 已配置` : "DeepSeek 尚未配置" }}</strong>
+      <span class="agent-dot" :class="{ ready: connected && status?.configured }" />
+      <strong>{{ loading ? "正在连接后端" : !connected ? "后端尚未连接" : status?.configured ? `后端已连接 · ${status.model} 已配置` : "后端已连接 · DeepSeek 尚未配置" }}</strong>
       <span>需求与有界对话会发送给 DeepSeek；计划批准与业务执行分开。</span>
       <button :disabled="loading || busy" class="agent-icon" aria-label="重新连接智能体" @click="load"><RefreshCw :size="16" /></button>
     </div>
@@ -49,17 +54,24 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 
     <div class="agent-grid">
       <section class="agent-conversation" aria-label="研究对话">
-        <div v-if="!session?.messages.length" class="agent-welcome">
+        <div v-if="!session?.messages.length && !pendingMessage" class="agent-welcome">
           <div class="agent-bot"><Bot :size="30" /></div><h2>你希望完成什么研究？</h2>
-          <p>先明确目标和缺失参数，再展示供你审阅的计划。需要现有事实时可切换“查询与解释”。</p>
-          <button v-for="example in examples" :key="example" :disabled="busy || !status?.configured" @click="input = example">{{ example }} <span>↗</span></button>
+          <p>直接查询现有可信数据，实时查看工具过程和答复。需要采集、回测等写入操作时再选择“先规划”。</p>
+          <button v-for="example in examples" :key="example.text" :disabled="busy || !status?.configured" @click="input = example.text; mode = example.mode">{{ example.text }} <span>↗</span></button>
         </div>
-        <div v-else class="agent-messages" aria-live="polite">
-          <article v-for="(message, index) in session.messages" :key="index" :class="['agent-message', message.role]">
+        <div v-else ref="messagePane" class="agent-messages" aria-live="polite">
+          <article v-for="(message, index) in session?.messages ?? []" :key="index" :class="['agent-message', message.role]">
             <strong>{{ message.role === 'user' ? '你' : '研究智能体' }}</strong><p>{{ message.content }}</p>
           </article>
+          <article v-if="pendingMessage" class="agent-message user"><strong>你</strong><p>{{ pendingMessage }}</p></article>
+          <article v-if="draft" class="agent-message assistant"><strong>{{ streamIncomplete ? '未完成答复 · 请载入原会话核对' : '研究智能体 · 正在输出' }}</strong><p>{{ draft }}</p></article>
         </div>
-        <p v-if="busy" role="status" class="agent-working">正在处理，请稍候……</p>
+        <section v-if="streamEvents.length" class="agent-process" aria-label="本次处理过程">
+          <strong>{{ streamIncomplete ? '本次响应未完成' : busy ? '正在处理' : '本次处理过程' }}</strong>
+          <ol><li v-for="(event, index) in streamEvents" :key="index"><span>{{ event.message ?? event.title ?? event.tool }}</span><details v-if="event.parameters || event.result"><summary>参数与有界结果</summary><pre>{{ pretty(event.parameters ?? event.result) }}</pre></details></li></ol>
+        </section>
+        <p v-if="busy && pendingMessage" role="status" class="agent-working">正在接收实时过程与答复…… <button type="button" class="agent-secondary" @click="stopResponse">停止接收</button></p>
+        <p v-if="streamIncomplete" class="agent-working">未完成的文字仅作草稿。停止接收不代表已取消查询；载入原会话不会重发请求。 <button type="button" class="agent-secondary" :disabled="busy || loading" @click="load">载入原会话</button></p>
         <form class="agent-composer" @submit.prevent="send()">
           <div class="agent-mode"><label for="agent-mode">处理方式</label><select id="agent-mode" v-model="mode" :disabled="busy || loading"><option value="plan">先规划</option><option value="chat">查询与解释</option></select></div>
           <label for="agent-input">研究需求</label>
@@ -106,6 +118,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 </template>
 
 <style scoped>
+.agent-process { margin: 0 24px 16px; padding: 12px 16px; background: #f5f8ff; border: 1px solid #e0e6f0; border-radius: 8px; font-size: 12px; color: #52617a; }.agent-process ol { margin-bottom: 0; padding-left: 20px; max-height: 220px; overflow: auto; }.agent-process li { padding: 4px 0; line-height: 1.6; }
 .agent-composer .agent-mode { justify-content: flex-start; margin-bottom: 12px; }.agent-mode label { margin: 0; }.agent-mode select { font: inherit; font-size: 12px; padding: 7px; border: 1px solid #dfe5ef; border-radius: 6px; color: #52617a; background: white; }
 .agent-history { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; font-size: 13px; color: #63718a; }.agent-history select { max-width: 70%; padding: 8px; border: 1px solid #dfe5ef; border-radius: 6px; }.agent-memory-form { display: grid; gap: 8px; }.agent-memory-form textarea, .agent-memory-form select { font: inherit; font-size: 12px; border: 1px solid #dfe5ef; border-radius: 6px; padding: 8px; width: 100%; }.agent-memory p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }.agent-memory { border-top: 1px solid #edf0f5; margin-top: 12px; padding-top: 4px; }
 .agent-page { max-width: 1600px; margin: 0 auto; padding: 30px; color: #1d293d; }

@@ -17,7 +17,7 @@ const session = (id = "session-1") => ({
 });
 
 function workspace(overrides = {}) {
-  const state = createAgentWorkspace({
+  const dependencies = {
     createAgentPlan: async () => session(),
     fetchAgentStatus: async () => ({ configured: true, model: "test", tools: [] }),
     fetchAgentSession: async id => session(id),
@@ -29,7 +29,9 @@ function workspace(overrides = {}) {
     sendAgentMessage: async () => session(),
     decideAgentAction: async () => ({ ...session(), actions: [{ ...session().actions[0], status: "confirmed", task_id: 71 }] }),
     ...overrides,
-  });
+  };
+  dependencies.streamAgentRequest ??= async (mode, message, id) => (mode === "plan" ? dependencies.createAgentPlan : dependencies.sendAgentMessage)(message, id);
+  const state = createAgentWorkspace(dependencies);
   state.mode.value = "chat";
   return state;
 }
@@ -39,8 +41,8 @@ const planSession = (status = "draft", version = 1) => ({ ...session(), actions:
   missing_inputs: status === "needs_input" ? ["book_id"] : [], clarification_questions: [],
 }] });
 
-test("planning is the default and does not dispatch legacy chat or confirmation", async () => {
-  expect(createAgentWorkspace().mode.value).toBe("plan");
+test("queries are the default and explicit planning remains separate", async () => {
+  expect(createAgentWorkspace().mode.value).toBe("chat");
   let plans = 0;
   let chats = 0;
   const state = workspace({ createAgentPlan: async () => { plans += 1; return planSession(); }, sendAgentMessage: async () => { chats += 1; return session(); } });
