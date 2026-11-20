@@ -66,6 +66,8 @@
 
 智能体第一阶段（2026-11-19）：`database/agent_base.py` / `agent_session.py` 与 `models/agent.py` 定义独立 SQLite `agent.db`，`repositories/agent.py` 负责有界会话与记忆的读写和 CAS，`services/agent_state.py` 负责短事务，`services/agent.py` 保存/恢复对话和确认检查点。`deepseek.py` 仅模型传输，`agent_tools.py` 适配既有 service。前端 `/agent` 可恢复会话和显式管理记忆。写执行默认关闭；完整范围以[整体计划](../plans/20261119-1049-agent-overall-plan-and-sqlite.md)为准。
 
+研究分支由 `AgentService.fork` 从已保存公开消息构建，`agent_context.py` 为查询和规划按完整用户轮次选取最近上下文。前端 `AgentPage.vue` 提供分支操作、来源跳转和窗口提示，`agentWorkspace.ts` 管理当前浏览器会话内的分支草稿。
+
 智能体第四阶段：services/agent_read_recovery.py承接执行器的只读CAS重试钩子；services/agent_plan_recovery.py提供原确认受控核验；services/agent_recovery.py与repositories/agent_recovery.py负责有限错误分类、精确任务/产物查询和首次研究落库身份绑定。前端AgentRecoveryEvidence.vue展示失败与已有产物，核验不重放。见[阶段四决定](../plans/20261119-1448-agent-recovery-and-evidence.md)。
 
 第二阶段：`schemas/agent_planning.py` 定义意图/步骤/有限绑定/批准合同，`services/agent_planning.py` 只生成与校验计划，`AgentService.plan/decide_plan` 负责版本/哈希/CAS。`AgentPlanPanel.vue` 与 `agentWorkspace.ts` 接入补问、审阅、批准/拒绝和恢复；批准不创建任务。计划存原会话 JSON，无新增表，见[阶段2决定](../plans/20261119-1405-agent-reviewable-plans.md)。

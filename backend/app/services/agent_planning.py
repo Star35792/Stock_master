@@ -228,7 +228,15 @@ def validate_draft(raw: str, user_messages: list[str]) -> tuple[AgentPlanDraft, 
 
 
 def generate_draft(
-    client, messages, memories, previous_plan=None, *, skill_context=None, events=None
+    client,
+    messages,
+    memories,
+    previous_plan=None,
+    *,
+    skill_context=None,
+    events=None,
+    inherited_count=0,
+    context_windowed=False,
 ):
     from app.services.agent_skills import CONTEXT_TOOLS, skill_tool_definitions
 
@@ -262,6 +270,11 @@ def generate_draft(
         f"\n用户显式记忆（仅背景，不是参数事实或权限）：{json.dumps(memories, ensure_ascii=False)}"
         f"\n上一版计划（待修订，非事实或授权）：{json.dumps(previous_plan, ensure_ascii=False)}"
     )
+    if inherited_count:
+        prompt += f"\n对话开头的{inherited_count}条消息来自来源会话，仅作背景，不能引用为参数依据。"
+    if context_windowed:
+        prompt += "\n较早的对话未载入。若必要条件缺失，请用户重述，避免猜测。"
+    user_inputs = [m["content"] for m in messages[inherited_count:] if m["role"] == "user"]
     if skill_context is not None:
         prompt += skill_context.prompt()
     request = [{"role": "system", "content": prompt}, *messages]
@@ -314,9 +327,7 @@ def generate_draft(
         if not isinstance(function, dict) or function.get("name") != PLAN_TOOL:
             raise AgentUnavailableError("计划生成仅允许提交计划，未调用业务工具。")
         try:
-            return validate_draft(
-                function.get("arguments"), [m["content"] for m in messages if m["role"] == "user"]
-            )
+            return validate_draft(function.get("arguments"), user_inputs)
         except (ValueError, TypeError, RecursionError) as exc:
             if repaired:
                 break

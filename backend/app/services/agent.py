@@ -12,11 +12,12 @@ from zoneinfo import ZoneInfo
 from pydantic import ValidationError
 
 from app.config.settings import settings
-from app.repositories.agent import AgentStateConflict
-from app.schemas.agent import AgentActionRead, AgentSessionRead
+from app.repositories.agent import MAX_SESSION_BYTES, AgentStateConflict
+from app.schemas.agent import AgentActionRead, AgentForkOrigin, AgentSessionRead
 from app.schemas.agent_execution import AgentPlanExecution
 from app.schemas.agent_planning import AgentPlanRead
 from app.schemas.agent_skills import AgentSkillVerification
+from app.services.agent_context import HISTORY_BYTES, context_size, recent_turns
 from app.services.agent_errors import AgentConflictError, AgentNotFoundError
 from app.services.agent_execution import AgentExecutionService, Proposal
 from app.services.agent_planning import (
@@ -41,6 +42,8 @@ from app.services.agent_stream import AgentStreamStopped
 from app.services.agent_tools import TOOLS, AgentTools, json_ready, tool_definitions
 from app.services.agent_write_policy import write_enabled
 from app.services.deepseek import AgentUnavailableError, DeepSeekClient
+
+MAX_PUBLIC_MESSAGES = 60
 
 
 def bounded_result(value: Any) -> Any:
@@ -69,6 +72,21 @@ class Conversation:
     executions: dict[str, AgentPlanExecution] = field(default_factory=dict)
     skill_checks: list[AgentSkillVerification] = field(default_factory=list)
     lock: Any = field(default_factory=Lock)
+    forked_from: AgentForkOrigin | None = None
+
+    @property
+    def inherited_count(self) -> int:
+        return self.forked_from.message_index if self.forked_from else 0
+
+    def user_inputs(self, *, visible_users: int) -> list[str]:
+        own_messages = self.messages[self.inherited_count :]
+        inputs = [item["content"] for item in own_messages if item["role"] == "user"]
+        return inputs[-visible_users:] if visible_users else []
+
+
+def fork_origin(saved: dict) -> AgentForkOrigin | None:
+    origin = saved.get("forked_from")
+    return AgentForkOrigin.model_validate(origin) if origin else None
 
 
 class AgentService:
@@ -123,6 +141,7 @@ class AgentService:
                         session_id,
                         now + 1800,
                         revision=saved["revision"],
+                        forked_from=fork_origin(saved),
                         history=saved.get("history", []),
                         messages=saved.get("messages", []),
                         skill_checks=[
@@ -161,6 +180,7 @@ class AgentService:
         if saved is None:
             raise AgentNotFoundError("会话不存在，请重新载入。")
         session.revision = saved["revision"]
+        session.forked_from = fork_origin(saved)
         session.history = saved.get("history", [])
         session.messages = saved.get("messages", [])
         session.steps = saved.get("steps", [])
@@ -185,9 +205,14 @@ class AgentService:
         state = {
             "session_id": session.session_id,
             "revision": session.revision,
-            "title": next(
-                (row["content"][:60] for row in session.messages if row["role"] == "user"),
-                "研究对话",
+            "title": ("分支 · " if session.forked_from else "")
+            + next(
+                (
+                    row["content"][:60]
+                    for row in session.messages[session.inherited_count :]
+                    if row["role"] == "user"
+                ),
+                "待发送" if session.forked_from else "研究对话",
             ),
             "history": session.history,
             "messages": session.messages,
@@ -206,6 +231,13 @@ class AgentService:
                 for key, action in session.actions.items()
             },
         }
+        if session.forked_from:
+            state["forked_from"] = session.forked_from.model_dump()
+            overflow = context_size(state) - MAX_SESSION_BYTES
+            if overflow > 0:
+                state["history"] = recent_turns(
+                    session.history, context_size(session.history) - overflow
+                )
         try:
             session.revision = self.store.save(state)
         except Exception as exc:
@@ -239,6 +271,7 @@ class AgentService:
             plans=[plan.model_copy(deep=True) for plan in session.plans],
             executions=[item.model_copy(deep=True) for item in session.executions.values()],
             skill_checks=[item.model_copy(deep=True) for item in session.skill_checks],
+            forked_from=session.forked_from,
         )
 
     def get(self, session_id):
@@ -256,20 +289,42 @@ class AgentService:
         finally:
             session.lock.release()
 
+    def fork(self, session_id: str, message_index: int) -> AgentSessionRead:
+        # A single committed, append-only public prefix. The source never changes here.
+        saved = self.store.load(session_id)
+        if saved is None:
+            raise AgentNotFoundError("来源会话不存在，请重新载入历史对话。")
+        messages = saved.get("messages", [])
+        if not 0 <= message_index < len(messages) or messages[message_index]["role"] != "user":
+            raise ValueError("请选择一条已保存的用户消息作为分支起点。")
+        prefix = messages[:message_index]
+        branch = Conversation(
+            token_urlsafe(24),
+            self.clock() + 1800,
+            messages=prefix,
+            history=recent_turns(prefix),
+            forked_from=AgentForkOrigin(session_id=session_id, message_index=message_index),
+        )
+        self.persist(branch)
+        return self.snapshot(branch)
+
     def chat(self, message, session_id=None, *, events=None):
         message = message.strip()
-        if not message:
-            raise ValueError("请输入需求。")
+        if not message or len(message) > 4000:
+            raise ValueError("请输入不超过4000字的研究需求。")
         session = self.conversation(session_id)
         if not session.lock.acquire(blocking=False):
             raise AgentConflictError("此会话正在处理请求，请稍后重试。")
+        accepted = False
         try:
-            if len(session.history) >= 60 or len(json.dumps(session.history)) > 60000:
-                raise AgentConflictError("此会话已达到上下文上限，请新建对话。")
+            if len(session.messages) - session.inherited_count + 2 > MAX_PUBLIC_MESSAGES:
+                raise AgentConflictError("此会话已达到消息上限，请从历史提问建立分支或新建对话。")
             self.snapshot(session)
             session.history.append({"role": "user", "content": message})
             session.messages.append({"role": "user", "content": message})
+            session.history = recent_turns(session.history)
             self.persist(session)
+            accepted = True
             if events:
                 events.emit("session", session_id=session.session_id)
                 events.emit("phase", message="已保存需求，正在读取上下文。")
@@ -278,15 +333,19 @@ class AgentService:
             session.messages.append({"role": "assistant", "content": reply})
             return self.snapshot(session)
         except (AgentUnavailableError, AgentStreamStopped):
-            if events and not session.persistence_failed:
+            if not session.persistence_failed:
                 self._close_interrupted_calls(session)
+            if events and not session.persistence_failed:
                 partial = events.draft[:10000] + "\n\n答复未完成，请载入原会话核对已取得结果。"
                 session.history.append({"role": "assistant", "content": partial})
                 session.messages.append({"role": "assistant", "content": partial})
             raise
         finally:
             try:
-                if not session.persistence_failed:
+                if accepted and not session.persistence_failed:
+                    session.history = recent_turns(session.history) or recent_turns(
+                        session.messages
+                    )
                     self.persist(session)
             finally:
                 session.lock.release()
@@ -329,35 +388,48 @@ class AgentService:
         try:
             if len(session.plans) >= MAX_PLANS:
                 raise AgentConflictError("本会话已保留4版计划，请新建对话；旧计划与批准记录保留。")
-            if len(session.messages) >= 60:
-                raise AgentConflictError("此会话达到上下文上限，请新建对话。")
+            if len(session.messages) - session.inherited_count + 2 > MAX_PUBLIC_MESSAGES:
+                raise AgentConflictError("此会话已达到消息上限，请从历史提问建立分支或新建对话。")
             for old in session.plans:
                 if old.status in {"draft", "needs_input", "approved"}:
                     old.status = "superseded"
             self.executor.invalidate(session, "重新规划已停止旧计划后续步骤；已开始任务保留。")
             session.messages.append({"role": "user", "content": message})
             session.history.append({"role": "user", "content": message})
+            session.history = recent_turns(session.history)
             # Invalidate the previous approval before any slow provider call (cross-process CAS).
             self.persist(session)
             if events:
                 events.emit("session", session_id=session.session_id)
                 events.emit("phase", message="正在整理计划；本阶段不会调用业务工具。")
-            messages = list(session.messages)
-            if len(json.dumps(messages, ensure_ascii=False).encode()) > 48000:
-                raise AgentConflictError("计划上下文已达上限，请新建对话。")
+            messages = recent_turns(session.messages)
+            context_windowed = len(messages) < len(session.messages)
+            if events and context_windowed:
+                events.emit("phase", context_windowed=True)
             memories = [
                 {key: item[key] for key in ("kind", "content")} for item in self.store.memories()
             ]
             previous = session.plans[-1].model_dump(mode="json") if session.plans else None
             context = SkillContext(self.skills, message)
+            inherited_count = max(
+                0, session.inherited_count - (len(session.messages) - len(messages))
+            )
             draft, missing = generate_draft(
-                self.client, messages, memories, previous, skill_context=context, events=events
+                self.client,
+                messages,
+                memories,
+                previous,
+                skill_context=context,
+                events=events,
+                inherited_count=inherited_count,
+                context_windowed=context_windowed,
             )
             if events:
                 events.check()
             reply = self._record_plan(session, draft, missing, context.identities)
             session.messages.append({"role": "assistant", "content": reply})
             session.history.append({"role": "assistant", "content": reply})
+            session.history = recent_turns(session.history)
             self.persist(session)
             return self.snapshot(session)
         finally:
@@ -443,13 +515,17 @@ class AgentService:
     def _run(self, session, *, events=None):
         from app.services.agent_result_evidence import execution_context
 
+        previous = session.history[:-1]
+        history = session.history[-1:]  # Current turn keeps transient Skill text in memory.
+        visible = recent_turns(session.history)
+        visible_users = sum(item["role"] == "user" for item in visible)
+        user_inputs = session.user_inputs(visible_users=visible_users)
         context = SkillTurn(
             self.skills,
             session.messages[-1]["content"],
-            [item["content"] for item in session.messages if item["role"] == "user"],
+            user_inputs,
             self.clock,
         )
-        history = list(session.history)  # Full Skill text lives only in this request.
 
         today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
         prompt = (
@@ -473,6 +549,8 @@ class AgentService:
             "请同时说明证据限制；业务目标未核验，不能根据completed声称目标已达成。"
             f"\n已保存执行观察：{execution_context(session)}"
         )
+        if session.forked_from:
+            prompt += "\n分支继承的对话只作背景。计划参数与技能资源须取自分支内提交的用户消息。"
         prompt += context.prompt()
         prompt += (
             "\n使用技能时按读取→观察→verify_skill核查材料的循环工作。"
@@ -523,11 +601,24 @@ class AgentService:
                     ensure_ascii=False,
                 )
             )
+        window_notice = False
         for round_index in range(settings.agent_max_steps):
-            if len(json.dumps(session.history)) > 80000:
-                return "上下文达到上限，请查看工具结果并新建对话继续。"
+            active_size = context_size(history)
+            if active_size > 80000:
+                session.skill_checks = (session.skill_checks + context.finish())[-8:]
+                return "本轮工具结果已达到上下文上限。可以查看工具记录，再缩小范围继续追问。"
+            earlier = recent_turns(previous, HISTORY_BYTES - active_size)
+            omitted = sum(item["role"] == "user" for item in earlier) + 1 < sum(
+                item["role"] == "user" for item in session.messages
+            )
+            if events and omitted and not window_notice:
+                window_notice = True
+                events.emit("phase", context_windowed=True)
             try:
-                request = [{"role": "system", "content": prompt}, *history]
+                system_prompt = prompt
+                if omitted:
+                    system_prompt += "\n较早的对话未载入。若必要条件缺失，请用户重述，避免猜测。"
+                request = [{"role": "system", "content": system_prompt}, *earlier, *history]
                 if events:
                     events.check()
                     events.draft = ""
@@ -619,11 +710,7 @@ class AgentService:
                             raise ValueError("提交计划必须单独调用。")
                         draft, missing = validate_draft(
                             call["function"]["arguments"],
-                            [
-                                item["content"]
-                                for item in session.messages
-                                if item["role"] == "user"
-                            ],
+                            user_inputs,
                         )
                         plan_reply = self._record_plan(session, draft, missing, context.identities)
                         plan = session.plans[-1]

@@ -35,10 +35,55 @@ function workspace(stream: (...args: any[]) => Promise<any>, overrides = {}) {
   });
 }
 
+test("forks a saved question as a draft and recovers the branch if the first stream fails", async () => {
+  const branch = { ...finalSession, session_id: "branch-1", messages: [], forked_from: { session_id: "session-1", message_index: 0 } };
+  const loads: string[] = [];
+  const state = workspace(async (_mode, text, id) => {
+    expect([text, id]).toEqual(["检查另一组", "branch-1"]);
+    throw new Error("连接中断");
+  }, {
+    fetchAgentSession: async (id: string) => { loads.push(id); return id === "branch-1" ? branch : finalSession; },
+    forkAgentSession: async (id: string, index: number) => {
+      expect([id, index]).toEqual(["session-1", 0]);
+      return branch;
+    },
+  });
+  await state.load();
+  await state.restore("session-1");
+  expect(await state.fork(0)).toBe(true);
+  expect(state.input.value).toBe("检查");
+  expect(state.session.value?.messages).toEqual([]);
+  state.input.value = "检查另一组";
+  await state.restore("session-1");
+  state.input.value = "来源会话草稿";
+  await state.restore("branch-1");
+  expect(state.input.value).toBe("检查另一组");
+  await state.restore("session-1");
+  expect(state.input.value).toBe("来源会话草稿");
+  await state.restore("branch-1");
+  await state.send();
+  expect(loads.at(-1)).toBe("branch-1");
+  expect(state.error.value).toBe("连接中断");
+  expect(state.session.value?.session_id).toBe("branch-1");
+  expect(state.input.value).toBe("检查另一组");
+});
+
+test("a failed fork leaves the source conversation active", async () => {
+  const state = workspace(async () => finalSession, {
+    fetchAgentSession: async () => finalSession,
+    forkAgentSession: async () => { throw new Error("会话数已达上限"); },
+  });
+  await state.restore("session-1");
+  expect(await state.fork(0)).toBe(false);
+  expect(state.session.value).toEqual(finalSession);
+  expect(state.error.value).toBe("会话数已达上限");
+});
+
 test("shows progress and draft before completion, then renders final answer once", async () => {
   let finish!: (value: any) => void;
   const state = workspace(async (_mode, _text, _id, emit) => {
     emit({ type: "session", session_id: "new-session" });
+    emit({ type: "phase", context_windowed: true });
     emit({ type: "text", text: "中间草稿" });
     emit({ type: "draft_reset" });
     emit({ type: "tool_start", message: "正在读取质量问题" });
@@ -48,6 +93,7 @@ test("shows progress and draft before completion, then renders final answer once
   await state.load();
   const pending = state.send("检查");
   expect(state.mode.value).toBe("chat");
+  expect(state.contextWindowed.value).toBe(true);
   expect(state.pendingMessage.value).toBe("检查");
   expect(state.draft.value).toBe("结果");
   expect(state.streamEvents.value.some(item => item.type === "tool_start")).toBe(true);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUp, Check, ChevronDown, History, LoaderCircle, MessageSquarePlus, RefreshCw, Settings2, Sparkles, Square, X } from "@lucide/vue";
+import { ArrowUp, Check, ChevronDown, GitBranch, History, LoaderCircle, MessageSquarePlus, RefreshCw, Settings2, Sparkles, Square, X } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import type { AgentMemory } from "../agentApi";
@@ -8,9 +8,9 @@ import AgentSkillPanel from "../components/AgentSkillPanel.vue";
 import { createAgentWorkspace } from "../composables/agentWorkspace";
 
 const {
-  session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete,
+  session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, contextWindowed,
   connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError,
-  sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget,
+  sessions, historyLoading, historyError, refreshHistory, memories, restore, fork, remember, forget,
   load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshProgress, canWrite, dispose,
 } = createAgentWorkspace();
 const messagePane = ref<HTMLElement | null>(null);
@@ -21,6 +21,14 @@ const memoryText = ref("");
 const memoryKind = ref<AgentMemory["kind"]>("preference");
 const editingMemory = ref<AgentMemory | null>(null);
 const followMessages = ref(true);
+const skillSelection = ref(0);
+const dismissedSuggestions = ref(false);
+const skillSuggestions = computed(() => {
+  const match = /^\/([a-z0-9-]*)$/i.exec(input.value);
+  if (!match || busy.value || loading.value || dismissedSuggestions.value) return [];
+  const prefix = match[1].toLowerCase();
+  return (status.value?.skills ?? []).filter(skill => skill.name.startsWith(prefix));
+});
 const hasConversation = computed(() => Boolean(session.value?.messages.length || pendingMessage.value || session.value?.plans?.length || session.value?.actions.length));
 const skillChecks = computed(() => [...(session.value?.skill_checks ?? []), ...(session.value?.executions ?? []).flatMap(item => item.skill_checks ?? [])]);
 const connectionLabel = computed(() => loading.value ? "正在连接" : !connected.value ? "连接不可用" : status.value?.configured ? status.value.model : "模型未配置");
@@ -37,7 +45,17 @@ function resizeInput() {
   if (element) { element.style.height = "auto"; element.style.height = `${Math.min(element.scrollHeight, 180)}px`; }
 }
 function handleInputKey(event: KeyboardEvent) {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+  if (event.isComposing || event.keyCode === 229) return;
+  const count = skillSuggestions.value.length;
+  if (count && ["ArrowUp", "ArrowDown", "Escape", "Tab", "Enter"].includes(event.key) && !event.shiftKey) {
+    event.preventDefault();
+    if (event.key === "Escape") dismissedSuggestions.value = true;
+    else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      skillSelection.value = (skillSelection.value + (event.key === "ArrowUp" ? -1 : 1) + count) % count;
+    } else selectSkill(skillSuggestions.value[skillSelection.value]?.name ?? skillSuggestions.value[0].name);
+    return;
+  }
+  if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     void send();
   }
@@ -60,12 +78,24 @@ async function restoreConversation(id: string) {
   await restore(id);
   if (!error.value) { dialog.value?.close(); void focusInput(); }
 }
+async function forkConversation(messageIndex: number) {
+  if (await fork(messageIndex)) {
+    followMessages.value = true;
+    await focusInput();
+    messagePane.value?.scrollTo({ top: messagePane.value.scrollHeight });
+  }
+}
 function selectSkill(name: string) { input.value = `/${name} `; dialog.value?.close(); void focusInput(); }
 function editMemory(memory: AgentMemory) { editingMemory.value = memory; memoryKind.value = memory.kind; memoryText.value = memory.content; }
 function clearMemoryForm() { editingMemory.value = null; memoryText.value = ""; }
 async function saveMemory() { if (await remember(memoryKind.value, memoryText.value, editingMemory.value ?? undefined)) clearMemoryForm(); }
 
-watch(input, async () => { await nextTick(); resizeInput(); });
+watch(input, async () => {
+  skillSelection.value = 0;
+  dismissedSuggestions.value = false;
+  await nextTick();
+  resizeInput();
+});
 watch(pendingMessage, value => { if (value) followMessages.value = true; });
 watch([draft, pendingMessage, () => session.value], async () => {
   await nextTick();
@@ -102,6 +132,7 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
           <div v-else class="agent-messages" aria-label="对话记录" aria-live="polite" :aria-busy="busy && !!pendingMessage">
             <article v-for="(message, index) in session?.messages ?? []" :key="index" :class="['agent-message', message.role]">
               <span class="agent-speaker">{{ message.role === 'user' ? '你' : '智能体' }}</span><p>{{ message.content }}</p>
+              <button v-if="message.role === 'user'" type="button" class="agent-fork" :disabled="busy || loading || !!input.trim()" :title="input.trim() ? '请先发送或清空输入框中的草稿' : '编辑这条提问并在新分支继续'" @click="forkConversation(index)"><GitBranch :size="13" aria-hidden="true" />从此处分支</button>
             </article>
             <article v-if="pendingMessage" class="agent-message user"><span class="agent-speaker">你</span><p>{{ pendingMessage }}</p></article>
             <article v-if="draft" class="agent-message assistant"><span class="agent-speaker">{{ streamIncomplete ? '未完成答复' : '智能体' }}</span><p>{{ draft }}</p><span v-if="busy" class="agent-cursor" aria-hidden="true" /></article>
@@ -138,12 +169,23 @@ onBeforeUnmount(() => { clearInterval(timer); dispose(); });
       </div>
 
       <div class="agent-input-area">
+        <div v-if="session?.forked_from" class="agent-origin">
+          <GitBranch :size="14" aria-hidden="true" />
+          <button type="button" class="agent-fork" :disabled="busy || loading" @click="restoreConversation(session.forked_from.session_id)">返回来源对话</button>
+          <span>研究参数请在分支内重新确认</span>
+        </div>
         <p v-if="error" role="alert" class="agent-error">{{ error }}</p>
+        <p v-if="contextWindowed" role="status" class="agent-muted agent-context-notice">本轮使用最近的对话作为上下文，早期消息仍可查看。</p>
         <p v-if="!loading && (!connected || !status?.configured)" role="status" class="agent-notice">{{ !connected ? '暂时无法连接智能体。' : '请先在后端配置 DeepSeek。' }}<button :disabled="busy" @click="openPanel('settings')">查看设置</button></p>
         <div v-if="streamIncomplete" class="agent-notice" role="status"><span>答复未完成，草稿仅供参考。停止接收不会撤销已开始的查询。</span><button :disabled="busy || loading" @click="load">载入原会话</button></div>
         <form class="agent-composer" @submit.prevent="send()">
           <label for="agent-input" class="agent-sr-only">发送消息</label>
-          <textarea id="agent-input" ref="inputElement" v-model="input" :disabled="busy || loading" maxlength="4000" rows="2" placeholder="发消息，聊聊你的想法…" @keydown="handleInputKey" />
+          <textarea id="agent-input" ref="inputElement" v-model="input" :disabled="busy || loading" maxlength="4000" rows="2" placeholder="输入问题，或键入 / 选择技能…" :aria-controls="skillSuggestions.length ? 'agent-skill-suggestions' : undefined" :aria-activedescendant="skillSuggestions.length ? `agent-suggestion-${skillSelection}` : undefined" :aria-autocomplete="skillSuggestions.length ? 'list' : undefined" @keydown="handleInputKey" />
+          <ul v-if="skillSuggestions.length" id="agent-skill-suggestions" class="agent-suggestions" role="listbox" aria-label="可用技能">
+            <li v-for="(skill, index) in skillSuggestions" :id="`agent-suggestion-${index}`" :key="skill.name" role="option" :aria-selected="index === skillSelection" @pointermove="skillSelection = index" @mousedown.prevent @click="selectSkill(skill.name)">
+              <strong>/{{ skill.name }}</strong><span>{{ skill.description }}</span>
+            </li>
+          </ul>
           <div class="agent-composer-footer">
             <label class="agent-mode"><span class="agent-sr-only">处理方式</span><select v-model="mode" :disabled="busy || loading" aria-label="处理方式"><option value="chat">对话</option><option value="plan">先规划</option></select></label>
             <span class="agent-key-hint">{{ mode === 'plan' ? '先审阅计划，再确认执行' : 'Enter 发送 · Shift + Enter 换行' }}</span>
@@ -203,6 +245,13 @@ button:disabled { opacity: .45; cursor: default; }button:focus-visible, textarea
 .agent-content { padding-block: 24px; }.agent-welcome { text-align: center; padding-block: 24px; }.agent-mark { display: inline-flex; color: #546bc7; margin-bottom: 15px; }.agent-welcome h2 { margin: 0 0 14px; font-size: clamp(23px, 3vw, 30px); font-weight: 600; letter-spacing: -.7px; }.agent-welcome p { margin: 0; font-size: 14px; color: #8a90a0; line-height: 1.8; }
 .is-empty .agent-conversation { justify-content: center; padding-bottom: min(14vh, 140px); }.is-empty .agent-scroll { flex: 0 1 auto; }.is-empty .agent-content { padding-block: 8px 20px; }
 .agent-message { margin-bottom: 30px; font-size: 15px; line-height: 1.95; overflow-wrap: anywhere; }.agent-speaker { font-size: 11px; color: #8991a0; }.agent-message p { white-space: pre-wrap; margin: 6px 0 0; }.agent-message.user { max-width: 85%; width: fit-content; margin-left: auto; padding: 10px 18px; border-radius: 17px 17px 4px 17px; background: #eef0f6; }.agent-message.user .agent-speaker { display: none; }.agent-message.user p { margin: 0; }.agent-message.assistant { padding-block: 4px 8px; }
+.agent-fork { padding: 2px 4px; gap: 4px; color: #596987; background: transparent; font-size: 11px; }
+.agent-fork:hover:not(:disabled) { background: #e3e8f4; color: #324991; }
+.agent-origin { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; color: #596987; font-size: 11px; margin-bottom: 6px; }
+.agent-context-notice { margin: 0 0 6px; }
+.agent-suggestions { list-style: none; max-height: 190px; overflow-y: auto; margin: 0 0 10px; padding: 4px; border: 1px solid #e0e3eb; border-radius: 9px; background: #fcfcfd; }
+.agent-suggestions li { display: grid; gap: 2px; padding: 6px 8px; border-radius: 6px; color: #5e6c85; font-size: 12px; cursor: pointer; }
+.agent-suggestions li[aria-selected='true'] { background: #e9edfa; color: #31476f; }
 .agent-cursor { display: inline-block; height: 7px; width: 7px; border-radius: 50%; background: #7183c7; }.agent-thinking { display: flex; align-items: center; gap: 8px; color: #7b8497; font-size: 13px; }
 .agent-input-area { flex-shrink: 0; padding-top: 12px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }.agent-composer { padding: 16px 16px 12px; border: 1px solid #e0e3eb; border-radius: 20px; background: white; box-shadow: 0 4px 24px #24345a06; transition: border-color .15s, box-shadow .15s; }.agent-composer:focus-within { border-color: #a6b2db; box-shadow: 0 4px 24px #24345a0a; }.agent-composer textarea { display: block; width: 100%; min-height: 58px; max-height: 180px; resize: none; padding: 0; margin-bottom: 10px; border: 0; background: transparent; color: #29354c; font: inherit; font-size: 15px; line-height: 1.7; outline: none; }.agent-composer textarea::placeholder { color: #a2a7b3; }.agent-composer textarea:focus-visible { outline: none; }.agent-composer-footer { gap: 12px; }.agent-mode select { border: 0; border-radius: 7px; padding: 6px 8px; background: #f3f4f7; color: #606b80; font: inherit; font-size: 12px; cursor: pointer; }.agent-key-hint { color: #a2a8b5; font-size: 10px; }.agent-send { margin-left: auto; flex-shrink: 0; padding: 8px; height: 36px; width: 36px; border-radius: 50%; background: #485a93; }.agent-stop { background: #354263; }.agent-footnote { margin: 10px 0 0; color: #a2a8b3; font-size: 10px; text-align: center; }
 .agent-muted { font-size: 12px; color: #7e8798; line-height: 1.85; }.agent-notice, .agent-error { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; color: #916137; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }.agent-error { color: #ad4e4e; }.agent-notice button, .agent-error button { padding: 2px 0; color: inherit; background: transparent; text-decoration: underline; }.agent-followup { display: grid; gap: 16px; margin-block: 20px; }

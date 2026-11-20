@@ -65,6 +65,102 @@ def test_sqlite_is_separate_and_durable(storage):
     assert store.list_sessions()[0]["title"] == "请查询研究结果"
 
 
+def test_fork_route_accepts_only_saved_user_messages_and_restores_empty_branch(
+    storage, monkeypatch
+):
+    store, _ = storage
+    agent = make_agent(store)
+    source = agent.chat("分析第一套假设")
+    monkeypatch.setattr(route, "service", agent)
+    app = FastAPI()
+    app.include_router(route.router, prefix="/api/v1")
+    client = TestClient(app)
+    path = f"/api/v1/agent/sessions/{source.session_id}/fork"
+
+    for index in (1, 2, -1, "0", True):
+        assert client.post(path, json={"message_index": index}).status_code == 422
+    assert (
+        client.post(
+            path.replace(source.session_id, "missing"), json={"message_index": 0}
+        ).status_code
+        == 404
+    )
+    assert len(store.list_sessions()) == 1
+
+    response = client.post(path, json={"message_index": 0})
+    assert response.status_code == 201
+    branch = response.json()
+    assert branch["session_id"] != source.session_id
+    assert branch["messages"] == []
+    assert branch["forked_from"] == {"session_id": source.session_id, "message_index": 0}
+    assert client.get(f"/api/v1/agent/sessions/{branch['session_id']}").json() == branch
+    assert any(item["title"].startswith("分支") for item in store.list_sessions())
+    assert agent.client.complete.call_count == 1
+
+
+def test_fork_prunes_model_context_to_fit_an_existing_long_transcript(storage):
+    store, factory = storage
+    prefix = [
+        message
+        for index in range(11)
+        for message in (
+            {"role": "user", "content": f"第{index}组研究"},
+            {"role": "assistant", "content": "结果" * 3400},
+        )
+    ]
+    question = {"role": "user", "content": "换一组假设"}
+    store.save({"session_id": "source", "messages": [*prefix, question], "history": [question]})
+
+    branch = make_agent(store).fork("source", len(prefix))
+    assert branch.messages == prefix
+    saved = store.load(branch.session_id)
+    assert saved["history"] == prefix[-2:]
+
+    restored = make_agent(AgentStateStore(factory)).chat("继续", branch.session_id)
+    assert restored.messages[:-2] == prefix
+    assert store.load("source")["messages"] == [*prefix, question]
+
+
+def test_long_conversation_windows_model_requests_and_preserves_saved_transcript(storage):
+    from app.services.agent_context import HISTORY_BYTES, context_size
+    from app.services.agent_stream import AgentStream
+
+    store, factory = storage
+    reply = {"content": "研究说明" * 750}
+    agent = make_agent(store, response=reply)
+    first = "第一组研究" + "甲" * 2500
+    view = agent.chat(first)
+    for index in range(1, 8):
+        view = agent.chat(f"补充第{index}组" + "乙" * 2500, view.session_id)
+    events = AgentStream()
+    events.emit = Mock()
+    view = agent.chat("按最近条件继续", view.session_id, events=events)
+    model_messages = agent.client.complete.call_args.args[0]
+    assert context_size(model_messages[1:]) <= HISTORY_BYTES
+    assert model_messages[1]["role"] == "user"
+    assert model_messages[-1]["content"] == "按最近条件继续"
+    assert first not in [item["content"] for item in model_messages]
+    events.emit.assert_any_call("phase", context_windowed=True)
+    restored = make_agent(AgentStateStore(factory)).get(view.session_id)
+    assert restored.messages == view.messages
+    assert restored.messages[0]["content"] == first
+    assert len(restored.messages) == 18
+
+
+def test_context_window_keeps_tool_calls_and_results_in_the_same_turn():
+    from app.services.agent_context import context_size, recent_turns
+
+    old = [{"role": "user", "content": "旧问题"}, {"role": "assistant", "content": "旧答复"}]
+    current = [
+        {"role": "user", "content": "核查数据"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "quality-check"}]},
+        {"role": "tool", "tool_call_id": "quality-check", "content": "{}"},
+        {"role": "assistant", "content": "当前结果"},
+    ]
+    assert recent_turns(old + current, context_size(current)) == current
+    assert recent_turns(old + current, context_size(current) - 1) == []
+
+
 def test_revision_compare_and_swap_rejects_stale_snapshot(storage):
     store, _ = storage
     state = {"session_id": "s" * 32, "revision": 0, "messages": []}

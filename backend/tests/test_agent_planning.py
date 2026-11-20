@@ -160,6 +160,43 @@ def test_clarification_answer_produces_new_version_with_user_grounded_inputs(sto
     assert decide(service, second).plans[-1].status == "approved"
 
 
+@pytest.mark.parametrize("mode", ["chat", "plan"])
+def test_fork_does_not_use_inherited_user_text_as_plan_evidence(storage, mode):
+    store, factory = storage
+    source = agent(store)
+    first = source.plan("先检查 book_id=7")
+    later = source.plan("重新检查", first.session_id)
+    original = decide(source, later)
+    saved = store.load(later.session_id)
+    branch = source.fork(later.session_id, 2)
+    assert branch.messages == original.messages[:2]
+    assert branch.forked_from.session_id == later.session_id
+    assert not (branch.plans or branch.executions or branch.actions or branch.steps)
+    assert store.load(later.session_id) == saved
+    restored = agent(
+        AgentStateStore(factory),
+        draft(
+            steps=[
+                step(
+                    "position_holdings",
+                    parameters={"book_id": 7},
+                    input_evidence={"book_id": "book_id=7"},
+                )
+            ]
+        ),
+    )
+    # The chat provider returns a tool call ID; the planning stub does not require one.
+    restored.client.complete.return_value["tool_calls"][0]["id"] = "plan-call"
+    result = getattr(restored, mode)("分析持仓", branch.session_id)
+    assert result.plans[-1].status == "needs_input"
+    assert result.plans[-1].steps[0].parameters == {}
+    assert result.forked_from == branch.forked_from
+    result = getattr(restored, mode)("book_id=7", branch.session_id)
+    assert result.plans[-1].status == "draft"
+    assert result.plans[-1].steps[0].parameters == {"book_id": 7}
+    assert not restored.tools.mock_calls
+
+
 @pytest.mark.parametrize("quote", ["book_id=17", "7.5", "7x", "assistant book_id=7"])
 def test_evidence_must_be_actual_user_text_and_full_value(quote):
     value, missing = validate_draft(

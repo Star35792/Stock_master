@@ -7,6 +7,7 @@ export interface AgentStreamEvent {
   session?: AgentSession;
   text?: string;
   message?: string;
+  context_windowed?: boolean;
   title?: string;
   tool?: string;
   parameters?: Record<string, unknown>;

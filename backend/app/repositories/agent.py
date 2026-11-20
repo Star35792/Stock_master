@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.models.agent import AgentMemoryRecord, AgentSessionRecord
 
+MAX_SESSION_BYTES = 256 * 1024
+
 
 class AgentStateConflict(ValueError):
     pass
@@ -30,7 +32,7 @@ class AgentStateRepository:
         ]
 
     def save(self, db: Session, state: dict) -> int:
-        if len(json.dumps(state, ensure_ascii=False).encode()) > 262144:
+        if len(json.dumps(state, ensure_ascii=False).encode()) > MAX_SESSION_BYTES:
             raise ValueError("会话已达到256KiB上限，请新建对话；原任务记录保留。")
         session_id, revision = state["session_id"], state.get("revision", 0)
         now = datetime.now(UTC).isoformat()

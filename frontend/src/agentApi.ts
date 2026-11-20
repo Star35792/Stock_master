@@ -31,6 +31,7 @@ export interface AgentSession {
   plans: AgentPlan[];
   executions: AgentExecution[];
   skill_checks?: AgentSkillVerification[];
+  forked_from?: { session_id: string; message_index: number } | null;
 }
 
 export interface AgentExecution {
@@ -115,6 +116,8 @@ async function request<T>(path: string, body?: unknown, method?: string): Promis
 
 export const fetchAgentStatus = () => request<AgentStatus>("/status");
 export const fetchAgentSession = (id: string) => request<AgentSession>(`/sessions/${encodeURIComponent(id)}`);
+export const forkAgentSession = (id: string, message_index: number) =>
+  request<AgentSession>(`/sessions/${encodeURIComponent(id)}/fork`, { message_index });
 export const sendAgentMessage = (message: string, session_id: string | null) => request<AgentSession>("/chat", { message, session_id });
 export const createAgentPlan = (message: string, session_id: string | null) => request<AgentSession>("/plans", { message, session_id });
 export const decideAgentPlan = (plan: AgentPlan, session_id: string, decision: "approve" | "reject") => request<AgentSession>(`/plans/${encodeURIComponent(plan.plan_id)}/decision`, { session_id, version: plan.version, plan_hash: plan.plan_hash, decision });

@@ -8,6 +8,8 @@
 
 第四阶段不新增表或ORM列：session.state.executions.steps保存有界read_checkpoint及summary.recovery；metadata.job_log.metadata._agent_action、strategy.backtest_run.parameters._agent_action、portfolio.portfolio_plan.input_snapshot._agent_action绑定agent_action_v1确认ID/工具/参数哈希/原代码版本。研究身份在首次flush前写入，同一研究事务持久化；旧产物不补造确认血缘。详见[恢复证据合同](../plans/20261119-1448-agent-recovery-and-evidence.md)。
 
+分支元数据保存在 `agent_session.state.forked_from`，含 `session_id` 与从零开始的 `message_index`，旧快照缺字段时按普通会话读取。分支 `messages` 保存所选提问之前的公开文本及分支自身往来。`history` 是有界的模型上下文窗口，按用户轮次截取工具调用及其结果。两者复用原 SQLite 表和快照容量约束。
+
 2026-11-19 索引一致性维护不新增 schema、字段或键语义：定向恢复既有 `uq_job_log_id` 与 `ix_compact_market_security_symbol`，用临时唯一 guard 保护分事务重建，全列 SHA256/行数、索引定义和重开后的全部键点查保持一致，新增唯一必要任务审计。诊断入口 `scripts/maintenance/repair_index_consistency.py` 默认只读，不在启动初始化中自动重建索引。证据见[运维恢复决策](../plans/20261119-1014-operations-recovery-and-index-consistency.md)。
 
 运维修复（2026-10-28）：`scripts/maintenance/restore_financial_unique_indexes.py` 仅恢复ORM已声明的 `fundamental.financial_statement.uq_financial_statement_key` 与 `fundamental.financial_indicator.uq_financial_indicator_key`，以修复旧库缺唯一索引导致的财务upsert失败；不新增表/字段或改变唯一键语义。应用释放数据库后，脚本持共享写锁、检查重复和空键、事务创建并后验核对，保存独立JSON审计；有重复/空键即拒绝，不自动删行或去重。全库其他缺失约束只审计不扩展修复。

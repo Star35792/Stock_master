@@ -380,14 +380,21 @@ def test_legal_long_skill_is_complete_in_transient_context(registry):
         path.read_text(encoding="utf-8") + "\n" + "a" * 7000 + "END_RULE", encoding="utf-8"
     )
     agent, _, _ = service(
+        {"content": "旧" * 7000},
+        {"content": "另" * 7000},
         call("load_skill", {"name": "data-quality-diagnosis"}),
         call("verify_skill", {"name": "data-quality-diagnosis"}),
         {"content": "缺证据"},
     )
     agent.skills = registry
-    agent.chat("检查数据")
-    request = agent.client.complete.call_args_list[1].args[0]
+    first = agent.chat("较早的检查")
+    agent.chat("最近的检查", first.session_id)
+    agent.chat("检查数据", first.session_id)
+    requests = [entry.args[0] for entry in agent.client.complete.call_args_list]
+    assert "较早的检查" in [item["content"] for item in requests[2]]
+    request = requests[3]
     assert any("END_RULE" in item["content"] for item in request)
+    assert "较早的检查" not in [item["content"] for item in request]
     assert "END_RULE" not in json.dumps(agent.store.rows)
 
 

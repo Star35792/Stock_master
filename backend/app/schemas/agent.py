@@ -22,6 +22,17 @@ class AgentConfirmRequest(BaseModel):
     decision: Literal["confirm", "cancel"]
 
 
+class AgentForkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    message_index: int = Field(ge=0)
+
+
+class AgentForkOrigin(BaseModel):
+    session_id: str
+    message_index: int
+
+
 class AgentActionRead(BaseModel):
     action_id: str
     tool: str
@@ -47,6 +58,7 @@ class AgentSessionRead(BaseModel):
     plans: list[AgentPlanRead] = Field(default_factory=list)
     executions: list[AgentPlanExecution] = Field(default_factory=list)
     skill_checks: list[AgentSkillVerification] = Field(default_factory=list, max_length=8)
+    forked_from: AgentForkOrigin | None = None
 
 
 class AgentMemoryWrite(BaseModel):

@@ -5,6 +5,7 @@ from app.repositories.agent import AgentStateConflict
 from app.schemas.agent import (
     AgentChatRequest,
     AgentConfirmRequest,
+    AgentForkRequest,
     AgentMemoryWrite,
     AgentSessionRead,
 )
@@ -147,6 +148,14 @@ def agent_session(session_id: str):
     try:
         return service.get(session_id)
     except (AgentConflictError, AgentNotFoundError, AgentUnavailableError) as exc:
+        raise _http_error(exc) from None
+
+
+@router.post("/sessions/{session_id}/fork", response_model=AgentSessionRead, status_code=201)
+def agent_fork(session_id: str, payload: AgentForkRequest):
+    try:
+        return service.fork(session_id, payload.message_index)
+    except (AgentUnavailableError, AgentConflictError, AgentNotFoundError, ValueError) as exc:
         raise _http_error(exc) from None
 
 

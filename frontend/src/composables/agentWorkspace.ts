@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import {
   createAgentPlan, decideAgentPlan, controlAgentPlan, recoverAgentPlanStep,
@@ -6,6 +6,7 @@ import {
   fetchAgentSession,
   fetchAgentStatus,
   fetchAgentTask,
+  forkAgentSession,
   sendAgentMessage,
   fetchAgentSessions, fetchAgentMemories, saveAgentMemory, deleteAgentMemory,
   type AgentMemory, type AgentSessionSummary,
@@ -20,6 +21,7 @@ const defaultDeps = {
   createAgentPlan, decideAgentPlan, controlAgentPlan, recoverAgentPlanStep,
   fetchAgentStatus, fetchAgentSession, fetchAgentTask, sendAgentMessage, decideAgentAction,
   fetchAgentSessions, fetchAgentMemories, saveAgentMemory, deleteAgentMemory,
+  forkAgentSession,
 };
 
 function isFinishedTask(task: AgentTask | undefined) {
@@ -37,6 +39,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   const draft = ref("");
   const pendingMessage = ref("");
   const streamIncomplete = ref(false);
+  const contextWindowed = ref(false);
   const connected = ref(false);
   let streamSessionId: string | null = null;
   let streamController: AbortController | null = null;
@@ -57,6 +60,21 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   let trackingBusy = false;
   const autoContinue = new Set<string>();
 
+  const draftKey = (id: string) => `${storageKey}-draft-${id}`;
+  let regularDraft = "";
+  const stopWatchingDraft = watch(input, text => {
+    const active = session.value;
+    if (!active?.forked_from) {
+      regularDraft = text;
+      return;
+    }
+    try {
+      const key = draftKey(active.session_id);
+      if (text) sessionStorage.setItem(key, text);
+      else sessionStorage.removeItem(key);
+    } catch { /* memory-only mode */ }
+  }, { flush: "sync" });
+
   function canWrite(tool: string) {
     return status.value?.tools?.find(item => item.name === tool)?.write_enabled
       ?? status.value?.write_enabled ?? false;
@@ -65,8 +83,26 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   function saveSession(value: AgentSession, epoch = generation) {
     if (disposed || epoch !== generation) return;
     session.value = value;
+    streamSessionId = value.session_id;
     plansNeedReload.value = false;
     try { sessionStorage.setItem(storageKey, value.session_id); } catch { /* memory-only mode */ }
+  }
+
+  function openSavedSession(value: AgentSession, epoch: number, newDraft?: string) {
+    if (disposed || epoch !== generation) return false;
+    autoContinue.clear();
+    saveSession(value, epoch);
+    let savedDraft = "";
+    try { if (value.forked_from) savedDraft = sessionStorage.getItem(draftKey(value.session_id)) ?? ""; } catch { /* memory-only mode */ }
+    input.value = newDraft ?? (value.forked_from ? savedDraft : regularDraft);
+    pendingMessage.value = "";
+    draft.value = "";
+    streamEvents.value = [];
+    streamIncomplete.value = false;
+    contextWindowed.value = false;
+    tasks.value = {};
+    taskError.value = null;
+    return true;
   }
 
   async function refreshTasks() {
@@ -143,7 +179,10 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
       let saved: string | null = null;
       try { saved = sessionStorage.getItem(storageKey); } catch { /* memory-only mode */ }
       if (saved && !disposed) {
-        saveSession(await deps.fetchAgentSession(saved), epoch);
+        const value = await deps.fetchAgentSession(saved);
+        if (disposed || epoch !== generation) return;
+        if (session.value?.session_id === saved) saveSession(value, epoch);
+        else openSavedSession(value, epoch);
         pendingMessage.value = "";
         draft.value = "";
         if (disposed || epoch !== generation) return;
@@ -164,6 +203,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     draft.value = "";
     streamEvents.value = [];
     streamIncomplete.value = false;
+    contextWindowed.value = false;
     streamController = new AbortController();
     if (requestMode === "plan") plansNeedReload.value = true;
     try {
@@ -175,7 +215,8 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
           try { sessionStorage.setItem(storageKey, event.session_id); } catch { /* memory-only mode */ }
         }
         if (event.type === "round" || event.type === "draft_reset") draft.value = "";
-        if (event.type === "text" && typeof event.text === "string") draft.value += event.text;
+        if (event.context_windowed) contextWindowed.value = true;
+        else if (event.type === "text" && typeof event.text === "string") draft.value += event.text;
         else if (!["session", "done"].includes(event.type)) streamEvents.value = [...streamEvents.value, event].slice(-40);
       }, streamController.signal);
       if (disposed || epoch !== generation) return;
@@ -287,6 +328,7 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     session.value = null;
     plansNeedReload.value = false;
     error.value = null;
+    regularDraft = "";
     input.value = "";
     tasks.value = {};
     streamSessionId = null;
@@ -294,25 +336,37 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     draft.value = "";
     streamEvents.value = [];
     streamIncomplete.value = false;
+    contextWindowed.value = false;
     try { sessionStorage.removeItem(storageKey); } catch { /* memory-only mode */ }
   }
 
   async function restore(id: string) {
-    if (busy.value) return;
+    if (busy.value || disposed) return;
     const epoch = ++generation;
-    autoContinue.clear();
     loading.value = true;
     error.value = null;
     try {
-      saveSession(await deps.fetchAgentSession(id), epoch);
-      pendingMessage.value = "";
-      draft.value = "";
-      streamEvents.value = [];
-      streamIncomplete.value = false;
-      streamSessionId = id;
-      if (epoch === generation && !disposed) { tasks.value = {}; await refreshTasks(); }
+      if (openSavedSession(await deps.fetchAgentSession(id), epoch)) await refreshTasks();
     } catch (cause) {
       if (epoch === generation && !disposed) error.value = cause instanceof Error ? cause.message : "会话恢复失败";
+    } finally { if (epoch === generation && !disposed) loading.value = false; }
+  }
+
+  async function fork(messageIndex: number) {
+    const source = session.value;
+    const message = source?.messages[messageIndex];
+    if (busy.value || loading.value || disposed || input.value.trim() || !source || message?.role !== "user") return false;
+    const epoch = ++generation;
+    loading.value = true;
+    error.value = null;
+    try {
+      const branch = await deps.forkAgentSession(source.session_id, messageIndex);
+      if (!openSavedSession(branch, epoch, message.content)) return false;
+      mode.value = "chat";
+      return true;
+    } catch (cause) {
+      if (epoch === generation && !disposed) error.value = cause instanceof Error ? cause.message : "创建分支失败";
+      return false;
     } finally { if (epoch === generation && !disposed) loading.value = false; }
   }
 
@@ -336,5 +390,5 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     finally { busy.value = false; }
   }
 
-  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, refreshProgress, canWrite, dispose: () => { disposed = true; generation += 1; streamController?.abort(); } };
+  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, contextWindowed, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, historyLoading, historyError, refreshHistory, memories, restore, fork, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, refreshProgress, canWrite, dispose: () => { disposed = true; generation += 1; stopWatchingDraft(); streamController?.abort(); } };
 }
