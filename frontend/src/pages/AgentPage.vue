@@ -1,140 +1,217 @@
 <script setup lang="ts">
-import AgentSkillPanel from "../components/AgentSkillPanel.vue";
-import { Bot, RefreshCw, Send, Sparkles } from "@lucide/vue";
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { ArrowUp, Check, ChevronDown, History, LoaderCircle, MessageSquarePlus, RefreshCw, Settings2, Sparkles, Square, X } from "@lucide/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import { createAgentWorkspace } from "../composables/agentWorkspace";
-import AgentPlanPanel from "../components/AgentPlanPanel.vue";
 import type { AgentMemory } from "../agentApi";
+import AgentPlanPanel from "../components/AgentPlanPanel.vue";
+import AgentSkillPanel from "../components/AgentSkillPanel.vue";
+import { createAgentWorkspace } from "../composables/agentWorkspace";
 
-const { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose } = createAgentWorkspace();
-const memoryText = ref("");
+const {
+  session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete,
+  connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError,
+  sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget,
+  load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose,
+} = createAgentWorkspace();
 const messagePane = ref<HTMLElement | null>(null);
-watch([draft, pendingMessage, () => session.value?.messages.length], async () => {
-  await nextTick();
-  messagePane.value?.scrollTo({ top: messagePane.value.scrollHeight });
-});
-const memoryKind = ref<"preference" | "constraint" | "lesson">("preference");
+const inputElement = ref<HTMLTextAreaElement | null>(null);
+const dialog = ref<HTMLDialogElement | null>(null);
+const panel = ref<"settings" | "history">("settings");
+const memoryText = ref("");
+const memoryKind = ref<AgentMemory["kind"]>("preference");
 const editingMemory = ref<AgentMemory | null>(null);
+const followMessages = ref(true);
+const hasConversation = computed(() => Boolean(session.value?.messages.length || pendingMessage.value || session.value?.plans?.length || session.value?.actions.length));
+const skillChecks = computed(() => [...(session.value?.skill_checks ?? []), ...(session.value?.executions ?? []).flatMap(item => item.skill_checks ?? [])]);
+const connectionLabel = computed(() => loading.value ? "正在连接" : !connected.value ? "连接不可用" : status.value?.configured ? status.value.model : "模型未配置");
+const processLabel = computed(() => streamIncomplete.value ? "本次响应未完成 · 查看过程" : busy.value ? [...streamEvents.value].reverse().find(event => event.message)?.message ?? "正在思考…" : "查看本次处理过程");
+const labels: Record<string, string> = { starting: "创建结果待核实", pending: "等待确认", confirmed: "已确认", cancelled: "已取消", expired: "已过期", queued: "已排队", running: "执行中", success: "成功", partial: "部分完成", failed: "失败" };
+const pretty = (value: unknown) => JSON.stringify(value, null, 2);
+
+function trackScroll() {
+  const pane = messagePane.value;
+  if (pane) followMessages.value = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
+}
+function resizeInput() {
+  const element = inputElement.value;
+  if (element) { element.style.height = "auto"; element.style.height = `${Math.min(element.scrollHeight, 180)}px`; }
+}
+function handleInputKey(event: KeyboardEvent) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+    event.preventDefault();
+    void send();
+  }
+}
+async function focusInput() { await nextTick(); inputElement.value?.focus(); }
+function newConversation() { reset(); mode.value = "chat"; followMessages.value = true; void focusInput(); }
+function openPanel(value: "settings" | "history") {
+  panel.value = value;
+  dialog.value?.showModal();
+  if (value === "history") void refreshHistory();
+}
+function closeOnBackdrop(event: MouseEvent) {
+  const element = dialog.value;
+  if (!element || event.target !== element) return;
+  const bounds = element.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) element.close();
+}
+async function restoreConversation(id: string) {
+  followMessages.value = true;
+  await restore(id);
+  if (!error.value) { dialog.value?.close(); void focusInput(); }
+}
+function selectSkill(name: string) { input.value = `/${name} `; dialog.value?.close(); void focusInput(); }
 function editMemory(memory: AgentMemory) { editingMemory.value = memory; memoryKind.value = memory.kind; memoryText.value = memory.content; }
 function clearMemoryForm() { editingMemory.value = null; memoryText.value = ""; }
 async function saveMemory() { if (await remember(memoryKind.value, memoryText.value, editingMemory.value ?? undefined)) clearMemoryForm(); }
-const examples = [
-  { text: "检查数据覆盖和未解决的质量问题，给我下一步处理建议", mode: "chat" as const },
-  { text: "查询最近的研究回测，解释结果和仍未解决的数据资格限制", mode: "chat" as const },
-  { text: "帮我规划日线采集、缺口回填、因子研究和组合草案的流程，缺参数先问我", mode: "plan" as const },
-];
-const labels: Record<string, string> = { starting: "创建结果待核实", pending: "等待确认", confirmed: "已确认", cancelled: "已取消", expired: "已过期", queued: "已排队", running: "执行中", success: "成功", partial: "部分完成", failed: "失败" };
-const pretty = (value: unknown) => JSON.stringify(value, null, 2);
+
+watch(input, async () => { await nextTick(); resizeInput(); });
+watch(pendingMessage, value => { if (value) followMessages.value = true; });
+watch([draft, pendingMessage, () => session.value], async () => {
+  await nextTick();
+  if (followMessages.value) messagePane.value?.scrollTo({ top: messagePane.value.scrollHeight });
+});
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(async () => {
   await load();
+  resizeInput();
   timer = setInterval(() => { if (!busy.value) void refreshTasks(); }, 4000);
 });
 onBeforeUnmount(() => { clearInterval(timer); dispose(); });
 </script>
 
 <template>
-  <div class="agent-page">
+  <div class="agent-page" :class="{ 'is-empty': !hasConversation }">
     <header class="agent-heading">
-      <div><p class="agent-eyebrow"><Sparkles :size="15" /> RESEARCH AGENT</p><h1>智能体工作台</h1><p>从一句研究需求开始，串起数据、诊断、回测与组合草案。</p></div>
-      <button class="agent-secondary" :disabled="busy" @click="reset">新建对话</button>
+      <div class="agent-title"><Sparkles :size="19" aria-hidden="true" /><h1>智能体</h1></div>
+      <nav class="agent-toolbar" aria-label="对话操作">
+        <button :disabled="busy || loading" title="新建对话" @click="newConversation"><MessageSquarePlus :size="18" aria-hidden="true" /><span>新对话</span></button>
+        <button :disabled="busy || loading" title="历史对话" aria-label="历史对话" @click="openPanel('history')"><History :size="18" aria-hidden="true" /></button>
+        <button title="设置" aria-label="智能体设置" @click="openPanel('settings')"><Settings2 :size="18" aria-hidden="true" /></button>
+      </nav>
     </header>
 
-    <div class="agent-connection" role="status">
-      <span class="agent-dot" :class="{ ready: connected && status?.configured }" />
-      <strong>{{ loading ? "正在连接后端" : !connected ? "后端尚未连接" : status?.configured ? `后端已连接 · ${status.model} 已配置` : "后端已连接 · DeepSeek 尚未配置" }}</strong>
-      <span>需求与有界对话会发送给 DeepSeek；计划批准与业务执行分开。</span>
-      <button :disabled="loading || busy" class="agent-icon" aria-label="重新连接智能体" @click="load"><RefreshCw :size="16" /></button>
-    </div>
-    <p v-if="!loading && status && !status.configured" class="agent-error">请在后端配置 DEEPSEEK_API_KEY 并重启服务；此页面不会读取或展示密钥。</p>
-    <p v-if="error" role="alert" class="agent-error">{{ error }}</p>
-    <p class="agent-muted">支持按需加载专业技能与材料核查。先批准计划，再按范围执行；写步骤仍需逐项确认，默认关闭。材料齐备不表示研究目标或策略资格已认证。</p>
-    <label v-if="sessions.length" class="agent-history">恢复历史会话 <select :disabled="busy || loading" :value="session?.session_id ?? ''" @change="restore(($event.target as HTMLSelectElement).value)"><option value="" disabled>选择已保存对话</option><option v-for="item in sessions" :key="item.session_id" :value="item.session_id">{{ item.title }}</option></select></label>
+    <section class="agent-conversation" aria-label="研究对话">
+      <div ref="messagePane" class="agent-scroll" @scroll.passive="trackScroll">
+        <div class="agent-content">
+          <div v-if="!hasConversation" class="agent-welcome">
+            <div class="agent-mark"><Sparkles :size="30" :stroke-width="1.5" aria-hidden="true" /></div>
+            <h2>今天想聊些什么？</h2>
+            <p>聊聊行情、研究或持仓，直接问我就好。</p>
+          </div>
+          <div v-else class="agent-messages" aria-label="对话记录" aria-live="polite" :aria-busy="busy && !!pendingMessage">
+            <article v-for="(message, index) in session?.messages ?? []" :key="index" :class="['agent-message', message.role]">
+              <span class="agent-speaker">{{ message.role === 'user' ? '你' : '智能体' }}</span><p>{{ message.content }}</p>
+            </article>
+            <article v-if="pendingMessage" class="agent-message user"><span class="agent-speaker">你</span><p>{{ pendingMessage }}</p></article>
+            <article v-if="draft" class="agent-message assistant"><span class="agent-speaker">{{ streamIncomplete ? '未完成答复' : '智能体' }}</span><p>{{ draft }}</p><span v-if="busy" class="agent-cursor" aria-hidden="true" /></article>
+            <p v-if="busy && pendingMessage && !draft && !streamEvents.length" class="agent-thinking" role="status"><LoaderCircle :size="16" class="agent-spin" aria-hidden="true" />正在思考…</p>
+          </div>
 
-    <div class="agent-grid">
-      <section class="agent-conversation" aria-label="研究对话">
-        <div v-if="!session?.messages.length && !pendingMessage" class="agent-welcome">
-          <div class="agent-bot"><Bot :size="30" /></div><h2>你希望完成什么研究？</h2>
-          <p>直接查询现有可信数据，实时查看工具过程和答复。需要采集、回测等写入操作时再选择“先规划”。</p>
-          <button v-for="example in examples" :key="example.text" :disabled="busy || !status?.configured" @click="input = example.text; mode = example.mode">{{ example.text }} <span>↗</span></button>
-        </div>
-        <div v-else ref="messagePane" class="agent-messages" aria-live="polite">
-          <article v-for="(message, index) in session?.messages ?? []" :key="index" :class="['agent-message', message.role]">
-            <strong>{{ message.role === 'user' ? '你' : '研究智能体' }}</strong><p>{{ message.content }}</p>
-          </article>
-          <article v-if="pendingMessage" class="agent-message user"><strong>你</strong><p>{{ pendingMessage }}</p></article>
-          <article v-if="draft" class="agent-message assistant"><strong>{{ streamIncomplete ? '未完成答复 · 请载入原会话核对' : '研究智能体 · 正在输出' }}</strong><p>{{ draft }}</p></article>
-        </div>
-        <section v-if="streamEvents.length" class="agent-process" aria-label="本次处理过程">
-          <strong>{{ streamIncomplete ? '本次响应未完成' : busy ? '正在处理' : '本次处理过程' }}</strong>
-          <ol><li v-for="(event, index) in streamEvents" :key="index"><span>{{ event.message ?? event.title ?? event.tool }}</span><details v-if="event.parameters || event.result"><summary>参数与有界结果</summary><pre>{{ pretty(event.parameters ?? event.result) }}</pre></details></li></ol>
-        </section>
-        <p v-if="busy && pendingMessage" role="status" class="agent-working">正在接收实时过程与答复…… <button type="button" class="agent-secondary" @click="stopResponse">停止接收</button></p>
-        <p v-if="streamIncomplete" class="agent-working">未完成的文字仅作草稿。停止接收不代表已取消查询；载入原会话不会重发请求。 <button type="button" class="agent-secondary" :disabled="busy || loading" @click="load">载入原会话</button></p>
-        <form class="agent-composer" @submit.prevent="send()">
-          <div class="agent-mode"><label for="agent-mode">处理方式</label><select id="agent-mode" v-model="mode" :disabled="busy || loading"><option value="plan">先规划</option><option value="chat">查询与解释</option></select></div>
-          <label for="agent-input">研究需求</label>
-          <textarea id="agent-input" v-model="input" :disabled="busy" maxlength="4000" rows="3" placeholder="例如：检查日线缺口，给出可修复范围；先展示方案再执行。" @keydown.ctrl.enter.prevent="send()" />
-          <div><span>{{ mode === 'plan' ? '补充参数会生成新版本，并替代旧计划' : '查询结果以原服务与工具记录为准' }}</span><button :disabled="busy || loading || !status?.configured || !input.trim()"><Send :size="16" />{{ mode === 'plan' ? '生成计划' : '发送查询' }}</button></div>
-        </form>
-      </section>
+          <details v-if="streamEvents.length" class="agent-process">
+            <summary><LoaderCircle v-if="busy" :size="14" class="agent-spin" aria-hidden="true" /><span role="status">{{ processLabel }}</span><ChevronDown :size="14" aria-hidden="true" /></summary>
+            <ol><li v-for="(event, index) in streamEvents" :key="index"><span>{{ event.message ?? event.title ?? event.tool }}</span><details v-if="event.parameters || event.result"><summary>参数与结果</summary><pre>{{ pretty(event.parameters ?? event.result) }}</pre></details></li></ol>
+          </details>
 
-      <aside class="agent-evidence" aria-label="操作与证据">
-        <AgentSkillPanel :skills="status?.skills ?? []" :checks="[...(session?.skill_checks ?? []), ...(session?.executions ?? []).flatMap(item => item.skill_checks ?? [])]" :busy="busy || loading" @select="input = `/${$event} `" />
-        <p v-if="plansNeedReload && !busy" role="alert" class="agent-error">计划状态尚未核实，批准已停用。请点击重新连接，再审阅当前版本。</p>
-        <AgentPlanPanel :plans="session?.plans ?? []" :executions="session?.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" @explain="send(`请解释第${$event}版计划的已保存执行结果，引用真实ID、日期和原服务指标，分别说明事实、缺失与推断及限制；不要生成新写预览。`, 'chat')" />
-        <section class="agent-panel">
-          <h2>长期记忆 <span>{{ memories.length }}/32</span></h2>
-          <p class="agent-muted">仅保存你明确提交的偏好、约束和经验，存储于本地 SQLite。请勿填写密钥；记忆不作为行情事实或执行授权。</p>
-          <form class="agent-memory-form" @submit.prevent="saveMemory">
-            <select v-model="memoryKind" aria-label="记忆分类"><option value="preference">偏好</option><option value="constraint">约束</option><option value="lesson">经验</option></select>
-            <textarea v-model="memoryText" aria-label="长期记忆内容" maxlength="400" rows="2" placeholder="例如：研究结论优先说明数据日期和证据缺口" />
-            <button :disabled="busy || loading || !memoryText.trim()">{{ editingMemory ? '明确保存修改' : '明确保存' }}</button>
-            <button v-if="editingMemory" type="button" class="agent-secondary" @click="clearMemoryForm">取消编辑</button>
-          </form>
-          <article v-for="memory in memories" :key="memory.id" class="agent-memory">
-            <p>{{ memory.content }}</p>
-            <button class="agent-secondary" :disabled="busy || loading" @click="editMemory(memory)">编辑</button>
-            <button class="agent-secondary" :disabled="busy || loading" @click="forget(memory)">删除此记忆</button>
-          </article>
-        </section>
-        <section class="agent-panel"><h2>操作提案 <span>{{ session?.actions.length ?? 0 }}</span></h2><p v-if="!session?.actions.length" class="agent-muted">需要写入数据或运行研究时，具体参数和预检结果会出现在这里。</p>
-          <article v-for="action in session?.actions ?? []" :key="action.action_id" class="agent-action">
-            <h3>{{ action.title }}<span :class="['agent-tag', action.status]">{{ labels[action.status] }}</span></h3>
-            <p>{{ action.preview.summary }}</p>
-            <details :open="action.status === 'pending'"><summary>参数与影响</summary><pre>{{ pretty(action.parameters) }}</pre><pre>{{ pretty(action.preview) }}</pre></details>
-            <p v-if="action.status === 'pending'" class="agent-muted">{{ !action.plan_id ? '独立预览没有计划授权，请在批准计划内重新预检。' : status?.write_enabled ? '逐项授权有效期最多10分钟；确认会重检来源与影响，再创建后台任务。' : '默认写执行关闭；可以审阅预检，确认此步骤尚未开放。' }}</p>
-            <div v-if="action.status === 'pending'" class="agent-action-buttons"><button :disabled="busy || !status?.write_enabled || !action.plan_id" @click="decide(action.action_id, 'confirm')">确认此步骤</button><button class="agent-secondary" :disabled="busy" @click="decide(action.action_id, 'cancel')">取消</button></div>
-            <div v-if="action.task_id" class="agent-task"><strong>任务 #{{ action.task_id }} · {{ labels[tasks[action.task_id]?.status ?? 'queued'] }}</strong><p>{{ tasks[action.task_id]?.error_message }}</p><details v-if="tasks[action.task_id]?.result"><summary>任务结果</summary><pre>{{ pretty(tasks[action.task_id]?.result) }}</pre></details><button class="agent-secondary" :disabled="busy" @click="send(`查询任务 ${action.task_id} 的状态与结果；若已完成，请复查并给出下一步建议。`, 'chat')">复查并继续</button></div>
-          </article>
+          <div v-if="session?.plans?.length || session?.actions.length || plansNeedReload" class="agent-followup">
+            <p v-if="plansNeedReload && !busy" role="alert" class="agent-error">计划状态尚未核实，批准已停用。请载入原会话，再审阅当前版本。<button :disabled="loading" @click="load">载入原会话</button></p>
+            <AgentPlanPanel v-if="session?.plans?.length" :plans="session.plans" :executions="session.executions ?? []" :execution-busy="executionBusy" :busy="busy || loading || plansNeedReload" :tool-titles="Object.fromEntries((status?.tools ?? []).map(tool => [tool.name, tool.title]))" @decision="decidePlan" @control="controlPlan" @inspect="recoverPlanStep" @explain="send(`请解释第${$event}版计划的已保存执行结果，引用真实ID、日期和原服务指标，分别说明事实、缺失与推断及限制；不要生成新写预览。`, 'chat')" />
+            <section v-if="session?.actions.length" class="agent-panel" aria-label="操作提案">
+              <h2>操作提案</h2>
+              <article v-for="action in session.actions" :key="action.action_id" class="agent-action">
+                <h3>{{ action.title }}<span class="agent-tag">{{ labels[action.status] ?? action.status }}</span></h3>
+                <p>{{ action.preview.summary }}</p>
+                <details :open="action.status === 'pending'"><summary>参数与影响</summary><pre>{{ pretty(action.parameters) }}</pre><pre>{{ pretty(action.preview) }}</pre></details>
+                <p v-if="action.status === 'pending'" class="agent-muted">{{ !action.plan_id ? '独立预览没有计划授权，请在批准计划内重新预检。' : status?.write_enabled ? '确认会重检来源与影响，再创建后台任务。授权最多有效10分钟。' : '写执行默认关闭；目前仅可审阅此步骤。' }}</p>
+                <div v-if="action.status === 'pending'" class="agent-action-buttons"><button :disabled="busy || loading || plansNeedReload || !status?.write_enabled || !action.plan_id" @click="decide(action.action_id, 'confirm')">确认此步骤</button><button class="agent-secondary" :disabled="busy || loading" @click="decide(action.action_id, 'cancel')">取消</button></div>
+                <div v-if="action.task_id" class="agent-task"><strong>任务 #{{ action.task_id }} · {{ labels[tasks[action.task_id]?.status ?? 'queued'] }}</strong><p>{{ tasks[action.task_id]?.error_message }}</p><details v-if="tasks[action.task_id]?.result"><summary>任务结果</summary><pre>{{ pretty(tasks[action.task_id]?.result) }}</pre></details><button class="agent-secondary" :disabled="busy || loading" @click="send(`查询任务 ${action.task_id} 的状态与结果；若已完成，请复查并给出下一步建议。`, 'chat')">复查并继续</button></div>
+              </article>
+            </section>
+          </div>
           <p v-if="taskError" role="alert" class="agent-error">{{ taskError }}</p>
-        </section>
-        <section class="agent-panel"><h2>工具记录 <span>{{ session?.steps.length ?? 0 }}</span></h2><p v-if="!session?.steps.length" class="agent-muted">这里显示实际查询与预检结果。无数据和失败会如实保留。</p><details v-for="(step, index) in session?.steps ?? []" :key="index" class="agent-step"><summary>{{ step.title }}</summary><pre>{{ pretty(step.result) }}</pre></details></section>
-        <nav class="agent-links"><RouterLink to="/research">研究详情 ↗</RouterLink><RouterLink to="/operations">运维任务 ↗</RouterLink><RouterLink to="/portfolio">组合草案 ↗</RouterLink></nav>
-      </aside>
-    </div>
+          <details v-if="session?.steps.length || skillChecks.length" class="agent-records">
+            <summary>查看工具记录与检查材料</summary>
+            <details v-for="(step, index) in session?.steps ?? []" :key="index"><summary>{{ step.title }}</summary><pre>{{ pretty(step.result) }}</pre></details>
+            <AgentSkillPanel v-if="skillChecks.length" :skills="[]" :checks="skillChecks" :busy="busy || loading" @select="selectSkill" />
+          </details>
+        </div>
+      </div>
+
+      <div class="agent-input-area">
+        <p v-if="error" role="alert" class="agent-error">{{ error }}</p>
+        <p v-if="!loading && (!connected || !status?.configured)" role="status" class="agent-notice">{{ !connected ? '暂时无法连接智能体。' : '请先在后端配置 DeepSeek。' }}<button :disabled="busy" @click="openPanel('settings')">查看设置</button></p>
+        <div v-if="streamIncomplete" class="agent-notice" role="status"><span>答复未完成，草稿仅供参考。停止接收不会撤销已开始的查询。</span><button :disabled="busy || loading" @click="load">载入原会话</button></div>
+        <form class="agent-composer" @submit.prevent="send()">
+          <label for="agent-input" class="agent-sr-only">发送消息</label>
+          <textarea id="agent-input" ref="inputElement" v-model="input" :disabled="busy || loading" maxlength="4000" rows="2" placeholder="发消息，聊聊你的想法…" @keydown="handleInputKey" />
+          <div class="agent-composer-footer">
+            <label class="agent-mode"><span class="agent-sr-only">处理方式</span><select v-model="mode" :disabled="busy || loading" aria-label="处理方式"><option value="chat">对话</option><option value="plan">先规划</option></select></label>
+            <span class="agent-key-hint">{{ mode === 'plan' ? '先审阅计划，再确认执行' : 'Enter 发送 · Shift + Enter 换行' }}</span>
+            <button v-if="busy && pendingMessage" type="button" class="agent-send agent-stop" aria-label="停止接收" title="停止接收" @click="stopResponse"><Square :size="15" fill="currentColor" aria-hidden="true" /></button>
+            <button v-else type="submit" class="agent-send" :disabled="busy || loading || !status?.configured || !connected || !input.trim()" :aria-label="mode === 'plan' ? '生成计划' : '发送消息'" :title="mode === 'plan' ? '生成计划' : '发送消息'"><ArrowUp :size="20" aria-hidden="true" /></button>
+          </div>
+        </form>
+        <p class="agent-footnote">AI 回答仅供研究参考，请核对重要信息。</p>
+      </div>
+    </section>
+
+    <dialog ref="dialog" class="agent-dialog" :aria-labelledby="panel === 'settings' ? 'agent-settings-title' : 'agent-history-title'" @click="closeOnBackdrop">
+      <header class="agent-dialog-heading"><h2 :id="panel === 'settings' ? 'agent-settings-title' : 'agent-history-title'">{{ panel === 'settings' ? '设置' : '历史对话' }}</h2><button type="button" class="agent-close" aria-label="关闭" autofocus @click="dialog?.close()"><X :size="19" aria-hidden="true" /></button></header>
+      <p v-if="error" role="alert" class="agent-error">{{ error }}</p>
+      <template v-if="panel === 'history'">
+        <p v-if="historyLoading" class="agent-muted" role="status">正在读取历史对话…</p>
+        <p v-if="historyError" role="alert" class="agent-error">{{ historyError }}<button :disabled="historyLoading" @click="refreshHistory">重试</button></p>
+        <p v-else-if="!historyLoading && !sessions.length" class="agent-empty-history">还没有历史对话，从第一条消息开始吧。</p>
+        <div class="agent-history-list"><button v-for="item in sessions" :key="item.session_id" :disabled="busy || loading" :aria-current="item.session_id === session?.session_id ? 'true' : undefined" @click="restoreConversation(item.session_id)"><span>{{ item.title }}</span><Check v-if="item.session_id === session?.session_id" :size="16" aria-label="当前对话" /></button></div>
+      </template>
+      <div v-else class="agent-settings">
+        <details open class="agent-setting-section">
+          <summary>偏好与记忆 <span>{{ memories.length }}/32</span></summary>
+          <p class="agent-muted">语气、回答详略等偏好可保存在这里，只在你点击保存后记住。</p>
+          <form class="agent-memory-form" @submit.prevent="saveMemory">
+            <select v-model="memoryKind" aria-label="记忆分类" :disabled="busy || loading"><option value="preference">偏好</option><option value="constraint">约束</option><option value="lesson">经验</option></select>
+            <textarea v-model="memoryText" aria-label="长期记忆内容" :disabled="busy || loading" maxlength="400" rows="3" placeholder="例如：用自然、简洁的语气回答，先给结论" />
+            <div class="agent-action-buttons"><button :disabled="busy || loading || !memoryText.trim()">{{ editingMemory ? '保存修改' : '保存记忆' }}</button><button v-if="editingMemory" type="button" class="agent-secondary" @click="clearMemoryForm">取消编辑</button></div>
+          </form>
+          <article v-for="memory in memories" :key="memory.id" class="agent-memory"><p>{{ memory.content }}</p><div class="agent-action-buttons"><button class="agent-secondary" :disabled="busy || loading" @click="editMemory(memory)">编辑</button><button class="agent-secondary" :disabled="busy || loading" @click="forget(memory)">删除</button></div></article>
+          <p class="agent-muted">记忆仅保存在本地，请勿填写密钥。偏好不作为行情事实或操作授权。</p>
+        </details>
+        <details class="agent-setting-section"><summary>专业技能</summary><AgentSkillPanel :skills="status?.skills ?? []" :checks="[]" :busy="busy || loading" @select="selectSkill" /></details>
+        <details class="agent-setting-section"><summary>连接与使用说明 <span class="agent-dot" :class="{ ready: connected && status?.configured }" /></summary>
+          <p class="agent-connection" role="status">{{ connectionLabel }}<button class="agent-secondary" :disabled="loading || busy" @click="load"><RefreshCw :size="14" aria-hidden="true" />重新连接</button></p>
+          <p v-if="connected && !status?.configured" class="agent-muted">请在后端配置 DEEPSEEK_API_KEY 并重启服务。</p>
+          <p class="agent-muted">需求与对话会发送给 DeepSeek。普通对话查询现有数据；采集、回测等操作请在输入框选择“先规划”。批准计划不会执行，写步骤仍需逐项确认。{{ status?.write_enabled ? '当前允许在授权范围内确认写步骤。' : '当前写执行默认关闭。' }}</p>
+          <p class="agent-muted">技能检查材料齐备不代表研究目标或策略资格已认证。</p>
+        </details>
+      </div>
+    </dialog>
   </div>
 </template>
 
 <style scoped>
-.agent-process { margin: 0 24px 16px; padding: 12px 16px; background: #f5f8ff; border: 1px solid #e0e6f0; border-radius: 8px; font-size: 12px; color: #52617a; }.agent-process ol { margin-bottom: 0; padding-left: 20px; max-height: 220px; overflow: auto; }.agent-process li { padding: 4px 0; line-height: 1.6; }
-.agent-composer .agent-mode { justify-content: flex-start; margin-bottom: 12px; }.agent-mode label { margin: 0; }.agent-mode select { font: inherit; font-size: 12px; padding: 7px; border: 1px solid #dfe5ef; border-radius: 6px; color: #52617a; background: white; }
-.agent-history { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; font-size: 13px; color: #63718a; }.agent-history select { max-width: 70%; padding: 8px; border: 1px solid #dfe5ef; border-radius: 6px; }.agent-memory-form { display: grid; gap: 8px; }.agent-memory-form textarea, .agent-memory-form select { font: inherit; font-size: 12px; border: 1px solid #dfe5ef; border-radius: 6px; padding: 8px; width: 100%; }.agent-memory p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }.agent-memory { border-top: 1px solid #edf0f5; margin-top: 12px; padding-top: 4px; }
-.agent-page { max-width: 1600px; margin: 0 auto; padding: 30px; color: #1d293d; }
-.agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
-.agent-heading h1 { margin: 8px 0; font-size: 28px; letter-spacing: -.8px; }
-.agent-heading p { margin: 0; color: #68758a; font-size: 14px; }
-.agent-eyebrow { display: flex; align-items: center; gap: 6px; color: #4463d5 !important; font-size: 11px !important; font-weight: 700; letter-spacing: 1.4px; }
-.agent-connection { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 16px; border: 1px solid #dfe5ef; border-radius: 10px; margin-bottom: 22px; font-size: 12px; background: white; color: #68758a; }
-.agent-connection strong { color: #39465a; }.agent-dot { width: 7px; height: 7px; border-radius: 50%; background: #b0b8c4; }.agent-dot.ready { background: #31977a; }
-.agent-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); align-items: start; gap: 22px; }
-.agent-conversation, .agent-panel { background: white; border: 1px solid #dfe5ef; border-radius: 12px; }
-.agent-conversation { overflow: hidden; min-height: 560px; display: flex; flex-direction: column; }.agent-welcome { padding: 44px 28px; flex: 1; }.agent-bot { display: inline-flex; padding: 13px; border-radius: 15px; background: #eef2ff; color: #4662d0; }.agent-welcome h2 { font-size: 21px; }.agent-welcome p { line-height: 1.8; font-size: 14px; color: #68758a; }.agent-welcome button { width: 100%; background: #fafbfe; color: #42516a; border: 1px solid #e2e7f1; border-radius: 8px; margin: 6px 0; text-align: left; font-size: 13px; line-height: 1.7; padding: 12px; display: flex; justify-content: space-between; gap: 12px; }
-.agent-messages { padding: 24px; flex: 1; max-height: 65vh; overflow: auto; }.agent-message { padding: 15px; border-radius: 10px; margin-bottom: 16px; font-size: 14px; background: #f6f8fc; }.agent-message.user { margin-left: 30px; background: #edf2ff; }.agent-message strong { font-size: 11px; color: #62728e; }.agent-message p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; margin: 8px 0 0; }
-.agent-composer { margin: 16px; padding: 14px; border: 1px solid #d8dfed; border-radius: 10px; }.agent-composer label { display: block; font-size: 12px; margin-bottom: 8px; color: #63718a; }.agent-composer textarea { width: 100%; resize: vertical; min-height: 80px; border: 0; outline: none; color: #26344c; background: transparent; font: inherit; font-size: 14px; line-height: 1.7; }.agent-composer > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.agent-composer span { font-size: 10px; color: #8995a8; }
-button { cursor: pointer; border: 0; border-radius: 7px; padding: 9px 14px; color: white; background: #4663d4; display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; }button:disabled { opacity: .5; cursor: default; }button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #4663d4; outline-offset: 3px; }.agent-secondary { background: white; color: #52617a; border: 1px solid #dce2ec; }.agent-icon { margin-left: auto; color: #68758a; background: transparent; padding: 3px; }
-.agent-evidence { display: grid; gap: 18px; min-width: 0; }.agent-panel { padding: 20px; }.agent-panel h2 { font-size: 15px; margin: 0 0 16px; display: flex; justify-content: space-between; }.agent-panel h2 > span { color: #8995a8; }.agent-muted { color: #7a879a; font-size: 12px; line-height: 1.8; }.agent-action { border-top: 1px solid #edf0f5; padding: 16px 0; }.agent-action h3 { margin: 0; display: flex; gap: 8px; justify-content: space-between; font-size: 14px; }.agent-action p { font-size: 12px; line-height: 1.8; }.agent-tag { font-size: 10px; font-weight: 500; color: #738198; }.agent-tag.pending { color: #a26c18; }.agent-tag.confirmed { color: #31866e; }summary { cursor: pointer; font-size: 12px; color: #576987; padding: 8px 0; }pre { font-size: 11px; line-height: 1.65; background: #f7f9fc; border-radius: 6px; padding: 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }.agent-action-buttons { display: flex; gap: 8px; }.agent-task { background: #f5f8ff; padding: 12px; margin-top: 12px; border-radius: 8px; font-size: 12px; }.agent-step { border-top: 1px solid #edf0f5; }.agent-links { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12px; }.agent-links a { color: #637697; text-decoration: none; }.agent-error { color: #a13d3d; font-size: 13px; padding: 12px; background: #fff3f3; border-radius: 8px; }.agent-working { padding: 0 26px; font-size: 12px; color: #6276a7; }
-@media (max-width: 1100px) { .agent-grid { grid-template-columns: 1fr; }.agent-page { padding: 20px; } }
-@media (max-width: 600px) { .agent-page { padding: 14px; }.agent-heading { align-items: flex-start; }.agent-heading h1 { font-size: 23px; }.agent-welcome { padding: 24px 18px; }.agent-composer span { display: none; }.agent-composer > div { justify-content: flex-end; }.agent-connection > span:not(.agent-dot) { line-height: 1.7; } }
+.agent-page { height: 100%; min-height: 0; display: flex; flex-direction: column; color: #253047; background: #fcfcfd; }
+.agent-heading { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; padding: 18px 28px; }
+.agent-title, .agent-toolbar, .agent-composer-footer, .agent-action-buttons { display: flex; align-items: center; gap: 10px; }
+.agent-title { color: #5264b4; }.agent-title h1 { margin: 0; color: #354057; font-size: 15px; font-weight: 600; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 14px; border: 1px solid transparent; border-radius: 9px; color: white; background: #4663d4; font: inherit; font-size: 12px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #6b7ddd; outline-offset: 3px; }
+.agent-toolbar { gap: 4px; }.agent-toolbar button, .agent-close { min-width: 36px; height: 36px; padding: 8px; color: #71798b; background: transparent; }.agent-toolbar button:hover, .agent-close:hover { background: #eceef4; color: #293650; }
+.agent-toolbar button:first-child { padding-inline: 12px; margin-right: 4px; }
+.agent-conversation { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.agent-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.agent-content, .agent-input-area { width: min(100%, 800px); padding-inline: 28px; margin-inline: auto; }
+.agent-content { padding-block: 24px; }.agent-welcome { text-align: center; padding-block: 24px; }.agent-mark { display: inline-flex; color: #546bc7; margin-bottom: 15px; }.agent-welcome h2 { margin: 0 0 14px; font-size: clamp(23px, 3vw, 30px); font-weight: 600; letter-spacing: -.7px; }.agent-welcome p { margin: 0; font-size: 14px; color: #8a90a0; line-height: 1.8; }
+.is-empty .agent-conversation { justify-content: center; padding-bottom: min(14vh, 140px); }.is-empty .agent-scroll { flex: 0 1 auto; }.is-empty .agent-content { padding-block: 8px 20px; }
+.agent-message { margin-bottom: 30px; font-size: 15px; line-height: 1.95; overflow-wrap: anywhere; }.agent-speaker { font-size: 11px; color: #8991a0; }.agent-message p { white-space: pre-wrap; margin: 6px 0 0; }.agent-message.user { max-width: 85%; width: fit-content; margin-left: auto; padding: 10px 18px; border-radius: 17px 17px 4px 17px; background: #eef0f6; }.agent-message.user .agent-speaker { display: none; }.agent-message.user p { margin: 0; }.agent-message.assistant { padding-block: 4px 8px; }
+.agent-cursor { display: inline-block; height: 7px; width: 7px; border-radius: 50%; background: #7183c7; }.agent-thinking { display: flex; align-items: center; gap: 8px; color: #7b8497; font-size: 13px; }
+.agent-input-area { flex-shrink: 0; padding-top: 12px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }.agent-composer { padding: 16px 16px 12px; border: 1px solid #e0e3eb; border-radius: 20px; background: white; box-shadow: 0 4px 24px #24345a06; transition: border-color .15s, box-shadow .15s; }.agent-composer:focus-within { border-color: #a6b2db; box-shadow: 0 4px 24px #24345a0a; }.agent-composer textarea { display: block; width: 100%; min-height: 58px; max-height: 180px; resize: none; padding: 0; margin-bottom: 10px; border: 0; background: transparent; color: #29354c; font: inherit; font-size: 15px; line-height: 1.7; outline: none; }.agent-composer textarea::placeholder { color: #a2a7b3; }.agent-composer textarea:focus-visible { outline: none; }.agent-composer-footer { gap: 12px; }.agent-mode select { border: 0; border-radius: 7px; padding: 6px 8px; background: #f3f4f7; color: #606b80; font: inherit; font-size: 12px; cursor: pointer; }.agent-key-hint { color: #a2a8b5; font-size: 10px; }.agent-send { margin-left: auto; flex-shrink: 0; padding: 8px; height: 36px; width: 36px; border-radius: 50%; background: #485a93; }.agent-stop { background: #354263; }.agent-footnote { margin: 10px 0 0; color: #a2a8b3; font-size: 10px; text-align: center; }
+.agent-muted { font-size: 12px; color: #7e8798; line-height: 1.85; }.agent-notice, .agent-error { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; color: #916137; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }.agent-error { color: #ad4e4e; }.agent-notice button, .agent-error button { padding: 2px 0; color: inherit; background: transparent; text-decoration: underline; }.agent-followup { display: grid; gap: 16px; margin-block: 20px; }
+details { min-width: 0; }summary { padding: 10px 0; color: #7b8597; font-size: 12px; cursor: pointer; }pre { max-height: 260px; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 8px; background: #f4f6fa; font-size: 11px; line-height: 1.8; }
+.agent-process { margin-block: 10px 20px; }.agent-process > summary { display: flex; align-items: center; gap: 8px; list-style: none; }.agent-process > summary::-webkit-details-marker { display: none; }.agent-process > summary > span { flex: 1; }.agent-process[open] > summary > svg:last-child { transform: rotate(180deg); }.agent-process ol { padding-left: 20px; max-height: 260px; overflow: auto; color: #718098; font-size: 12px; line-height: 1.8; }.agent-process li { padding-block: 4px; }.agent-records { border-top: 1px solid #eceef3; margin-block: 20px; }
+.agent-panel { min-width: 0; border: 1px solid #e2e6ef; border-radius: 12px; padding: 20px; background: white; }.agent-panel h2 { font-size: 15px; margin: 0 0 16px; }.agent-action + .agent-action { border-top: 1px solid #eceef3; margin-top: 16px; padding-top: 16px; }.agent-action h3 { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; font-size: 14px; }.agent-action p { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }.agent-tag { color: #7989af; font-size: 11px; }.agent-action-buttons { flex-wrap: wrap; }.agent-secondary { background: white; color: #637089; border-color: #e1e5ee; }.agent-task { margin-top: 14px; padding: 12px; border-radius: 8px; background: #f5f7fc; font-size: 12px; }
+.agent-dialog { width: min(520px, calc(100vw - 32px)); max-height: min(80dvh, 760px); margin: auto; padding: 24px; border: 1px solid #e2e5ed; border-radius: 18px; color: #2d3950; background: #fff; box-shadow: 0 24px 90px #19233824; overflow-y: auto; }.agent-dialog::backdrop { background: #1b254044; backdrop-filter: blur(3px); }.agent-dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }.agent-dialog-heading h2 { font-size: 18px; margin: 0; }.agent-setting-section { border-top: 1px solid #eceef3; padding-block: 8px; }.agent-setting-section > summary { font-size: 13px; color: #43516a; }.agent-setting-section > summary > span { float: right; font-size: 11px; color: #8a94a5; }.agent-memory-form { display: grid; gap: 10px; }.agent-memory-form textarea, .agent-memory-form select { width: 100%; border: 1px solid #e0e4ed; border-radius: 8px; padding: 10px; color: #43516a; background: white; font: inherit; font-size: 12px; }.agent-memory-form textarea { resize: vertical; }.agent-memory { padding-block: 12px; border-bottom: 1px solid #eff1f6; }.agent-memory p { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }.agent-connection { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }.agent-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 5px; background: #c3a67c; }.agent-dot.ready { background: #57a88a; }.agent-history-list { display: grid; gap: 6px; }.agent-history-list button { justify-content: space-between; width: 100%; text-align: left; color: #56637a; background: #f6f7fa; padding: 14px; line-height: 1.7; }.agent-history-list button[aria-current] { color: #4e62ad; background: #eff2fc; }.agent-history-list button > span { flex: 1; overflow-wrap: anywhere; }.agent-empty-history { padding-block: 30px; text-align: center; color: #8b95a5; font-size: 13px; }
+.agent-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }.agent-spin { animation: agent-spin 1.4s linear infinite; }@keyframes agent-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .agent-spin { animation: none; } }
+@media (max-width: 760px) { .agent-heading { padding: 12px 16px; }.agent-content, .agent-input-area { padding-inline: 16px; }.agent-content { padding-top: 16px; }.agent-message { font-size: 14px; }.agent-message.user { max-width: 92%; }.agent-welcome p { font-size: 12px; }.agent-key-hint { display: none; }.is-empty .agent-conversation { padding-bottom: 6vh; }.agent-composer { padding: 14px 12px 10px; border-radius: 16px; }.agent-dialog { padding: 18px; }.agent-toolbar button:first-child { padding-inline: 8px; }.agent-composer textarea { min-height: 48px; } }
+@media (max-height: 560px) { .is-empty .agent-conversation { padding-bottom: 0; }.agent-mark { display: none; }.agent-welcome { padding-block: 4px; }.agent-welcome p { display: none; } }
 </style>

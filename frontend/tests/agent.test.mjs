@@ -54,6 +54,47 @@ test("queries are the default and explicit planning remains separate", async () 
   expect(state.session.value.plans[0].status).toBe("draft");
 });
 
+test("history refresh discovers new conversations without changing the active response", async () => {
+  let saved = [];
+  const state = workspace({ fetchAgentSessions: async () => saved });
+  await state.load();
+  await state.send("当前需求");
+  state.draft.value = "尚未完成的答复";
+  state.streamIncomplete.value = true;
+  saved = [{ session_id: "session-1", title: "当前需求", updated_at: "2026-11-20" }];
+  await state.refreshHistory();
+  expect(state.sessions.value).toEqual(saved);
+  expect(state.session.value.session_id).toBe("session-1");
+  expect(state.draft.value).toBe("尚未完成的答复");
+  expect(state.streamIncomplete.value).toBe(true);
+});
+
+test("history errors remain separate from the current conversation and can be retried", async () => {
+  let fails = false;
+  const state = workspace({ fetchAgentSessions: async () => { if (fails) throw new Error("历史暂不可用"); return []; } });
+  await state.load();
+  fails = true;
+  await state.refreshHistory();
+  expect(state.historyError.value).toBe("历史暂不可用");
+  expect(state.error.value).toBeNull();
+  expect(state.historyLoading.value).toBe(false);
+  fails = false;
+  await state.refreshHistory();
+  expect(state.historyError.value).toBeNull();
+});
+
+test("late history refresh cannot repopulate state after a new conversation", async () => {
+  let release;
+  const state = workspace({ fetchAgentSessions: () => new Promise(resolve => { release = resolve; }) });
+  const pending = state.refreshHistory();
+  await state.refreshHistory();
+  state.reset();
+  release([{ session_id: "old", title: "旧对话" }]);
+  await pending;
+  expect(state.sessions.value).toEqual([]);
+  expect(state.historyLoading.value).toBe(false);
+});
+
 test("task follow-up explicitly uses chat while planning remains selected", async () => {
   let chats = 0;
   let plans = 0;

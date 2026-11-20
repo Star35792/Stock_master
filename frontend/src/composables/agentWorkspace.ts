@@ -43,6 +43,8 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
   const error = ref<string | null>(null);
   const taskError = ref<string | null>(null);
   const sessions = ref<AgentSessionSummary[]>([]);
+  const historyLoading = ref(false);
+  const historyError = ref<string | null>(null);
   const memories = ref<AgentMemory[]>([]);
   const pendingActions = computed(() => session.value?.actions.filter(action => action.status === "pending") ?? []);
   const storageKey = "stock-master-agent-session";
@@ -70,6 +72,19 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
         if (!disposed && epoch === generation) taskError.value = cause instanceof Error ? cause.message : "任务进度读取失败";
       }
     }));
+  }
+
+  async function refreshHistory() {
+    if (disposed || historyLoading.value) return;
+    const epoch = generation;
+    historyLoading.value = true;
+    historyError.value = null;
+    try {
+      const items = await deps.fetchAgentSessions();
+      if (!disposed && epoch === generation) sessions.value = items;
+    } catch (cause) {
+      if (!disposed && epoch === generation) historyError.value = cause instanceof Error ? cause.message : "历史对话读取失败";
+    } finally { historyLoading.value = false; }
   }
 
   async function load() {
@@ -274,5 +289,5 @@ export function createAgentWorkspace(overrides: Partial<typeof defaultDeps> = {}
     finally { busy.value = false; }
   }
 
-  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; streamController?.abort(); } };
+  return { session, status, tasks, input, mode, streamEvents, draft, pendingMessage, streamIncomplete, connected, stopResponse, plansNeedReload, busy, executionBusy, loading, error, taskError, pendingActions, sessions, historyLoading, historyError, refreshHistory, memories, restore, remember, forget, load, send, decide, decidePlan, controlPlan, recoverPlanStep, reset, refreshTasks, dispose: () => { disposed = true; generation += 1; streamController?.abort(); } };
 }

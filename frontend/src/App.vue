@@ -48,7 +48,7 @@ const navGroups = [
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'app-shell--agent': $route.name === 'agent' }">
     <AppSidebar :groups="navGroups" />
 
     <main class="workspace">
@@ -56,3 +56,12 @@ const navGroups = [
     </main>
   </div>
 </template>
+
+<style>
+.app-shell--agent { height: 100dvh; min-height: 0; overflow: hidden; }
+.app-shell--agent .workspace { min-height: 0; padding: 0; overflow: hidden; }
+.app-shell--agent .sidebar { min-height: 0; }
+@media (max-width: 1040px) {
+  .app-shell--agent { grid-template-rows: auto minmax(0, 1fr); }
+}
+</style>
